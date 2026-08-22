@@ -1,14 +1,10 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { StatTileComponent } from '../../../shared/ui/stat-tile/stat-tile.component';
-import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
-
-interface Ranking {
-  nombre: string;
-  valor: number;
-}
+import { BadgeComponent, BadgeTone } from '../../../shared/ui/badge/badge.component';
+import { MetricasService, Ranking } from '../../../shared/data/metricas.service';
 
 interface ColaboradorResumen {
   id: string;
@@ -25,16 +21,17 @@ interface ColaboradorResumen {
   imports: [CommonModule, FormsModule, RouterLink, StatTileComponent, BadgeComponent],
   templateUrl: './panel-general.component.html',
 })
-export class PanelGeneralComponent {
+export class PanelGeneralComponent implements OnInit {
+  private readonly metricas = inject(MetricasService);
+  /** Lo que esta viendo el agente. Cae a la maqueta si no hay API. */
+  readonly m = this.metricas.metricas;
+
+  ngOnInit(): void {
+    void this.metricas.cargar();
+  }
+
   rango = 'Esta semana';
   readonly rangos = ['Esta semana', 'Últimos 14 días', 'Este mes', 'Personalizado'];
-
-  areasVulnerables: Ranking[] = [
-    { nombre: 'Contabilidad', valor: 18 },
-    { nombre: 'Ventas', valor: 12 },
-    { nombre: 'Ingeniería', valor: 7 },
-    { nombre: 'Marketing', valor: 4 },
-  ];
 
   areasUsoIa: Ranking[] = [
     { nombre: 'Ingeniería', valor: 86 },
@@ -58,7 +55,27 @@ export class PanelGeneralComponent {
   ];
 
   max(lista: Ranking[]): number {
-    return Math.max(...lista.map((x) => x.valor));
+    // Sin el 1, una lista vacia da -Infinity y las barras quedan en NaN.
+    return Math.max(1, ...lista.map((x) => x.valor));
+  }
+
+  /** Un destino aprobado no preocupa; uno que nadie clasifico, si. */
+  tonoDestino(clasificacion: string): BadgeTone {
+    const tonos: Record<string, BadgeTone> = {
+      ai_approved: 'green',
+      ai_unapproved: 'red',
+      ai_unknown: 'amber',
+    };
+    return tonos[clasificacion] ?? 'neutral';
+  }
+
+  etiquetaDestino(clasificacion: string): string {
+    const etiquetas: Record<string, string> = {
+      ai_approved: 'aprobada',
+      ai_unapproved: 'sin aprobar',
+      ai_unknown: 'sin clasificar',
+    };
+    return etiquetas[clasificacion] ?? clasificacion;
   }
 
   get pendientes(): number {

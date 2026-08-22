@@ -183,6 +183,56 @@ def lleva_contenido(evento: dict) -> bool:
     )
 
 
+# EL FRONT
+#
+# Este servicio sirve dos cosas por la misma URL: el API que consume el panel y
+# el panel en si, que es la app Angular de frontend/. Van juntos a proposito.
+# Separados hacen falta dos servicios, una URL para cada uno y CORS en el medio,
+# y todo eso para que dos piezas del mismo producto se hablen.
+#
+# El panel en HTML que arma Python sigue existiendo y queda de respaldo: si no
+# hay build del front (un checkout sin npm, un test, alguien levantando esto a
+# mano) el servicio sigue mostrando las metricas en vez de una pagina de error.
+DIST = RAIZ / "frontend" / "dist" / "aegis-ui" / "browser"
+
+_TIPOS = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+    ".woff": "font/woff",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".webmanifest": "application/manifest+json",
+}
+
+
+def hay_front() -> bool:
+    return (DIST / "index.html").is_file()
+
+
+def _archivo_del_front(ruta: str) -> Path | None:
+    """El archivo que corresponde a esa ruta, o None si no hay ninguno.
+
+    Se comprueba que el resultado siga estando DENTRO de dist: sin eso, un
+    pedido a /../../etc/passwd sirve cualquier archivo de la maquina. Es la
+    trampa clasica de servir archivos, y este proceso es publico.
+    """
+
+    if not hay_front():
+        return None
+
+    destino = (DIST / ruta.lstrip("/")).resolve()
+    try:
+        destino.relative_to(DIST.resolve())
+    except ValueError:
+        return None
+    return destino if destino.is_file() else None
+
+
 def _ruta_pedida(path: str) -> str:
     """La ruta real que pidio el navegador.
 
@@ -218,7 +268,10 @@ class Handler(BaseHTTPRequestHandler):
         ruta = _ruta_pedida(self.path)
         registrados = eventos()
 
-        if ruta in ("/", "/panel"):
+        if ruta == "/panel" or (ruta == "/" and not hay_front()):
+            # El panel en HTML. Es la portada solo cuando no hay front
+            # construido; con front, queda accesible a proposito en /panel para
+            # poder ver las metricas crudas sin depender del build.
             metricas = compute(registrados)
             reincidencias = repeat_offenders(registrados)
             cuerpo = render(metricas, reincidencias, os.environ.get("AEGIS_TENANT", "acme"))
@@ -253,7 +306,27 @@ class Handler(BaseHTTPRequestHandler):
                         },
                     )
                 else:
-                    self._json(404, {"error": "ruta desconocida"})
+                    self._servir_el_front(ruta)
+
+    def _servir_el_front(self, ruta: str) -> None:
+        """Un archivo del build, o el index para que enrute el navegador.
+
+        La segunda mitad es la que importa: el enrutado de la app es del lado
+        del cliente, asi que /admin/politicas no existe como archivo. Sin
+        devolver el index, entrar directo a esa direccion o recargar la pagina
+        da 404, y es el unico bug de esto que nadie ve navegando y todos ven
+        cuando comparten un enlace.
+        """
+
+        archivo = _archivo_del_front(ruta)
+        if archivo is None and hay_front():
+            archivo = DIST / "index.html"
+
+        if archivo is None:
+            self._json(404, {"error": "ruta desconocida"})
+        else:
+            tipo = _TIPOS.get(archivo.suffix, "application/octet-stream")
+            self._responder(200, archivo.read_bytes(), tipo)
 
     def do_POST(self) -> None:  # noqa: N802
         ruta = _ruta_pedida(self.path)
@@ -286,7 +359,8 @@ def main() -> None:
     # 127.0.0.1 el health check nunca lo alcanza y el despliegue se marca caido.
     puerto = int(os.environ.get("PORT", PUERTO_POR_DEFECTO))
     servidor = ThreadingHTTPServer(("0.0.0.0", puerto), Handler)
-    print(f"Panel de Aegis en :{puerto} (almacen: {almacen()})", flush=True)
+    front = "con el front" if hay_front() else "sin front, sirviendo el panel HTML"
+    print(f"Aegis en :{puerto} ({front}, almacen: {almacen()})", flush=True)
     servidor.serve_forever()
 
 

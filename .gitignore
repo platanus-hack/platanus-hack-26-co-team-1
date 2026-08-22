@@ -40,3 +40,7 @@ aegis-domains.json
 # Datos del panel desplegado, si se corre local
 eventos.jsonl
 aegis-lessons-cache.json
+
+# El build del front: se genera en cada despliegue, no se versiona.
+frontend/node_modules
+frontend/dist

@@ -12,8 +12,17 @@
 
 <main class="flex-1 px-4 py-6 sm:px-8">
   <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-    <app-stat-tile label="Intentos de filtración" value="41" trend="↑ 12% vs. semana pasada" [trendUp]="true"></app-stat-tile>
-    <app-stat-tile label="Colaboradores activos" value="27 / 31" trend="87% adopción"></app-stat-tile>
+    <app-stat-tile
+      label="Intentos de filtración"
+      value="{{ m().enVivo ? m().total : 41 }}"
+      trend="{{ m().enVivo ? m().bloqueados + ' cortados' : '↑ 12% vs. semana pasada' }}"
+      [trendUp]="true"
+    ></app-stat-tile>
+    <app-stat-tile
+      label="Fugas evitadas"
+      value="{{ m().enVivo ? m().tasaBloqueo + '%' : '87%' }}"
+      trend="{{ m().enVivo ? 'de lo que se intentó enviar' : 'adopción' }}"
+    ></app-stat-tile>
     <app-stat-tile label="Pendientes de instalar" value="{{ pendientes }}"></app-stat-tile>
     <app-stat-tile label="Herramienta más usada" value="Claude" trend="48% del uso total"></app-stat-tile>
   </div>
@@ -22,14 +31,14 @@
     <div class="aegis-card p-6">
       <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Áreas más vulnerables</h2>
       <div class="flex flex-col gap-3.5">
-        @for (a of areasVulnerables; track a.nombre) {
+        @for (a of m().areasVulnerables; track a.nombre) {
           <div>
             <div class="mb-1.5 flex items-center justify-between text-sm">
               <span class="text-aegis-text">{{ a.nombre }}</span>
               <span class="font-display text-xs text-aegis-faint">{{ a.valor }}</span>
             </div>
             <div class="h-1.5 w-full rounded-full bg-aegis-surface3">
-              <div class="h-1.5 rounded-full bg-aegis-red" [style.width.%]="(a.valor / max(areasVulnerables)) * 100"></div>
+              <div class="h-1.5 rounded-full bg-aegis-red" [style.width.%]="(a.valor / max(m().areasVulnerables)) * 100"></div>
             </div>
           </div>
         }
@@ -66,6 +75,62 @@
               <div class="h-1.5 rounded-full bg-aegis-amber" [style.width.%]="(h.valor / max(herramientas)) * 100"></div>
             </div>
           </div>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Lo que el panel del agente ya mostraba y a esta pantalla le faltaba. Son
+       los tres datos mas propios de Aegis: que TIPO de dato se intento sacar,
+       hacia donde iba, y que herramientas aparecieron sin que nadie las
+       aprobara. -->
+  <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
+    <div class="aegis-card p-6">
+      <h2 class="mb-1 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Qué se intenta enviar</h2>
+      <p class="mb-4 text-sm text-aegis-dim">El tipo de dato, nunca el dato: eso no sale del equipo.</p>
+      <div class="flex flex-col gap-3.5">
+        @for (d of m().detecciones; track d.nombre) {
+          <div>
+            <div class="mb-1.5 flex items-center justify-between gap-3 text-sm">
+              <span class="text-aegis-text">{{ d.nombre }}</span>
+              <span class="font-display text-xs text-aegis-faint">{{ d.valor }}</span>
+            </div>
+            <div class="h-1.5 w-full rounded-full bg-aegis-surface3">
+              <div class="h-1.5 rounded-full bg-aegis-red" [style.width.%]="(d.valor / max(m().detecciones)) * 100"></div>
+            </div>
+          </div>
+        } @empty {
+          <p class="text-sm text-aegis-faint">Todavía no se intentó enviar nada sensible.</p>
+        }
+      </div>
+    </div>
+
+    <div class="aegis-card p-6">
+      <h2 class="mb-1 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Destinos más frecuentes</h2>
+      <p class="mb-4 text-sm text-aegis-dim">Adónde iba, y si estaba aprobado.</p>
+      <div class="flex flex-col gap-2.5">
+        @for (d of m().destinos; track d.dominio) {
+          <div class="flex items-center justify-between gap-3">
+            <span class="truncate text-sm text-aegis-text" [title]="d.dominio">{{ d.dominio }}</span>
+            <div class="flex shrink-0 items-center gap-2">
+              <app-badge [tone]="tonoDestino(d.clasificacion)">{{ etiquetaDestino(d.clasificacion) }}</app-badge>
+              <span class="w-8 text-right font-display text-xs text-aegis-faint">{{ d.intentos }}</span>
+            </div>
+          </div>
+        } @empty {
+          <p class="text-sm text-aegis-faint">Sin tráfico registrado todavía.</p>
+        }
+      </div>
+    </div>
+
+    <div class="aegis-card p-6">
+      <h2 class="mb-1 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Shadow AI descubierta</h2>
+      <p class="mb-4 text-sm text-aegis-dim">No estaban en ninguna lista: se delataron por cómo se comportan.</p>
+      <div class="flex flex-wrap gap-2">
+        @for (dominio of m().shadowAi; track dominio) {
+          <span class="rounded-lg border border-aegis-amber/25 bg-aegis-amber/[0.06] px-2.5 py-1.5 font-display text-xs text-aegis-amber">{{ dominio }}</span>
+        } @empty {
+          <p class="text-sm text-aegis-faint">Ninguna herramienta sin aprobar apareció todavía.</p>
         }
       </div>
     </div>
