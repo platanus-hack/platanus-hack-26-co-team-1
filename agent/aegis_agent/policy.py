@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -9,7 +10,7 @@ Classification = Literal[
 ]
 Action = Literal["allow", "warn", "block_destination", "block_content"]
 
-from .catalog import AI_DOMAINS  # noqa: E402  (catalogo semilla)
+from .catalog import AI_DOMAINS, AI_HOST_PATTERNS  # noqa: E402  (catalogo semilla)
 from .detect.model import (  # noqa: E402
     ETIQUETAS_POR_DEFECTO,
     ETIQUETAS_PRECISAS,
@@ -330,9 +331,32 @@ def _match_length(host: str, domains: frozenset[str]) -> int:
     return max(lengths) if lengths else 0
 
 
+# Los patrones se compilan una vez. Cubren a los proveedores que tienen un host
+# por REGION: bedrock-runtime.us-east-1 estaba en la lista literal y las otras
+# diecinueve regiones no, asi que Bedrock estaba cubierto en un 5%.
+_PATRONES = tuple(re.compile(p) for p in AI_HOST_PATTERNS)
+
+
+def _match_patron(host: str) -> int:
+    """Largo del host si algun patron de IA lo reconoce, o 0.
+
+    Se devuelve el largo y no un booleano para que compita en la misma escala que
+    _match_length: la resolucion por especificidad tiene que seguir funcionando
+    igual, y un host que matchea un patron es tan especifico como su propio
+    nombre.
+    """
+
+    normalizado = host.lower().strip(".")
+    return len(normalizado) if any(p.match(normalizado) for p in _PATRONES) else 0
+
+
 def classify(host: str, policy: Policy) -> Classification:
     approved = _match_length(host, policy.approved_ai)
     catalogued = _match_length(host, AI_DOMAINS)
+    # Solo si la lista literal no dijo nada. Es el camino comun --el 97% del
+    # trafico no va a ninguna IA-- y no tiene por que pagar siete regex.
+    if catalogued == 0:
+        catalogued = _match_patron(host)
     exempt = _match_length(host, PASSTHROUGH_DOMAINS)
 
     if approved >= max(catalogued, exempt) and approved > 0:

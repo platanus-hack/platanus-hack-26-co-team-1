@@ -14,12 +14,17 @@ from aegis_agent.policy import Policy, classify, looks_like_ai_api
 
 
 class FakeRequest:
-    def __init__(self, host, path, body, method="POST"):
+    def __init__(self, host, path, body, method="POST", headers=None):
         self.pretty_host = host
         self.path = path
         self.method = method
         self._body = body
         self.query = None
+        # El embudo tambien mira las cabeceras: Content-Type dice si esto es un
+        # archivo yendose, y Origin dice desde la pagina de quien salio. Un doble
+        # sin cabeceras dejaba de modelar la mitad de la pregunta que hace el
+        # addon, y por eso estos dos tests se pusieron rojos al agregarla.
+        self.headers = dict(headers or {})
 
     def get_content(self, strict=True):
         return self._body

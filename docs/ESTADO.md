@@ -31,7 +31,7 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Verificación de cobertura de escritorio | Funciona | `install/windows.py verificar` |
 | Normalización anti-evasión (base64, gzip, docx, UTF-16…) | Funciona | `agent/aegis_agent/detect/payload.py` |
 | Proxy de intercepción (mitmproxy) | Funciona | `agent/aegis_agent/proxy/` |
-| Catálogo de 112 dominios de IA | Funciona | `agent/aegis_agent/catalog.py` |
+| Catálogo de 167 dominios de IA + 7 patrones regionales | Funciona | `agent/aegis_agent/catalog.py` |
 | Detección de shadow AI por comportamiento | Funciona | `agent/aegis_agent/signals.py` |
 | Base colaborativa de dominios + clasificador | Funciona | `backend/aegis_backend/` |
 | Panel de la empresa | Funciona, desplegado | `agent/aegis_agent/panel/`, `web/app.py` |

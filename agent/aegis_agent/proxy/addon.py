@@ -31,6 +31,7 @@ from ..policy_store import cargar as cargar_politica
 from ..policy_store import refrescar_en_segundo_plano
 from ..procesos import DESCONOCIDO, Proceso, del_puerto
 from ..sensor import SensorDePuntosCiegos
+from ..subidas import subida_hacia_una_ia
 from ..signals import SignalCollector
 from . import blockpage
 
@@ -437,6 +438,22 @@ class Aegis:
             self._maybe_classify(host)
             if tiene_forma:
                 classification = "ai_unknown"
+            else:
+                # looks_like_ai_api busca la forma de una CONVERSACION: las claves
+                # messages, prompt, model. Una subida de archivo no tiene ninguna,
+                # asi que hasta aca el adjunto se iba sin abrirse: los bytes de un
+                # archivo arrastrado a ChatGPT van a files.oaiusercontent.com, que
+                # no es chatgpt.com. El embudo tenia que aprender la otra pregunta.
+                origen = subida_hacia_una_ia(
+                    flow.request.headers.get("Content-Type", ""),
+                    body,
+                    flow.request.headers.get("Origin", ""),
+                    flow.request.headers.get("Referer", ""),
+                    lambda candidato: classify(candidato, self.policy)
+                    not in ("non_ai", "passthrough"),
+                )
+                if origen is not None:
+                    classification = "ai_unknown"
 
         if classification != "non_ai":
             # Antes que el escaneo de fugas, y por separado: lo que se busca aca

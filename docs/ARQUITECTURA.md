@@ -52,9 +52,15 @@ paso existe para no pagar el siguiente.
 3. ¿El método lleva payload? (POST/PUT/PATCH)  Si no, fin.
 
 4. ¿El destino es non_ai?
-   → solo se mira la FORMA del request sobre los primeros 4 KB.
-     Si no parece una llamada a un modelo, fin. No se escanea nada.
-     Si lo parece, pasa a ai_unknown y se manda a clasificar.
+   → se le hacen DOS preguntas sobre los primeros 4 KB, y ninguna sola alcanza:
+
+     a. ¿tiene forma de llamada a un modelo? (claves messages, prompt, model)
+     b. ¿es un archivo yendose, y yendose hacia una IA?
+        (multipart con filename, o Content-Type binario, o firma de archivo
+         — Y el Origin/Referer del request apunta a un dominio de IA)
+
+     Si ninguna, fin: no se escanea nada.
+     Si alguna, pasa a ai_unknown y se manda a clasificar.
 
 5. ¿El texto trae órdenes dirigidas al modelo?
    Es la dirección contraria: no un dato que sale, sino una instrucción para
@@ -89,6 +95,27 @@ peticiones por hora y casi ninguna va a una IA; escanearlas todas gasta CPU en
 cada clic y llena el panel de hallazgos donde el dato nunca estuvo yendo a un
 modelo.
 
+**Y la pregunta (b) existe porque durante un tiempo el paso 4 preguntó una sola
+cosa, y por ahí se iba el adjunto entero.** Cuando alguien arrastra un archivo a
+ChatGPT, los bytes no van a `chatgpt.com`: van a `files.oaiusercontent.com`. Ese
+host no estaba en el catálogo —ningún catálogo de "aplicaciones de IA" lista los
+endpoints de subida— y la pregunta (a) tampoco lo rescataba, porque busca la
+forma de una *conversación* y una subida no tiene ninguna de esas claves.
+Resultado: la acción más común y más fácil de sacar un documento completo no
+disparaba nada. No era una regla que faltaba, era un agujero en el embudo.
+
+Las dos condiciones de (b) se piden **juntas** a propósito. Una subida sola es la
+navegación normal —una foto de perfil, un adjunto a un ticket de Jira— y
+escanearla es exactamente lo que el embudo existe para evitar. Lo que la vuelve
+interesante es que salga desde la página de una IA, y eso el propio request lo
+dice: el navegador pone `Origin: https://chatgpt.com` en la subida al host de
+blobs. No hay que adivinar ni guardar estado.
+
+Lo que **todavía** no cubre (b) es la app de escritorio que no manda `Origin`.
+Para ese caso hace falta saber qué proceso abrió la conexión, y esa señal la
+construye la atribución por proceso: el punto de enganche está marcado en
+`subidas.py` y es una línea.
+
 ## 3. La cascada de detección
 
 | Nivel | Qué es | Dónde corre | Costo | Qué atrapa |
@@ -122,7 +149,13 @@ gastar 110 ms más no cambia la decisión ni la lección.
 
 Tres fuentes, de más barata a más cara:
 
-1. **Catálogo local** (`catalog.py`): 112 dominios en siete categorías. Resolución
+1. **Catálogo local** (`catalog.py`): 167 dominios en trece categorías, más
+   siete **patrones** de host. Los patrones cubren a los proveedores que tienen
+   un host por región: `bedrock-runtime.us-east-1` estaba en la lista literal y
+   las otras diecinueve regiones no, así que Bedrock estaba cubierto en un 5%.
+   Se consultan solo cuando la lista literal no dijo nada, y son estrechos a
+   propósito: un patrón ancho sobre `blob.core.windows.net` convertiría el
+   almacenamiento propio de la empresa en un destino de IA. Resolución
    por especificidad: gana el dominio más largo que matchea, y por eso
    `copilot.microsoft.com` es IA aunque `microsoft.com` esté en passthrough.
 2. **Forma del request** (`policy.looks_like_ai_api`): rutas y claves del cuerpo
