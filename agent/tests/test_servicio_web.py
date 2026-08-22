@@ -113,8 +113,25 @@ class TestElApiSigueDondeEstaba(ServicioVivo):
         self.assertEqual(estado, 200)
         self.assertTrue(json.loads(cuerpo)["ok"])
 
-    def test_metricas(self):
-        estado, cuerpo = self.pedir("/api/metrics")
+    def test_las_metricas_no_se_sirven_sin_sesion(self):
+        # Cambio de contrato: /api/metrics era publico y mostraba los eventos de
+        # TODAS las empresas. Ver tests/test_cuentas_y_aislamiento.py.
+        estado, _ = self.pedir("/api/metrics")
+        self.assertEqual(estado, 401)
+
+    def test_metricas_con_sesion(self):
+        sys.path.insert(0, str(REPO / "backend"))
+        from aegis_backend import cuentas
+
+        token = cuentas.emitir("admin", "acme", "admin")
+        conexion = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=10)
+        try:
+            conexion.request("GET", "/api/metrics", headers={"Authorization": f"Bearer {token}"})
+            respuesta = conexion.getresponse()
+            estado, cuerpo = respuesta.status, respuesta.read()
+        finally:
+            conexion.close()
+
         self.assertEqual(estado, 200)
         datos = json.loads(cuerpo)
         self.assertIn("metrics", datos)

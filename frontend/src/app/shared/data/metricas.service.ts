@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+import { SesionService } from './sesion.service';
 
 /**
  * Las metricas de verdad, del agente que corre en los equipos.
@@ -101,11 +102,21 @@ function nombreDeRegla(reglaId: string): string {
 
 @Injectable({ providedIn: 'root' })
 export class MetricasService {
+  private readonly sesion = inject(SesionService);
+
   readonly metricas = signal<MetricasPanel>(MAQUETA);
+  /** true cuando el API rechazo la sesion: sirve para mandar al login. */
+  readonly sinSesion = signal(false);
 
   async cargar(): Promise<void> {
     try {
-      const respuesta = await fetch('/api/metrics', { headers: { Accept: 'application/json' } });
+      // El token va en la cabecera y el tenant NO va en ningun lado: lo saca el
+      // servidor de adentro del token firmado. Si fuera un parametro de esta
+      // llamada, cualquiera pediria los datos de otra empresa desde la consola.
+      const respuesta = await fetch('/api/metrics', {
+        headers: { Accept: 'application/json', ...this.sesion.cabeceras() },
+      });
+      this.sinSesion.set(respuesta.status === 401);
       if (respuesta.ok) {
         this.metricas.set(this.traducir(await respuesta.json()));
       }

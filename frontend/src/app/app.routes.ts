@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { sesionGuard } from './shared/data/sesion.guard';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'colaborador/landing' },
@@ -11,6 +12,10 @@ export const routes: Routes = [
 
   {
     path: 'admin',
+    // Sin sesion, al login. Es comodidad y no seguridad: lo que protege los
+    // datos es que /api/metrics devuelve 401 sin token y saca el tenant de
+    // adentro del token firmado, no este guard.
+    canActivate: [sesionGuard],
     loadComponent: () =>
       import('./features/admin/shell/admin-shell.component').then((m) => m.AdminShellComponent),
     children: [

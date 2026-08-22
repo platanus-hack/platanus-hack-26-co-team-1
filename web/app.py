@@ -34,7 +34,7 @@ sys.path.insert(0, str(RAIZ / "backend"))
 from aegis_agent.panel.demo_data import semana_simulada  # noqa: E402
 from aegis_agent.panel.metrics import compute, repeat_offenders  # noqa: E402
 from aegis_agent.panel.render import render  # noqa: E402
-from aegis_backend import rutas, supabase  # noqa: E402
+from aegis_backend import cuentas, rutas, supabase  # noqa: E402
 from aegis_backend.classifier import anthropic_model  # noqa: E402
 from aegis_backend.store import DomainStore, PolicyStore  # noqa: E402
 
@@ -183,26 +183,38 @@ def _guardar_local(evento: dict) -> None:
 # dia. Dos segundos de cache no cambian nada de lo que se ve y le sacan al
 # almacen la parte aburrida del trabajo.
 VENTANA_DE_CACHE = 2.0
-_cache: tuple[float, list[dict]] | None = None
+_cache: dict[str, tuple[float, list[dict]]] = {}
 
 
-def eventos() -> list[dict]:
+def eventos(tenant: str | None = None) -> list[dict]:
+    """Los eventos de una empresa, o todos si no se pide ninguna.
+
+    El cache va por tenant y no en una sola variable: con una sola, la primera
+    empresa que carga el panel deja sus eventos ahi y la siguiente los recibe
+    durante dos segundos. Un cache compartido entre inquilinos es una fuga con
+    fecha de vencimiento, no un cache.
+    """
+
     global _cache
 
     guardados: list[dict] | None = None
     if supabase.configurado():
-        vigente = _cache is not None and (time.time() - _cache[0]) < VENTANA_DE_CACHE
+        clave = tenant or ""
+        anterior = _cache.get(clave)
+        vigente = anterior is not None and (time.time() - anterior[0]) < VENTANA_DE_CACHE
         if vigente:
-            guardados = _cache[1]
+            guardados = anterior[1]
         else:
-            guardados = supabase.leer_eventos(MAX_EVENTOS)
+            guardados = supabase.leer_eventos(MAX_EVENTOS, tenant)
             if guardados is not None:
-                _cache = (time.time(), guardados)
+                _cache[clave] = (time.time(), guardados)
 
     # None es "Supabase no contesto", que no es lo mismo que "no hay eventos":
     # en ese caso se cae al nivel de abajo en vez de dar el panel por vacio.
     if guardados is None:
         guardados = _local()
+        if tenant:
+            guardados = [e for e in guardados if e.get("tenant_id") == tenant]
 
     # La semana simulada es lo ultimo y solo cuando no hay NADA: sirve para
     # ensenar el producto, y taparia un almacen recien conectado que todavia no
@@ -217,7 +229,7 @@ def guardar(evento: dict) -> None:
     if subido:
         # Sin esto el evento existe en la base pero el panel no lo ve hasta que
         # venza la ventana, y en una demo dos segundos de nada son eternos.
-        _cache = None
+        _cache = {}
     else:
         _guardar_local(evento)
 
@@ -247,6 +259,31 @@ _LECCIONES: dict[tuple, dict] = {}
 
 def _tenant_de(ruta: str, prefijo: str) -> str:
     return ruta[len(prefijo) :].split("?")[0].strip("/")
+
+
+# QUIEN VE QUE
+#
+# El panel era publico y mostraba TODOS los eventos, de todas las empresas: el
+# contrato tiene `tenant_id` desde el primer dia y ninguna consulta lo miraba.
+# Para un producto cuyo pitch es "tus datos no salen de tu empresa", que el
+# panel de una muestre el trafico de otra no es un detalle de permisos.
+#
+# La regla que lo sostiene: **el tenant sale del token y nunca del pedido.** Si
+# viniera en la URL, cualquier cuenta leeria los datos de cualquier otra
+# cambiando un parametro, y ningun login arreglaria eso.
+def sembrar_la_cuenta_inicial() -> None:
+    """La cuenta con la que se entra la primera vez.
+
+    La llama `main()` y no el import. Importar este modulo tiene que poder no
+    tocar nada de afuera: sembrar al importar significa que cualquier test que
+    haga `import app` -o cualquier herramienta que lo inspeccione- escribe una
+    cuenta en la base de verdad. Es el mismo error que costo veintitres tests
+    rojos con `addons = [Aegis()]` (docs/ESTADO.md, seccion 5).
+    """
+
+    usuario, contrasena, tenant = cuentas.cuenta_inicial()
+    if cuentas.sembrar_si_no_hay(usuario, contrasena, tenant):
+        print(f"Cuenta inicial creada: {usuario} (empresa {tenant})", flush=True)
 
 
 # EL FRONT
@@ -330,6 +367,19 @@ class Handler(BaseHTTPRequestHandler):
             "application/json; charset=utf-8",
         )
 
+    def _sesion(self) -> dict | None:
+        """La sesion del token, o None. El tenant sale de aca y de ningun lado mas."""
+
+        return cuentas.del_encabezado(self.headers.get("Authorization"))
+
+    def _cuerpo(self) -> dict | None:
+        largo = int(self.headers.get("Content-Length", "0") or 0)
+        try:
+            datos = json.loads(self.rfile.read(largo) if largo else b"{}")
+        except ValueError:
+            datos = None
+        return datos if isinstance(datos, dict) else None
+
     def do_GET(self) -> None:  # noqa: N802  (firma de BaseHTTPRequestHandler)
         # Los eventos se leen dentro de cada rama y no una vez arriba: con el
         # almacen en memoria daba igual, pero contra Supabase esa linea era una
@@ -350,22 +400,30 @@ class Handler(BaseHTTPRequestHandler):
             if ruta in ("/api/metrics", "/v1/metrics"):
                 from dataclasses import asdict
 
-                registrados = eventos()
-                calculadas = compute(registrados)
-                self._json(
-                    200,
-                    {
-                        "metrics": {
-                            **asdict(calculadas),
-                            # block_rate es una propiedad, no un campo, asi que
-                            # asdict no la trae y quien consuma la API la espera.
-                            "block_rate": round(calculadas.block_rate, 1),
+                sesion = self._sesion()
+                if sesion is None:
+                    self._json(401, {"error": "sesion requerida"})
+                else:
+                    # `sesion["tenant"]` y no un parametro del pedido: es lo
+                    # unico que impide que una empresa lea el panel de otra.
+                    registrados = eventos(sesion["tenant"])
+                    calculadas = compute(registrados)
+                    self._json(
+                        200,
+                        {
+                            "metrics": {
+                                **asdict(calculadas),
+                                # block_rate es una propiedad, no un campo, asi
+                                # que asdict no la trae y quien consuma la API
+                                # la espera.
+                                "block_rate": round(calculadas.block_rate, 1),
+                            },
+                            "repeats": repeat_offenders(registrados),
+                            "almacen": almacen(),
+                            "eventos": len(registrados),
+                            "tenant": sesion["tenant"],
                         },
-                        "repeats": repeat_offenders(registrados),
-                        "almacen": almacen(),
-                        "eventos": len(registrados),
-                    },
-                )
+                    )
             else:
                 if ruta == "/v1/health":
                     self._json(
@@ -385,8 +443,18 @@ class Handler(BaseHTTPRequestHandler):
                         )
                     else:
                         if ruta.startswith("/v1/policy/"):
+                            # El agente pide su politica por tenant sin token
+                            # -no tiene con quien loguearse- y eso esta bien: la
+                            # politica es la configuracion que el agente OBEDECE,
+                            # no datos de nadie. Con sesion, manda la sesion, y
+                            # asi el panel no puede leer la de otra empresa.
+                            sesion = self._sesion()
+                            pedido = _tenant_de(ruta, "/v1/policy/")
                             self._json(
-                                200, POLITICAS.get(_tenant_de(ruta, "/v1/policy/"))
+                                200,
+                                POLITICAS.get(
+                                    sesion["tenant"] if sesion else pedido
+                                ),
                             )
                         else:
                             if ruta == "/v1/policy":
@@ -430,7 +498,9 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(datos, dict):
             self._json(400, {"error": "cuerpo invalido"})
         else:
-            if ruta in ("/v1/events", "/api/events"):
+            if ruta == "/v1/login":
+                self._entrar(datos)
+            elif ruta in ("/v1/events", "/api/events"):
                 if lleva_contenido(datos):
                     self._json(422, {"error": "el evento contiene campos prohibidos"})
                 else:
@@ -442,30 +512,58 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self._json(404, {"error": "ruta desconocida"})
 
+    def _entrar(self, datos: dict) -> None:
+        """Login. Un solo motivo de rechazo, a proposito.
+
+        No se distingue "ese usuario no existe" de "la contrasena no va": la
+        diferencia le confirma a quien prueba cuales cuentas existen, que es la
+        mitad del trabajo de entrar.
+        """
+
+        cuenta = cuentas.autenticar(
+            str(datos.get("usuario", "")), str(datos.get("password", ""))
+        )
+        if cuenta is None:
+            self._json(401, {"error": "usuario o contrasena incorrectos"})
+        else:
+            self._json(
+                200,
+                {
+                    "token": cuentas.emitir(
+                        cuenta["usuario"], cuenta["tenant"], cuenta.get("rol", "admin")
+                    ),
+                    "usuario": cuenta["usuario"],
+                    "tenant": cuenta["tenant"],
+                    "rol": cuenta.get("rol", "admin"),
+                },
+            )
+
     def do_PUT(self) -> None:  # noqa: N802
         """La politica que escribe el panel. Es el unico PUT del servicio.
 
         Sin esto, la pantalla de Politicas era un formulario que no salia de la
         memoria del navegador: se llenaba, se guardaba, y al recargar volvia a
         estar como antes.
+
+        Escribir SI pide sesion, y sobre el tenant de la sesion: la politica
+        incluye el diccionario de terminos de la empresa, asi que dejar que un
+        pedido sin token elija sobre que empresa escribe seria dejar que
+        cualquiera desarme las reglas de cualquiera.
         """
 
         ruta = _ruta_pedida(self.path)
-        largo = int(self.headers.get("Content-Length", "0") or 0)
-
-        try:
-            datos = json.loads(self.rfile.read(largo) if largo else b"{}")
-        except ValueError:
-            datos = None
+        datos = self._cuerpo()
 
         if not ruta.startswith("/v1/policy/"):
             self._json(404, {"error": "ruta desconocida"})
         else:
-            if not isinstance(datos, dict):
+            sesion = self._sesion()
+            if sesion is None:
+                self._json(401, {"error": "sesion requerida"})
+            elif datos is None:
                 self._json(400, {"error": "cuerpo invalido"})
             else:
-                tenant = _tenant_de(ruta, "/v1/policy/")
-                self._json(200, POLITICAS.put(tenant, datos))
+                self._json(200, POLITICAS.put(sesion["tenant"], datos))
 
     def log_message(self, *args) -> None:
         """Silencio: un log de accesos guardaria que dominios mira cada cliente."""
@@ -475,6 +573,7 @@ def main() -> None:
     # Render inyecta PORT y espera que el servicio escuche en 0.0.0.0: atado a
     # 127.0.0.1 el health check nunca lo alcanza y el despliegue se marca caido.
     puerto = int(os.environ.get("PORT", PUERTO_POR_DEFECTO))
+    sembrar_la_cuenta_inicial()
     servidor = ThreadingHTTPServer(("0.0.0.0", puerto), Handler)
     front = "con el front" if hay_front() else "sin front, sirviendo el panel HTML"
     print(f"Aegis en :{puerto} ({front}, almacen: {almacen()})", flush=True)

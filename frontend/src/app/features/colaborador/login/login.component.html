@@ -35,7 +35,12 @@
             <label class="aegis-label">Contraseña</label>
             <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="password" />
           </div>
-          <button type="button" class="aegis-btn-primary mt-2" (click)="ingresar()">Ingresar ↗</button>
+          @if (error()) {
+            <p class="rounded-lg border border-aegis-red/25 bg-aegis-red/[0.06] px-3 py-2 text-sm text-aegis-red">{{ error() }}</p>
+          }
+          <button type="button" class="aegis-btn-primary mt-2" [disabled]="entrando()" (click)="ingresar()">
+            {{ entrando() ? 'Entrando…' : 'Ingresar ↗' }}
+          </button>
           <button type="button" class="font-display text-xs uppercase tracking-wide text-aegis-faint hover:text-aegis-dim" (click)="modoRecuperar = true">Olvidé mi contraseña</button>
         </div>
       } @else {
