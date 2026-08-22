@@ -3,12 +3,19 @@ from __future__ import annotations
 import json
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
+
+from . import supabase
 
 # Lo unico compartido entre todos los clientes es el veredicto de un dominio.
 # Nunca el contenido, nunca quien lo visito: solo "este dominio tiene un modelo
 # detras". Por eso la base puede crecer sola sin comprometer a nadie.
+#
+# Los dos almacenes de este archivo guardan en JSON y, si hay Supabase
+# configurado, tambien alla. El JSON no sobra: es lo que hace que el backend
+# arranque sin credenciales de nada, y la red que atrapa a Supabase cuando no
+# contesta.
 
 DEFAULT_TTL = 7 * 24 * 3600
 
@@ -53,6 +60,21 @@ class DomainStore:
                 domain: Verdict(**data) for domain, data in raw.items()
             }
 
+        remotos = supabase.leer_veredictos()
+        if remotos:
+            # Los remotos ganan: son los que vieron todos los clientes de la red,
+            # y el JSON local es el cache de uno solo. Se filtra por los campos
+            # de Verdict para que una columna nueva en la base no reviente el
+            # arranque de un agente viejo.
+            validos = {f.name for f in fields(Verdict)}
+            for domain, datos in remotos.items():
+                recortado = {k: v for k, v in datos.items() if k in validos}
+                try:
+                    self._verdicts[domain] = Verdict(**recortado)
+                except TypeError:
+                    # Una fila incompleta no puede dejar sin veredictos al resto.
+                    pass
+
     def _flush(self) -> None:
         payload = {domain: asdict(v) for domain, v in self._verdicts.items()}
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,6 +90,9 @@ class DomainStore:
         with self._lock:
             self._verdicts[verdict.domain] = verdict
             self._flush()
+        # Fuera del lock: subir es una llamada de red y ningun otro cliente
+        # tiene por que esperarla para leer un veredicto que ya esta en memoria.
+        supabase.guardar_veredicto(asdict(verdict))
         return verdict
 
     def count(self) -> int:
@@ -100,6 +125,10 @@ class PolicyStore:
         if self.path.exists():
             self._policies = json.loads(self.path.read_text(encoding="utf-8") or "{}")
 
+        remotas = supabase.leer_politicas()
+        if remotas:
+            self._policies.update(remotas)
+
     def _flush(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
@@ -114,4 +143,7 @@ class PolicyStore:
         with self._lock:
             self._policies[tenant] = datos
             self._flush()
+        # La politica es lo unico de todo esto que si se pierde se nota al dia
+        # siguiente: es lo que la empresa escribio a mano en el panel.
+        supabase.guardar_politica(tenant, datos)
         return datos
