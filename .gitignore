@@ -29,3 +29,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# Capturas de trabajo del panel
+agent/tests/e2e/panel.png
+aegis-events.jsonl
