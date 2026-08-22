@@ -7,7 +7,7 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 212 en verde (`python run_tests.py` desde la raíz).
+**Tests:** 225 en verde (`python run_tests.py` desde la raíz).
 
 ---
 
@@ -30,8 +30,8 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Base colaborativa de dominios + clasificador | Funciona | `backend/aegis_backend/` |
 | Panel de la empresa | Funciona, desplegado | `agent/aegis_agent/panel/`, `api/index.py` |
 | Instalador para Windows (CA + proxy + variables) | Funciona | `agent/aegis_agent/install/windows.py` |
-| Cobertura de **Claude Code** | Verificada con el CLI real | ver §9 |
-| Cobertura de **Codex** | Mecanismo listo, **sin verificar** | ver §9 |
+| Cobertura de **Claude Code** | Verificada con el CLI real | ver §8 |
+| Cobertura de **Codex** | Mecanismo listo, **sin verificar** | ver §8 |
 | Lecciones pedagógicas | Locales, estáticas | `agent/aegis_agent/lessons.py` |
 
 **Panel desplegado:** https://aegis-theta-eight.vercel.app
@@ -127,7 +127,7 @@ En el orden en que más valor agregan:
 4. **Vercel KV** para que el panel desplegado no pierda los eventos.
 5. **Instalador de macOS**, si hay alguien del equipo en Mac.
 
-## 9. Cobertura de los CLI de IA
+## 8. Cobertura de los CLI de IA
 
 **Claude Code: verificado con el binario real**, no con una simulación.
 
@@ -147,7 +147,7 @@ mecanismo es el mismo y las variables ya están puestas (`CODEX_CA_CERTIFICATE`,
 honra, pero **eso no es lo mismo que haberlo probado**. Si instalás Codex, la
 prueba es idéntica a la de arriba y toma dos minutos.
 
-## 8. Documentos
+## 9. Documentos
 
 - [Arquitectura](ARQUITECTURA.md) — cómo encaja todo y por dónde pasa un request
 - [Operación](OPERACION.md) — cómo levantar cada pieza y todas las variables
