@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .. import entorno
 from ..policy import PASSTHROUGH_DOMAINS
 
 # Instalacion a nivel de usuario, nunca de maquina: la CA va al almacen personal
@@ -78,28 +79,18 @@ def plan(port: int) -> list[Step]:
 # -- generacion de la CA ----------------------------------------------------
 
 
-def ensure_ca(mitmdump: str, timeout: int = 30) -> bool:
-    """Arranca mitmdump una vez, solo para que escriba su CA, y lo cierra."""
+def ensure_ca(mitmdump: str | None = None, timeout: int = 30) -> bool:
+    """Crea la autoridad certificadora si no existe.
 
-    if CA_CERT.exists():
-        listo = True
-    else:
-        proceso = subprocess.Popen(
-            [mitmdump, "--listen-port", "0", "--quiet"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        try:
-            import time
+    Antes esto lanzaba `mitmdump --listen-port 0` y esperaba hasta treinta
+    segundos a que el archivo apareciera en disco. Ahora la escribe `CertStore`
+    directo, y eso importa por una razon concreta: adentro de un ejecutable
+    empaquetado no hay ningun mitmdump que lanzar, y sin CA no hay producto.
 
-            limite = time.time() + timeout
-            while time.time() < limite and not CA_CERT.exists():
-                time.sleep(0.2)
-        finally:
-            proceso.terminate()
-            proceso.wait(timeout=10)
-        listo = CA_CERT.exists()
-    return listo
+    El parametro se conserva y se ignora para no romper a quien ya lo pasaba.
+    """
+
+    return entorno.generar_ca()
 
 
 # -- registro de Windows ----------------------------------------------------
@@ -203,6 +194,20 @@ def clear_env_vars() -> None:
                 pass
 
 
+def puerto_escuchando(port: int) -> bool:
+    """Si hay alguien atendiendo en el puerto del proxy AHORA.
+
+    Es la diferencia entre "configurado" y "protegido", y hasta ahora el estado no
+    la mostraba: se podia ver todo en verde con el proxy caido.
+    """
+
+    import socket
+
+    with socket.socket() as sonda:
+        sonda.settimeout(0.4)
+        return sonda.connect_ex(("127.0.0.1", port)) == 0
+
+
 def status(port: int) -> dict:
     proxy = read_proxy_settings()
     return {
@@ -212,6 +217,8 @@ def status(port: int) -> dict:
         "proxy_servidor": proxy["server"],
         "apunta_a_aegis": proxy["server"] == f"127.0.0.1:{port}",
         "excluidos": proxy["bypass"],
+        "arranca_solo": bool(arranque_registrado()),
+        "escuchando": puerto_escuchando(port),
     }
 
 
@@ -333,7 +340,76 @@ def verificar(port: int) -> list[tuple[str, bool, str]]:
     return filas
 
 
-def install(port: int, mitmdump: str) -> list[str]:
+# -- arranque automatico -----------------------------------------------------
+#
+# Hasta ahora "instalar" configuraba la CA, el proxy del navegador y las
+# variables de entorno, y no arrancaba nada. O sea que despues de instalar el
+# navegador apuntaba a un puerto donde no habia nadie escuchando: la persona
+# quedaba SIN internet hasta que alguien corriera el proxy a mano.
+#
+# Es la diferencia entre un proyecto y un producto, y es una falla del peor tipo
+# --el usuario no puede saber que le falto un paso-- asi que el arranque va
+# adentro de instalar.
+#
+# Se registra en HKCU\\...\\Run y no como servicio de Windows a proposito: un
+# servicio necesita administrador y corre como otro usuario, y el proxy tiene que
+# ver la sesion de la persona. Todo el instalador es reversible sin permisos de
+# administrador (ADR 0001) y esto no lo cambia.
+CLAVE_DE_ARRANQUE = r"Software\Microsoft\Windows\CurrentVersion\Run"
+NOMBRE_EN_ARRANQUE = "Aegis"
+
+
+def comando_de_arranque(port: int) -> str:
+    """La linea que Windows va a ejecutar al iniciar sesion."""
+
+    partes = entorno.ejecutable_del_agente() + ["servicio"]
+    return " ".join(f'"{parte}"' if " " in parte else parte for parte in partes)
+
+
+def registrar_arranque(port: int) -> bool:
+    winreg = _registry()
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, CLAVE_DE_ARRANQUE, 0, winreg.KEY_SET_VALUE
+        ) as clave:
+            winreg.SetValueEx(
+                clave, NOMBRE_EN_ARRANQUE, 0, winreg.REG_SZ, comando_de_arranque(port)
+            )
+        return True
+    except OSError:
+        return False
+
+
+def quitar_arranque() -> bool:
+    winreg = _registry()
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, CLAVE_DE_ARRANQUE, 0, winreg.KEY_SET_VALUE
+        ) as clave:
+            winreg.DeleteValue(clave, NOMBRE_EN_ARRANQUE)
+        return True
+    except FileNotFoundError:
+        # No estaba: desinstalar tiene que poder correrse dos veces sin quejarse.
+        return True
+    except OSError:
+        return False
+
+
+def arranque_registrado() -> str:
+    winreg = _registry()
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, CLAVE_DE_ARRANQUE) as clave:
+            valor, _ = winreg.QueryValueEx(clave, NOMBRE_EN_ARRANQUE)
+            return str(valor)
+    except (FileNotFoundError, OSError, ValueError):
+        # ValueError cubre un valor con una forma que no esperamos. Consultar el
+        # estado tiene que ser SIEMPRE seguro: es lo primero que corre alguien
+        # cuando algo anda mal, y reventar ahi lo deja sin la unica herramienta
+        # de diagnostico que tiene.
+        return ""
+
+
+def install(port: int, mitmdump: str | None = None) -> list[str]:
     hechos = []
     if ensure_ca(mitmdump):
         hechos.append(f"CA generada en {CA_CERT}")
@@ -357,6 +433,17 @@ def install(port: int, mitmdump: str) -> list[str]:
         hechos.append("Proxy del navegador sin activar hasta que la CA este confiada")
     set_env_vars(port)
     hechos.append("Variables de entorno configuradas para los CLIs")
+    if registrar_arranque(port):
+        hechos.append("Aegis va a arrancar solo cuando inicies sesion")
+    else:
+        # Es el paso que convierte "configurado" en "protegido": si falla, hay que
+        # decirlo fuerte, porque el proxy del navegador ya quedo apuntando a un
+        # puerto donde no habria nadie escuchando.
+        hechos.append(
+            "NO se pudo registrar el arranque automatico. Aegis no va a levantarse "
+            "solo, y el navegador esta apuntando al proxy: corre `aegis servicio` "
+            "o desinstala."
+        )
     return hechos
 
 
@@ -368,44 +455,26 @@ def uninstall() -> list[str]:
         hechos.append("CA retirada del almacen del usuario")
     clear_env_vars()
     hechos.append("Variables de entorno eliminadas")
+    if quitar_arranque():
+        hechos.append("Arranque automatico quitado")
     return hechos
 
 
 def main() -> int:
-    from ..proxy import __name__ as _  # noqa: F401  (asegura el paquete)
+    """Se conserva para no romper `python -m aegis_agent.install.windows`.
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from tests.e2e.harness import mitmdump_path
+    Antes esto hacia `sys.path.insert` y `from tests.e2e.harness import
+    mitmdump_path`: el instalador de PRODUCCION importaba un modulo de tests. Los
+    tests no se empaquetan, asi que en un ejecutable ese import reventaba --justo
+    donde mas importaba que el instalador funcionara.
 
-    accion = sys.argv[1] if len(sys.argv) > 1 else "status"
-    puerto = int(os.environ.get("AEGIS_PORT", "8899"))
+    El punto de entrada de verdad ahora es aegis_agent.cli, que es lo que se
+    empaqueta.
+    """
 
-    if accion == "plan":
-        for paso in plan(puerto):
-            print(f"  - {paso.description}\n      {paso.detail}")
-        codigo = 0
-    else:
-        if accion == "install":
-            for hecho in install(puerto, mitmdump_path()):
-                print(f"  {hecho}")
-            codigo = 0
-        else:
-            if accion == "uninstall":
-                for hecho in uninstall():
-                    print(f"  {hecho}")
-                codigo = 0
-            elif accion == "verificar":
-                filas = verificar(puerto)
-                for camino, cubierto, motivo in filas:
-                    marca = "SI " if cubierto else "NO "
-                    print(f"  [{marca}] {camino}")
-                    print(f"         {motivo}")
-                codigo = 0 if all(cubierto for _, cubierto, _ in filas) else 1
-            else:
-                for clave, valor in status(puerto).items():
-                    print(f"  {clave}: {valor}")
-                codigo = 0
-    return codigo
+    from ..cli import main as cli
+
+    return cli(sys.argv[1:] or ["status"])
 
 
 if __name__ == "__main__":

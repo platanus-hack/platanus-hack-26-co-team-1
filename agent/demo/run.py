@@ -35,10 +35,9 @@ STRIPE_KEY=sk_live_4eC39HqLyjWDarjtT1zdp7dc
 
 
 def _mitmdump_path() -> str:
-    scheme = "nt_user" if os.name == "nt" else "posix_user"
-    scripts = Path(sysconfig.get_path("scripts", scheme=scheme))
-    candidate = scripts / ("mitmdump.exe" if os.name == "nt" else "mitmdump")
-    return str(candidate) if candidate.exists() else "mitmdump"
+    """Delegado en aegis_agent.entorno: estaba duplicado aca y en el harness."""
+
+    return entorno.mitmdump_en_disco() or "mitmdump"
 
 
 def _wait_for_port(port: int, timeout: float = 40) -> bool:

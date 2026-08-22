@@ -53,6 +53,51 @@ def entorno_aislado(workdir: str | Path):
         yield
 
 
+@contextmanager
+def sistema_intocable():
+    """Bloquea TODO lo que el instalador usa para modificar la maquina.
+
+    Esto no es prolijidad: es una red de contencion, y existe porque ya fallo de
+    la peor forma posible.
+
+    Un test que probaba que el CLI acepta los nombres de accion en ingles
+    parcheaba `cli._desinstalar` y llamaba `cli.main(["uninstall"])`. El parche no
+    tuvo efecto --el despacho pasaba por un diccionario armado al importar, con
+    referencias directas a las funciones-- asi que **corrio el desinstalador de
+    verdad**: apago el proxy del navegador del desarrollador, le borro las
+    variables de entorno y le abrio un dialogo de Windows pidiendo BORRAR una
+    autoridad certificadora raiz de su almacen personal. Le dijo que si.
+
+    O sea: un test unitario desconfiguro una maquina real y desprotegio al equipo.
+    Es la misma familia que el bug de `~/.aegis/politica.json` de arriba, un
+    escalon mas arriba en consecuencias.
+
+    La leccion no es "parchear mejor". Es que en un proyecto cuyo codigo de
+    produccion escribe en el registro, confia certificados y corre `certutil`, el
+    aislamiento no puede depender de que cada test se acuerde de parchear lo
+    correcto. Se bloquean las tres puertas de salida de una vez:
+
+      - `subprocess.run`  -> certutil y setx
+      - `subprocess.Popen`-> arrancar procesos
+      - `winreg`          -> proxy, variables y arranque automatico
+
+    Uselo en `setUp` de cualquier test que toque `install.windows` o `cli`.
+    """
+
+    import subprocess
+    from unittest.mock import MagicMock
+
+    corrido = MagicMock(returncode=0, stdout="", stderr="")
+    registro = MagicMock()
+
+    with patch.object(subprocess, "run", return_value=corrido) as run, patch.object(
+        subprocess, "Popen", return_value=MagicMock(pid=1234)
+    ) as popen, patch(
+        "aegis_agent.install.windows._registry", return_value=registro
+    ) as reg:
+        yield {"run": run, "popen": popen, "registry": reg, "winreg": registro}
+
+
 def variables_aisladas(workdir: str | Path) -> dict[str, str]:
     """Lo mismo que `entorno_aislado`, para pasarle a un proceso hijo.
 
