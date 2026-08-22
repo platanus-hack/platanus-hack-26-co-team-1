@@ -202,6 +202,38 @@ tienen credenciales de prueba bloquea a su propio desarrollador todo el día.
 que el equipo de seguridad no sabe que está instalada— se queda con la política estricta. El detalle
 y lo que esto cuesta está en el [ADR 0004](adr/0004-la-politica-conoce-la-aplicacion-el-detector-no.md).
 
+## 9d. El diccionario de la empresa
+
+Lo único que ningún detector genérico puede tener. Una llave de AWS se reconoce
+por su formato y el modelo local adivina que "Grupo Éxito" es una empresa, pero
+**ninguno de los dos sabe que Grupo Éxito es cliente de esta empresa** ni que
+"Proyecto Fénix" es el nombre en clave de una adquisición sin anunciar.
+
+```python
+Policy(company_terms={
+    "Proyecto Fenix": "proyecto",
+    "Bancolombia": "cliente",
+    "intranet.acme.co": "dominio interno",
+})
+```
+
+Es determinista: no hay umbral que calibrar. Se compara sin tildes ni mayúsculas
+y con límite de palabra, y se mira sobre **las mismas vistas** que las reglas, así
+que comprimir el cuerpo o pasarlo por base64 no lo esconde.
+
+**El término nunca sale del equipo.** Ni en la evidencia ni en el evento viaja el
+valor: viaja la etiqueta que le puso la empresa (`<cliente>`, `<proyecto>`). El
+diccionario es, por definición, la lista más sensible que tiene la empresa, y si
+se pudiera reconstruir desde el panel, Aegis sería el agujero que dice tapar.
+
+Por defecto **corta**, porque un término declarado es una decisión explícita y no
+una probabilidad. Se baja a aviso con `company_terms_action="warn"`.
+
+Lo que **no** hace, y hay que decirlo: no generaliza. Si la empresa declara
+"Bancolombia" y alguien escribe "Banco Colombia", esto no lo ve — para eso está
+T2, que trabaja por sentido. Las dos capas se complementan; la que se cree que
+reemplaza a la otra es la que hace daño.
+
 ## 9c. Inyección de prompts
 
 Aegis mira las dos direcciones. Lo que busca no es un dato que sale sino una

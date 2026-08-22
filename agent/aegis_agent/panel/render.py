@@ -2,61 +2,67 @@ from __future__ import annotations
 
 from html import escape
 
+from ..ui import tokens
 from .metrics import Metrics
 
-# El panel comparte lenguaje visual con la pagina de bloqueo a proposito: el
-# empleado y el administrador ven el mismo producto desde dos lados.
+# El panel comparte lenguaje visual con la pagina de bloqueo y con el front
+# principal a proposito: el empleado y el administrador ven el mismo producto
+# desde dos lados. Los colores salen de ui/tokens.py, que es el espejo de
+# frontend/tailwind.config.js.
 
-_STYLES = """
-*{box-sizing:border-box}
-body{margin:0;background:#0f1115;color:#e8eaed;
-font-family:"Segoe UI",system-ui,-apple-system,sans-serif;padding:40px 32px}
-.wrap{max-width:1180px;margin:0 auto}
-header{display:flex;align-items:baseline;justify-content:space-between;
-border-bottom:1px solid #232834;padding-bottom:18px;margin-bottom:32px;flex-wrap:wrap;gap:12px}
-.brand{display:flex;align-items:center;gap:10px;font-size:13px;letter-spacing:.14em;
-text-transform:uppercase;color:#8b93a7}
-.brand svg{width:20px;height:20px;color:#5b8def}
-header .tenant{font-size:13px;color:#6b7285}
-h1{font-size:20px;margin:0;font-weight:600}
-h2{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#7b8398;
-margin:0 0 14px;font-weight:600}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin-bottom:32px}
-.kpi{background:#171a21;border:1px solid #262b36;border-radius:12px;padding:20px 22px}
-.kpi .n{font-size:30px;font-weight:600;line-height:1.1}
-.kpi .l{font-size:12px;color:#8b93a7;margin-top:6px;line-height:1.4}
-.kpi.alert .n{color:#e5747d}
-.kpi.good .n{color:#5fb98a}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;margin-bottom:20px}
-.card{background:#171a21;border:1px solid #262b36;border-radius:12px;padding:22px 24px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;font-weight:500;color:#6b7285;padding:0 0 8px;font-size:11px;
-letter-spacing:.08em;text-transform:uppercase}
-td{padding:8px 0;border-top:1px solid #1e222b;vertical-align:middle}
-td.num{text-align:right;font-variant-numeric:tabular-nums;color:#aab2c5}
-.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;
-border:1px solid #2f3644;color:#8b93a7}
-.tag.bad{border-color:#5b2b31;color:#e5747d;background:#20161a}
-.tag.warn{border-color:#5c4a24;color:#d8a44a;background:#1f1c14}
-.tag.ok{border-color:#28503f;color:#5fb98a;background:#152019}
-.bar{height:6px;border-radius:3px;background:#232834;overflow:hidden;margin-top:5px}
-.bar span{display:block;height:100%;background:#5b8def}
-.bar.crit span{background:#e5747d}
-.empty{color:#6b7285;font-size:13px;line-height:1.6}
-.chart{display:flex;align-items:flex-end;gap:4px;height:90px;margin-top:8px}
-.chart div{flex:1;background:#2d4a80;border-radius:2px 2px 0 0;min-height:2px}
-.chart div.peak{background:#5b8def}
-.axis{display:flex;justify-content:space-between;font-size:11px;color:#6b7285;margin-top:6px}
-.foot{margin-top:32px;font-size:12px;color:#6b7285;line-height:1.7;
-border-top:1px solid #232834;padding-top:18px}
+_STYLES = f"""
+{tokens.BASE_CSS}
+body{{padding:40px 32px}}
+.wrap{{max-width:1180px;margin:0 auto}}
+header{{display:flex;align-items:baseline;justify-content:space-between;
+border-bottom:1px solid {tokens.BORDER};padding-bottom:18px;margin-bottom:32px;
+flex-wrap:wrap;gap:12px}}
+.brand{{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:500;
+text-transform:uppercase;letter-spacing:0.13em;color:{tokens.FAINT}}}
+.brand svg{{width:20px;height:20px;color:{tokens.ACCENT}}}
+header .tenant{{font-size:13px;color:{tokens.DIM}}}
+h1{{font-size:20px;margin:0}}
+h2{{font-size:11px;font-weight:500;letter-spacing:0.13em;text-transform:uppercase;
+color:{tokens.FAINT};margin:0 0 14px}}
+.kpis{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+gap:16px;margin-bottom:32px}}
+.kpi{{background:{tokens.SURFACE};border:1px solid {tokens.BORDER};
+border-radius:16px;padding:20px 22px;box-shadow:{tokens.SOMBRA_PANEL}}}
+.kpi .n{{font-size:30px;font-weight:600;line-height:1.1;letter-spacing:-0.02em}}
+.kpi .l{{font-size:12px;color:{tokens.DIM};margin-top:6px;line-height:1.4}}
+.kpi.alert .n{{color:{tokens.RED}}}
+.kpi.good .n{{color:{tokens.GREEN}}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));
+gap:20px;margin-bottom:20px}}
+.card{{background:{tokens.SURFACE};border:1px solid {tokens.BORDER};
+border-radius:16px;padding:22px 24px;box-shadow:{tokens.SOMBRA_PANEL}}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}
+th{{text-align:left;font-weight:500;color:{tokens.FAINT};padding:0 0 8px;
+font-size:11px;letter-spacing:0.13em;text-transform:uppercase}}
+td{{padding:8px 0;border-top:1px solid {tokens.BORDER};vertical-align:middle}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;color:{tokens.DIM}}}
+.tag{{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;
+border:1px solid {tokens.BORDER};color:{tokens.DIM};background:{tokens.SURFACE2}}}
+.tag.bad{{border-color:rgba(201,58,76,0.28);color:{tokens.RED};
+background:rgba(201,58,76,0.07)}}
+.tag.warn{{border-color:rgba(168,113,10,0.28);color:{tokens.AMBER};
+background:rgba(168,113,10,0.07)}}
+.tag.ok{{border-color:rgba(23,122,82,0.28);color:{tokens.GREEN};
+background:rgba(23,122,82,0.07)}}
+.bar{{height:6px;border-radius:999px;background:{tokens.SURFACE3};
+overflow:hidden;margin-top:5px}}
+.bar span{{display:block;height:100%;background:{tokens.ACCENT}}}
+.bar.crit span{{background:{tokens.RED}}}
+.empty{{color:{tokens.FAINT};font-size:13px;line-height:1.6}}
+.chart{{display:flex;align-items:flex-end;gap:4px;height:90px;margin-top:8px}}
+.chart div{{flex:1;background:{tokens.SURFACE3};border-radius:3px 3px 0 0;min-height:2px}}
+.chart div.peak{{background:{tokens.ACCENT}}}
+.axis{{display:flex;justify-content:space-between;font-size:11px;
+color:{tokens.FAINT};margin-top:6px}}
+.foot{{margin-top:32px;font-size:12px;color:{tokens.FAINT};line-height:1.7;
+border-top:1px solid {tokens.BORDER};padding-top:18px}}
 """
-
-_SHIELD = (
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" '
-    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-    '<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8.3 7.5 9.5 4.3-1.2 7.5-5 7.5-9.5V6L12 3Z"/>'
-    '<path d="m9.2 12 2 2 3.6-3.8"/></svg>'
-)
+_SHIELD = tokens.ESCUDO_SVG
 
 _CLASS_TAG = {
     "ai_unapproved": ("bad", "IA no aprobada"),

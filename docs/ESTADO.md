@@ -7,7 +7,7 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 386 en verde (`python run_tests.py` desde la raíz).
+**Tests:** 416 en verde (`python run_tests.py` desde la raíz).
 **Entorno:** `agent/requirements.txt` para el proxy y los tests;
 `agent/requirements-modelo.txt` para T2, que va aparte porque es opcional y pesa.
 
@@ -40,6 +40,8 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Cobertura de **Codex** | Mecanismo listo, **sin verificar** | ver §8 |
 | Lecciones pedagógicas | **Las genera un modelo** desde el evento redactado | `backend/aegis_backend/lecciones.py` |
 | Inyección de prompts, en las dos direcciones | Funciona, avisa por defecto | `agent/aegis_agent/detect/inyeccion.py` |
+| Diccionario de la empresa (sus clientes, proyectos, dominios) | Funciona | `agent/aegis_agent/detect/diccionario.py` |
+| Sistema de diseño único en las tres superficies | Funciona | `agent/aegis_agent/ui/tokens.py` |
 | Atribución por aplicación y política por app | Funciona | `agent/aegis_agent/procesos.py`, [ADR 0004](adr/0004-la-politica-conoce-la-aplicacion-el-detector-no.md) |
 
 **Panel desplegado:** https://aegis-panel.onrender.com
@@ -139,8 +141,11 @@ En el orden en que más valor agregan:
 1. **Conectar el modelo a las lecciones y al clasificador de dominios.** Es lo
    único que separa el producto actual del que dice la propuesta. Solo falta la
    API key; el código y los tests con modelo simulado ya están.
-2. **La pantalla que edita la política.** La cañería ya está: `Policy.a_dict()`,
-   `policy_store` y `PUT /v1/policy/{tenant}`. Falta el formulario y los roles.
+2. **Conectar el front con la política.** La cañería ya está de los dos lados:
+   `Policy.a_dict()`, `policy_store`, `PUT /v1/policy/{tenant}`, y en la rama
+   `feature/frontend-ui` la pantalla de Políticas con sus tabs. Lo que falta es
+   que el formulario escriba de verdad — hoy es todo estado local del componente.
+   El diccionario de la empresa es el campo que más rinde conectar primero.
 3. **Más casos de negocio en el corpus.** `bench/corpus.py` tiene 84 frases y
    con eso ya se eligieron etiquetas y umbral. Es también lo que bloquea la
    decisión del modelo: con 30 frases sensibles, la diferencia entre dos modelos
