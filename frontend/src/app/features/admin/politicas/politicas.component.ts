@@ -21,9 +21,10 @@ interface ReglaDlp {
 }
 
 interface Excepcion {
-  alcance: string;
   tipo: 'Colaborador' | 'Perfil';
   detalle: string;
+  /** Un colaborador o perfil puede acumular más de una regla propia. */
+  alcances: string[];
 }
 
 /** Configuración de políticas: tabs internos (herramientas, DLP, asignación). */
@@ -53,9 +54,52 @@ export class PoliticasComponent {
   ];
 
   excepciones: Excepcion[] = [
-    { alcance: 'Todas las IAs permitidas', tipo: 'Perfil', detalle: 'Equipo de I+D' },
-    { alcance: 'Todas las IAs permitidas', tipo: 'Colaborador', detalle: 'Tobías Fuentes' },
+    { tipo: 'Perfil', detalle: 'Equipo de I+D', alcances: ['Todas las IAs permitidas'] },
+    { tipo: 'Colaborador', detalle: 'Tobías Fuentes', alcances: ['Todas las IAs permitidas', 'Permitir Gemini'] },
   ];
+
+  mostrarFormExcepcion = false;
+  nuevaExcepcion: { tipo: 'Colaborador' | 'Perfil'; detalle: string; alcance: string } = {
+    tipo: 'Colaborador',
+    detalle: '',
+    alcance: '',
+  };
+
+  get alcancesDisponibles(): string[] {
+    const porHerramienta = this.herramientas.flatMap((h) => [`Permitir ${h.nombre}`, `Bloquear ${h.nombre}`]);
+    return ['Todas las IAs permitidas', 'DLP estricto', 'Modo flexible', ...porHerramienta];
+  }
+
+  /** Si ya existe una excepción para ese colaborador/perfil, le suma la regla en vez de duplicar la tarjeta. */
+  agregarExcepcion(): void {
+    const detalle = this.nuevaExcepcion.detalle.trim();
+    const alcance = this.nuevaExcepcion.alcance;
+    if (!detalle || !alcance) return;
+
+    const existente = this.excepciones.find((e) => e.tipo === this.nuevaExcepcion.tipo && e.detalle === detalle);
+    if (existente) {
+      if (!existente.alcances.includes(alcance)) existente.alcances = [...existente.alcances, alcance];
+    } else {
+      this.excepciones = [{ tipo: this.nuevaExcepcion.tipo, detalle, alcances: [alcance] }, ...this.excepciones];
+    }
+
+    this.nuevaExcepcion = { tipo: 'Colaborador', detalle: '', alcance: '' };
+    this.mostrarFormExcepcion = false;
+  }
+
+  quitarExcepcion(excepcion: Excepcion): void {
+    this.excepciones = this.excepciones.filter((e) => e !== excepcion);
+  }
+
+  quitarAlcance(excepcion: Excepcion, alcance: string): void {
+    excepcion.alcances = excepcion.alcances.filter((a) => a !== alcance);
+    if (excepcion.alcances.length === 0) this.quitarExcepcion(excepcion);
+  }
+
+  alternarCeldaMatriz(area: string, indice: number): void {
+    const fila = this.matriz[area];
+    fila[indice] = !fila[indice];
+  }
 
   reglasDefault: ReglaDlp[] = [
     { nombre: 'API keys', descripcion: 'Detecta claves de API y tokens de acceso.', ejemplo: 'sk-live_51H8x... / AKIA4F3G2K1...', accion: 'Bloquear', activa: true, fija: true },
