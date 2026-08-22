@@ -22,10 +22,13 @@ import time
 os.environ.setdefault("AEGIS_T2", "1")
 
 from aegis_agent.detect import model  # noqa: E402
+from aegis_agent.policy import Policy  # noqa: E402
 from bench.corpus import GRUPOS_NORMALES, GRUPOS_SENSIBLES, NORMAL, SENSIBLE  # noqa: E402
 
-# Las categorias que cortan el envio. Es la misma frontera que usa la politica.
-CATEGORIAS_QUE_CORTAN = frozenset({"secret", "internal_data"})
+# Se usa la politica de verdad y no una copia de sus reglas: un banco que mide
+# algo distinto de lo que hace el proxy es peor que no tener banco, porque
+# reporta en verde una configuracion que en produccion corta lo que no debe.
+POLITICA = Policy()
 
 
 def _umbrales() -> list[float]:
@@ -41,8 +44,12 @@ def _mirar(texto: str, umbral: float) -> tuple[bool, bool, float]:
     arranque = time.perf_counter()
     hallazgos = model.scan_model(texto, umbral=umbral)
     transcurrido = (time.perf_counter() - arranque) * 1000
-    categorias = {hallazgo.category for hallazgo in hallazgos}
-    return bool(categorias & CATEGORIAS_QUE_CORTAN), bool(categorias), transcurrido
+    corta = any(
+        hallazgo.category in POLITICA.model_block_categories
+        and model.etiqueta_de(hallazgo.rule_id) in POLITICA.model_block_labels
+        for hallazgo in hallazgos
+    )
+    return corta, bool(hallazgos), transcurrido
 
 
 def main() -> int:

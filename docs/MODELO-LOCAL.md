@@ -43,14 +43,28 @@ forma rara de presentarse, y el agente protege igual sin él.
 El modelo recibe las etiquetas **como texto**, así que agregar un tipo de dato es
 configuración de la empresa y no un release del producto.
 
-| Etiqueta | Categoría | Severidad | Qué hace |
-|---|---|---|---|
-| `nombre de cliente` | internal_data | high | **corta** el envío |
-| `credencial` | pii | high | advierte |
-| `condicion de salud` | pii | high | advierte |
-| `persona` | pii | medium | advierte |
-| `empleado` | pii | medium | advierte |
-| `domicilio` | pii | medium | advierte |
+Y tienen dos niveles de autoridad, que es la decisión central de este documento:
+
+| Etiqueta | Categoría | Qué hace |
+|---|---|---|
+| `nombre de cliente` | internal_data | **corta el envío** |
+| `empresa` | internal_data | avisa |
+| `dinero` | internal_data | avisa |
+| `credencial` | pii | avisa |
+| `condicion de salud` | pii | avisa |
+| `persona` | pii | avisa |
+| `empleado` | pii | avisa |
+| `domicilio` | pii | avisa |
+
+**Avisar no le cuesta nada a la persona.** El envío sale igual, no ve ningún
+cartel, no se frena su trabajo: el hallazgo solo queda registrado en el panel, y
+de ahí salen las lecciones. Por eso una etiqueta que se equivoca seguido puede
+avisar sin problema, pero no puede cortar.
+
+La autoridad se decide **por etiqueta y no por categoría** (`model_block_labels`
+en `Policy`), porque dos etiquetas del mismo tipo de dato miden muy distinto:
+`empresa` y `nombre de cliente` son las dos `internal_data`, pero la primera se
+equivoca en 6 de 36 frases normales y la segunda en 1.
 
 **Cómo se eligieron, y qué hay que desaprender.** Se midió etiqueta por etiqueta
 sobre el corpus de `bench/corpus.py` (25 frases sensibles, 36 de trabajo normal):
@@ -80,30 +94,38 @@ Dos cosas que este documento afirmaba y la medición corrigió:
 
 ## 4. Métricas medidas
 
-Con `bench/evaluar_modelo.py` sobre el corpus completo (25 sensibles, 36 de
-trabajo normal), en CPU sin GPU, dándole al modelo el prompt ya extraído:
+Con `bench/evaluar_modelo.py` sobre el corpus completo (25 frases sensibles, 36
+de trabajo normal), en CPU sin GPU, dándole al modelo el prompt ya extraído:
 
-| Umbral | Detecta | Bloquea trabajo normal | Advierte de más |
+| Umbral | Detecta | **Bloquea trabajo normal** | Avisa de más |
 |---|---|---|---|
-| 0.50 (actual) | 10/25 | **0**/36 | 4/36 |
-| 0.60 | 9/25 | **0**/36 | 3/36 |
+| 0.50 (actual) | 21/25 | **0**/36 | 13/36 |
+| 0.60 | 21/25 | **0**/36 | 10/36 |
 
 ```
-Latencia:  p50 89 ms | p95 101 ms | presupuesto 700 ms
+Latencia:  p50 88 ms | p95 99 ms | presupuesto 700 ms
 Carga:     ~5 s, en un hilo al arrancar el proxy y no en el primer envío
 ```
 
-**Lo que hay que saber para no sobrevender esto.** El modelo cubre bien los datos
-personales y de salud (8/8 en el corpus) y muy mal los datos de negocio (1/14):
-las etiquetas que los encontraban son justo las que bloqueaban trabajo legítimo.
-La configuración actual elige **no equivocarse** por encima de **detectar más**,
-porque un bloqueo falso delante de alguien que está trabajando es lo que hace que
-Aegis se desinstale.
+Por grupo, en 0.5:
 
-Dos mediciones anteriores de este documento eran engañosas y quedan anuladas:
-estaban hechas sobre 17 frases y sobre el cuerpo crudo del request. Con el JSON
-completo el modelo marcaba 8 de cada 10 frases normales, porque los nombres de
-parámetros le daban entidades por todos lados.
+| Grupo | Resultado |
+|---|---|
+| Fugas de datos de empresa | 13/14 detectadas |
+| Datos personales y de salud | 8/8 detectadas |
+| Credenciales en lenguaje natural | 0/3 — las ve T1 con `credencial_en_espanol` |
+| Trabajo de rutina | 0/12 marcadas |
+| Menciones de empresa sin fuga | 5/6 marcadas, **0 bloqueadas** |
+
+**Lo que hay que saber para no sobrevender esto.** El modelo no distingue
+mencionar de filtrar: marca *"explicame qué hace Bancolombia"* igual que marca un
+contrato. Por eso lo que ve **avisa y no corta**, salvo la única etiqueta que
+midió lo bastante bien. El bloqueo con autoridad sigue siendo trabajo de T1.
+
+Dos mediciones anteriores de este documento quedan anuladas: estaban hechas sobre
+17 frases y sobre el cuerpo crudo del request. Con el JSON completo el modelo
+marcaba 8 de cada 10 frases normales, porque los nombres de parámetros le daban
+entidades por todos lados.
 
 ## 5. Cómo medirlo vos
 

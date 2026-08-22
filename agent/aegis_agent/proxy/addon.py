@@ -224,7 +224,12 @@ class Aegis:
                     # ningun hallazgo suyo bloquea, sin importar la categoria.
                     action = "warn"
                 else:
-                    if worst.category not in self.policy.model_block_categories:
+                    etiqueta = model.etiqueta_de(worst.rule_id)
+                    autorizada = (
+                        worst.category in self.policy.model_block_categories
+                        and etiqueta in self.policy.model_block_labels
+                    )
+                    if not autorizada:
                         action = "warn"
 
             if action == "block_content" and worst is not None:

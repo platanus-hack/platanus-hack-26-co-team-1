@@ -10,6 +10,7 @@ Classification = Literal[
 Action = Literal["allow", "warn", "block_destination", "block_content"]
 
 from .catalog import AI_DOMAINS  # noqa: E402  (catalogo semilla)
+from .detect.model import ETIQUETAS_PRECISAS  # noqa: E402
 
 # Dominios que no se descifran nunca, ni para inspeccionar. Ver ADR 0003.
 PASSTHROUGH_DOMAINS: frozenset[str] = frozenset(
@@ -65,6 +66,14 @@ class Policy:
     # sin importar la categoria.
     model_action: str = field(
         default_factory=lambda: os.environ.get("AEGIS_T2_ACCION", "block")
+    )
+    # Que etiquetas del modelo tienen autoridad para cortar un envio. Las demas
+    # avisan: quedan en el panel y alimentan la leccion, pero no frenan a nadie.
+    # Se decide por etiqueta y no por categoria porque dos etiquetas del mismo
+    # tipo de dato pueden medir muy distinto: "nombre de cliente" se equivoca en
+    # 1 de 36 frases normales y "empresa" en 6, y las dos son internal_data.
+    model_block_labels: frozenset[str] = field(
+        default_factory=lambda: frozenset(ETIQUETAS_PRECISAS)
     )
     block_categories: frozenset[str] = field(
         default_factory=lambda: frozenset({"secret", "internal_data"})

@@ -247,28 +247,50 @@ class TestDegradacionPorCategoria(unittest.TestCase):
     absolutamente todo, sin mirar la categoria.
     """
 
-    def test_un_secreto_del_modelo_bloquea(self):
-        flow, _ = _correr_inspeccion(Policy(), _hallazgo("modelo:contrasena", "secret"))
+    def test_una_etiqueta_precisa_bloquea(self):
+        flow, _ = _correr_inspeccion(
+            Policy(), _hallazgo("modelo:nombre_de_cliente", "internal_data")
+        )
         self.assertIsNotNone(flow.response)
         self.assertEqual(flow.response.status_code, 403)
         self.assertEqual(flow.response.headers["X-Aegis-Action"], "block_content")
 
-    def test_un_dato_de_empresa_del_modelo_bloquea(self):
-        flow, _ = _correr_inspeccion(Policy(), _hallazgo("modelo:empresa", "internal_data"))
-        self.assertIsNotNone(flow.response)
-        self.assertEqual(flow.response.status_code, 403)
-        self.assertEqual(flow.response.headers["X-Aegis-Action"], "block_content")
+    def test_una_etiqueta_amplia_solo_advierte_aunque_sea_dato_de_empresa(self):
+        """La categoria no alcanza: manda cuanto se equivoca la etiqueta.
+
+        "empresa" y "nombre de cliente" son las dos internal_data, pero medidas
+        sobre el corpus la primera marca 6 de 36 frases de trabajo normal y la
+        segunda 1. Solo la segunda puede cortarle el envio a alguien.
+        """
+
+        flow, eventos = _correr_inspeccion(
+            Policy(), _hallazgo("modelo:empresa", "internal_data")
+        )
+        self.assertIsNone(flow.response)
+        self.assertEqual(eventos[-1]["action"], "warned")
 
     def test_un_dato_personal_del_modelo_solo_advierte(self):
         flow, eventos = _correr_inspeccion(Policy(), _hallazgo("modelo:persona", "pii"))
         self.assertIsNone(flow.response)
         self.assertEqual(eventos[-1]["action"], "warned")
 
-    def test_model_action_warn_baja_todo_sin_mirar_categoria(self):
+    def test_model_action_warn_baja_todo_sin_mirar_la_etiqueta(self):
         politica = Policy(model_action="warn")
-        flow, eventos = _correr_inspeccion(politica, _hallazgo("modelo:contrasena", "secret"))
+        flow, eventos = _correr_inspeccion(
+            politica, _hallazgo("modelo:nombre_de_cliente", "internal_data")
+        )
         self.assertIsNone(flow.response)
         self.assertEqual(eventos[-1]["action"], "warned")
+
+    def test_la_empresa_puede_autorizar_otra_etiqueta(self):
+        """Es lo que la app web va a editar: que etiqueta tiene autoridad."""
+
+        politica = Policy(model_block_labels=frozenset({"empresa"}))
+        flow, _ = _correr_inspeccion(
+            politica, _hallazgo("modelo:empresa", "internal_data")
+        )
+        self.assertIsNotNone(flow.response)
+        self.assertEqual(flow.response.status_code, 403)
 
     def test_un_hallazgo_de_t1_no_se_toca(self):
         # Un rule_id que no empieza con "modelo:" ni siquiera entra al chequeo

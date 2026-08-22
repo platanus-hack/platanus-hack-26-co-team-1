@@ -40,14 +40,27 @@ from .types import Finding
 # Se sacaron las que no encuentran nada: "contrasena", "clave", "clave de acceso"
 # y "diagnostico medico" dieron 0/25. Las credenciales dichas en lenguaje natural
 # las ve T1 con la regla credencial_en_espanol, que es determinista.
-ETIQUETAS_POR_DEFECTO = (
-    "nombre de cliente",
-    "empleado",
+# Hay dos clases de etiqueta y la diferencia es cuanta autoridad tienen, no que
+# buscan. Las precisas pueden cortar un envio. Las amplias encuentran mucho mas
+# pero se equivocan seguido, asi que solo avisan: el envio sale igual y el
+# hallazgo queda en el panel, que es de donde salen las lecciones.
+#
+# Avisar no le cuesta nada a la persona (no ve ningun cartel, no se frena su
+# trabajo) y le da al panel la visibilidad que si necesita la empresa. Por eso
+# vale la pena tolerar que una etiqueta amplia se equivoque.
+ETIQUETAS_PRECISAS = ("nombre de cliente",)
+
+ETIQUETAS_AMPLIAS = (
+    "empresa",
+    "dinero",
     "persona",
+    "empleado",
     "domicilio",
     "condicion de salud",
     "credencial",
 )
+
+ETIQUETAS_POR_DEFECTO = ETIQUETAS_PRECISAS + ETIQUETAS_AMPLIAS
 
 # Medido con el conjunto de arriba sobre el corpus completo, dandole al modelo el
 # prompt ya extraido y no el JSON del request:
@@ -82,11 +95,23 @@ MODELO_POR_DEFECTO = "urchade/gliner_multi-v2.1"
 # mencion casual de una marca. Todo lo demas avisa.
 _CATEGORIA_POR_ETIQUETA = {
     "nombre de cliente": ("internal_data", "high"),
+    "empresa": ("internal_data", "high"),
+    "dinero": ("internal_data", "high"),
     "credencial": ("pii", "high"),
-    "empleado": ("pii", "medium"),
     "condicion de salud": ("pii", "high"),
+    "empleado": ("pii", "medium"),
     "domicilio": ("pii", "medium"),
 }
+
+
+def etiqueta_de(rule_id: str) -> str:
+    """La etiqueta que origino un hallazgo, a partir de su rule_id.
+
+    scan_model arma el rule_id cambiando los espacios por guiones bajos; esto lo
+    deshace para que la politica pueda hablar de etiquetas y no de rule_ids.
+    """
+
+    return rule_id.removeprefix("modelo:").replace("_", " ")
 
 _lock = threading.Lock()
 _modelo = None
