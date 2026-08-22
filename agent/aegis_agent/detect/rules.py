@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
+from .contexto import es_marca_de_documento, es_tarjeta_de_verdad
 from .entropy import (
     looks_random,
     luhn_valid,
@@ -28,6 +29,11 @@ class Rule:
     # Devolver False descarta el match. Es lo que separa un numero de tarjeta de
     # cualquier secuencia de 16 digitos.
     validator: Callable[[str], bool] | None = None
+    # Igual que validator, pero recibe (texto, inicio, fin) en vez del valor.
+    # Existe para las reglas cuyo falso positivo no se ve en lo que casaron sino
+    # en de que se estaba hablando: un numero que pasa Luhn puede ser una
+    # factura, y "confidencial" puede estar dentro de una pregunta sobre Word.
+    context_validator: Callable[[str, int, int], bool] | None = None
     redact_as: str = "mask"
     kind: str = ""
 
@@ -358,6 +364,7 @@ _INTERNAL_DATA: tuple[Rule, ...] = (
             r"|internal use only|company confidential)\b"
         ),
         description="Documento marcado como interno o confidencial",
+        context_validator=es_marca_de_documento,
         redact_as="type",
         kind="internal_doc",
     ),
@@ -374,6 +381,7 @@ _PII: tuple[Rule, ...] = (
         pattern=_compile(r"\b(?:\d[ -]?){13,19}\b"),
         description="Numero de tarjeta que pasa la validacion de Luhn",
         validator=luhn_valid,
+        context_validator=es_tarjeta_de_verdad,
         redact_as="type",
         kind="credit_card",
     ),
