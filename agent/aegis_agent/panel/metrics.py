@@ -26,6 +26,11 @@ class Metrics:
     by_rule: list[tuple[str, int]] = field(default_factory=list)
     by_destination: list[tuple[str, str, int]] = field(default_factory=list)
     by_area: list[tuple[str, int, int]] = field(default_factory=list)
+    # Que herramienta se uso, no que dominio. Son cosas distintas y las dos
+    # importan: `by_destination` dice "chatgpt.com" y esto dice si quien lo
+    # abrio fue el navegador o un agente de codigo mandando un repositorio
+    # entero. En 2026 esa es la diferencia que decide una politica.
+    by_process: list[tuple[str, int]] = field(default_factory=list)
     people_at_risk: list[tuple[str, str, int, int]] = field(default_factory=list)
     shadow_domains: list[str] = field(default_factory=list)
     uncatalogued_domains: list[str] = field(default_factory=list)
@@ -62,6 +67,7 @@ def compute(events: list[dict]) -> Metrics:
     person_critical: Counter[str] = Counter()
     person_area: dict[str, str] = {}
     hours: Counter[str] = Counter()
+    processes: Counter[str] = Counter()
     shadow: set[str] = set()
     uncatalogued: set[str] = set()
 
@@ -80,6 +86,10 @@ def compute(events: list[dict]) -> Metrics:
         classification = destination.get("classification", "non_ai")
         destinations[domain] += 1
         destination_class[domain] = classification
+        # "desconocido" es un valor legitimo del contrato -no siempre se puede
+        # atribuir la conexion a un proceso- asi que se cuenta como los demas en
+        # vez de descartarlo: esconderlo daria un ranking que no suma al total.
+        processes[destination.get("process") or "desconocido"] += 1
         if classification == "ai_unapproved":
             shadow.add(domain)
         if classification == "ai_unknown":
@@ -123,6 +133,7 @@ def compute(events: list[dict]) -> Metrics:
         ),
         key=lambda row: (-row[3], -row[2], row[0]),
     )[:10]
+    metrics.by_process = processes.most_common(10)
     metrics.shadow_domains = sorted(shadow)
     metrics.uncatalogued_domains = sorted(uncatalogued)
     metrics.timeline = sorted(hours.items())

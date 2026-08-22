@@ -21,6 +21,7 @@ def evento(
     severity="critical",
     action="blocked",
     hora="2026-08-22T14",
+    proceso="browser",
 ):
     detection = None
     if rule:
@@ -39,7 +40,7 @@ def evento(
         "destination": {
             "domain": domain,
             "classification": classification,
-            "process": "browser",
+            "process": proceso,
         },
         "detection": detection,
         "action": action,
@@ -88,6 +89,31 @@ class TestAgregados(unittest.TestCase):
         )
         self.assertEqual(metrics.shadow_domains, ["chatgpt.com"])
         self.assertEqual(metrics.uncatalogued_domains, ["asistente-raro.co"])
+
+    def test_la_herramienta_se_cuenta_aparte_del_destino(self):
+        """`by_destination` dice adonde fue; `by_process` dice con que.
+
+        Son preguntas distintas y las dos deciden politica: una persona pegando
+        un fragmento en chatgpt.com no es un agente de codigo mandando un
+        repositorio entero al mismo dominio.
+        """
+
+        metrics = compute(
+            [
+                evento(proceso="claude-code"),
+                evento(proceso="claude-code", hora="2026-08-22T15"),
+                evento(proceso="browser", hora="2026-08-22T16"),
+            ]
+        )
+        self.assertEqual(metrics.by_process, [("claude-code", 2), ("browser", 1)])
+
+    def test_lo_que_no_se_pudo_atribuir_se_cuenta_igual(self):
+        # "desconocido" es un valor legitimo del contrato: no siempre se puede
+        # atribuir la conexion a un proceso. Esconderlo daria un ranking que no
+        # suma al total y el panel mentiria por omision.
+        metrics = compute([evento(proceso=""), evento(proceso="cursor", hora="2026-08-22T15")])
+        self.assertEqual(dict(metrics.by_process), {"desconocido": 1, "cursor": 1})
+        self.assertEqual(sum(v for _, v in metrics.by_process), metrics.total)
 
     def test_riesgo_por_area_cuenta_los_criticos(self):
         metrics = compute(

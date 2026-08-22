@@ -29,20 +29,6 @@ export class PanelGeneralComponent implements OnInit {
   rango = 'Esta semana';
   readonly rangos = ['Esta semana', 'Últimos 14 días', 'Este mes', 'Personalizado'];
 
-  areasUsoIa: Ranking[] = [
-    { nombre: 'Ingeniería', valor: 86 },
-    { nombre: 'Marketing', valor: 61 },
-    { nombre: 'Contabilidad', valor: 40 },
-    { nombre: 'RR.HH.', valor: 22 },
-  ];
-
-  herramientas: Ranking[] = [
-    { nombre: 'Claude', valor: 48 },
-    { nombre: 'ChatGPT', valor: 33 },
-    { nombre: 'Claude Code', valor: 14 },
-    { nombre: 'Copilot', valor: 5 },
-  ];
-
   // Solo quienes tienen algo que revisar esta semana: el directorio completo vive en /admin/colaboradores.
   readonly colaboradores = COLABORADORES.filter((c) => c.intentos > 0).sort((a, b) => b.intentos - a.intentos);
 

@@ -35,6 +35,10 @@ export interface MetricasPanel {
   detecciones: Ranking[];
   destinos: Destino[];
   areasVulnerables: Ranking[];
+  /** Cuánto usa la IA cada área: el total, no sólo lo que se le escapa. */
+  areasUsoIa: Ranking[];
+  /** Con qué herramienta, no hacia qué dominio. Son cosas distintas. */
+  herramientas: Ranking[];
   /** Dominios que nadie catalogo y que se delataron por su comportamiento. */
   shadowAi: string[];
   /** true cuando esto vino del agente y no de la maqueta. */
@@ -54,6 +58,18 @@ const MAQUETA: MetricasPanel = {
     { nombre: 'Ventas', valor: 12 },
     { nombre: 'Ingeniería', valor: 7 },
     { nombre: 'Marketing', valor: 4 },
+  ],
+  areasUsoIa: [
+    { nombre: 'Ingeniería', valor: 86 },
+    { nombre: 'Marketing', valor: 61 },
+    { nombre: 'Contabilidad', valor: 40 },
+    { nombre: 'RR.HH.', valor: 22 },
+  ],
+  herramientas: [
+    { nombre: 'Claude', valor: 48 },
+    { nombre: 'ChatGPT', valor: 33 },
+    { nombre: 'Claude Code', valor: 14 },
+    { nombre: 'Copilot', valor: 5 },
   ],
   shadowAi: [],
   enVivo: false,
@@ -81,6 +97,25 @@ const NOMBRE_DE_REGLA: Record<string, string> = {
   archivo_critico: 'Archivo crítico',
   archivo_critico_por_firma: 'Base de datos disfrazada',
   punto_ciego: 'App que esquiva el proxy',
+};
+
+/**
+ * Nombres legibles para lo que el agente reporta en `destination.process`.
+ *
+ * El agente normaliza a un identificador estable (`procesos.py`) para que la
+ * política sea portable entre sistemas operativos; acá se deshace sólo para
+ * mostrarlo. La política sigue hablando de `claude-code`, no de "Claude Code".
+ */
+const NOMBRE_DE_PROCESO: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  'chatgpt-app': 'ChatGPT (app)',
+  browser: 'Navegador',
+  cursor: 'Cursor',
+  copilot: 'Copilot',
+  aider: 'Aider',
+  ollama: 'Ollama',
+  codex: 'Codex',
+  desconocido: 'Sin atribuir',
 };
 
 /** `modelo:empresa` y `empresa_cliente` son familias, no reglas sueltas. */
@@ -151,6 +186,20 @@ export class MetricasService {
       areasVulnerables: porArea.length
         ? porArea.map(([nombre, , criticos]) => ({ nombre, valor: criticos }))
         : MAQUETA.areasVulnerables,
+      // El primer número de by_area es el uso total y el segundo lo crítico:
+      // el mismo dato responde "quién usa más IA" y "a quién se le escapa más",
+      // que son preguntas distintas y estaban las dos inventadas.
+      areasUsoIa: porArea.length
+        ? porArea.map(([nombre, total]) => ({ nombre, valor: total }))
+        : MAQUETA.areasUsoIa,
+      herramientas: (m.by_process ?? []).length
+        ? (m.by_process ?? [])
+            .slice(0, 6)
+            .map(([proceso, veces]: [string, number]) => ({
+              nombre: NOMBRE_DE_PROCESO[proceso] ?? proceso,
+              valor: veces,
+            }))
+        : MAQUETA.herramientas,
       shadowAi: (m.shadow_domains ?? []).slice(0, 8),
       enVivo: (m.total ?? 0) > 0,
     };
