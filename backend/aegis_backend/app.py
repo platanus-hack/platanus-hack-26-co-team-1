@@ -2,22 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import lecciones
-from .classifier import anthropic_model, classify
-from .store import DomainStore, PolicyStore, Verdict
+from . import rutas
+from .classifier import anthropic_model
+from .store import DomainStore, PolicyStore
 
 DEFAULT_PORT = 8686
-
-# La cola de clasificacion corre aparte del request que la disparo: el agente
-# pregunta, recibe "todavia no se" al instante y sigue trabajando con su
-# politica. Nadie espera a que un modelo se decida.
-_pending: set[str] = set()
-_pending_lock = threading.Lock()
 
 
 class BackendHandler(BaseHTTPRequestHandler):
@@ -65,7 +58,7 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self._policy_tenant(self.path[len("/v1/policy/") :])
             else:
                 if self.path.startswith("/v1/policy"):
-                    self._send(200, _policy())
+                    self._send(200, rutas.politica_por_defecto())
                 else:
                     if self.path.startswith("/v1/stats"):
                         self._send(200, {"domains": self.store.count()})
@@ -84,23 +77,18 @@ class BackendHandler(BaseHTTPRequestHandler):
             evento = self._body()
             # El backend rechaza cualquier evento que traiga contenido: la unica
             # forma de garantizar la frontera es no confiar ni en el agente.
-            if _carries_content(evento):
+            if rutas.lleva_contenido(evento):
                 self._send(422, {"error": "el evento contiene campos prohibidos"})
             else:
                 self._send(202, {"accepted": evento.get("event_id")})
         else:
             if self.path.startswith("/v1/lessons"):
-                peticion = self._body()
                 # Misma frontera que en /v1/events, y por la misma razon: el
                 # endpoint es publico y no puede depender de que el agente se
                 # porte bien. Una leccion no necesita el contenido.
-                if _carries_content(peticion.get("event") or peticion):
-                    self._send(422, {"error": "el evento contiene campos prohibidos"})
-                else:
-                    self._send(
-                        200,
-                        lecciones.generar(peticion, self.ask_model, _CACHE_DE_LECCIONES),
-                    )
+                self._send(
+                    *rutas.leccion(self._body(), self.ask_model, _CACHE_DE_LECCIONES)
+                )
             else:
                 self._send(404, {"error": "ruta desconocida"})
 
@@ -109,50 +97,7 @@ class BackendHandler(BaseHTTPRequestHandler):
         self._send(200, self.policy_store.get(tenant))
 
     def _domain(self, domain: str) -> None:
-        domain = domain.split("?")[0].strip("/").lower()
-        verdict = self.store.get(domain)
-        if verdict is not None:
-            self._send(200, verdict.as_response())
-        else:
-            self._enqueue(domain)
-            self._send(202, {"domain": domain, "classification": "pending"})
-
-    def _enqueue(self, domain: str) -> None:
-        with _pending_lock:
-            nuevo = domain not in _pending
-            if nuevo:
-                _pending.add(domain)
-        if nuevo:
-            threading.Thread(
-                target=self._classify, args=(domain,), daemon=True
-            ).start()
-
-    def _classify(self, domain: str) -> None:
-        try:
-            self.store.put(classify(domain, self.ask_model))
-        finally:
-            with _pending_lock:
-                _pending.discard(domain)
-
-
-def _carries_content(evento: dict) -> bool:
-    prohibidos = ("payload", "content", "text", "prompt", "body", "raw")
-    evidencia = (evento.get("detection") or {}).get("evidence", "")
-    destino = evento.get("destination", {}).get("domain", "")
-    return (
-        any(campo in evento for campo in prohibidos)
-        or len(evidencia) > 32
-        or "/" in destino
-    )
-
-
-def _policy() -> dict:
-    return {
-        "policy_version": 1,
-        "unknown_domain_action": "warn",
-        "approved_ai": ["claude.ai", "api.anthropic.com"],
-        "rules": {"secret": "block", "internal_data": "block", "pii": "warn"},
-    }
+        self._send(*rutas.veredicto(domain, self.store, self.ask_model))
 
 
 # La cache vive en el modulo y no en la peticion: dos empleados a los que se les
