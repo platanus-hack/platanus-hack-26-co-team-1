@@ -12,6 +12,7 @@ from urllib.parse import unquote_plus
 
 from .engine import scan
 from .files import scan_files
+from .model import scan_model
 from .types import Finding
 
 # Un secreto casi nunca viaja en texto plano y derecho: viaja dentro de un JSON
@@ -230,6 +231,12 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
     bulk = _bulk_pii(counts)
     if bulk is not None:
         findings.append(bulk)
+
+    # T2 solo entra cuando T1 se quedo sin nada que decir. Si ya hay una
+    # credencial detectada, gastar 150 ms mas no cambia la decision ni la
+    # leccion; y si T1 vio algo, lo vio con certeza y sin adivinar.
+    if not findings and principal:
+        findings.extend(scan_model(principal))
 
     # Se reordena al final para que el primero sea el hallazgo mas especifico, no
     # el ultimo que se agrego. De ese primero sale la leccion que ve la persona,
