@@ -66,6 +66,11 @@ def main() -> int:
     proxy = subprocess.Popen(
         [
             _mitmdump_path(),
+            # A loopback y no a todas las interfaces: un proxy que descifra
+            # TLS abierto a la red local es un regalo para cualquiera que
+            # este en el mismo wifi.
+            "--listen-host",
+            "127.0.0.1",
             "--listen-port",
             str(PROXY_PORT),
             "--quiet",
