@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
 
+from .evidence import Evidence, fetch
 from .store import Verdict
 
 # Clasificar un dominio cuesta una llamada a un modelo. Se hace **una sola vez**
@@ -11,18 +13,55 @@ from .store import Verdict
 # cobertura crece sola. Lo que no puede pasar es que el agente espere: la
 # clasificacion es asincrona y el agente decide mientras tanto con su politica.
 
-# Senales en el propio nombre del dominio. No alcanzan solas para condenar a un
-# sitio, pero ordenan la cola de revision y sirven de red cuando no hay modelo.
+UMBRAL_IA = 0.6
+
+# Senales en el nombre del dominio. Ordenan la cola y sirven de red cuando el
+# sitio no responde, pero nunca deciden solas: hay negocios legitimos con "ai"
+# en el nombre y servicios de IA que no lo tienen.
 _TOKENS_FUERTES = (
     "gpt", "llm", "chatbot", "copilot", "openai", "anthropic", "claude",
     "gemini", "deepseek", "mistral", "perplexity", "huggingface",
 )
 _TOKENS_DEBILES = (
     "ai", "ia", "chat", "bot", "asistente", "assistant", "neural", "brain",
-    "mind", "genius", "prompt", "gen", "smart", "auto",
+    "mind", "genius", "prompt", "smart",
+)
+
+# Lo que dice el sitio de si mismo. Esto si decide, porque un servicio de IA
+# necesita explicarle al visitante que hace.
+_FRASES_FUERTES = (
+    "inteligencia artificial", "artificial intelligence", "language model",
+    "modelo de lenguaje", "ai assistant", "asistente de ia", "ai chat",
+    "chat con ia", "powered by gpt", "large language model", "ai agent",
+    "genera con ia", "generate with ai", "ai-powered",
+)
+_FRASES_DEBILES = (
+    "prompt", "chatbot", "gpt", "llm", "copilot", "resume tu", "summarize",
+    "pregunta lo que", "ask anything", "escribe con", "write with",
 )
 
 _SEPARADORES = re.compile(r"[.\-_]")
+
+# El titulo de una portada es corto y curado: si ahi aparece "AI" o "IA" suelto,
+# el sitio se esta presentando como tal. En el cuerpo de la pagina la misma
+# palabra aparece por cualquier motivo, asi que esta senal solo vale arriba.
+_IA_EN_TITULO = re.compile(r"\b(?:a\.?i\.?|i\.?a\.?)\b", re.I)
+_ASISTENTE = re.compile(
+    r"\b(?:asistente (?:inteligente|virtual|de ia)|smart assistant"
+    r"|ai (?:assistant|presentation|writer|video|search|notetaker|meeting"
+    r"|agent|chat|tool|editor))\b",
+    re.I,
+)
+
+# El titulo de una portada es corto y curado: si ahi dice "AI" o "IA" suelto, el
+# sitio se esta presentando como tal. En el cuerpo de la pagina la misma palabra
+# aparece por cualquier motivo, asi que esta senal solo vale en el titulo.
+_IA_EN_TITULO = re.compile(r"\b(?:a\.?i\.?|i\.?a\.?)\b", re.I)
+_ASISTENTE = re.compile(
+    r"\b(?:asistente (?:inteligente|virtual|de ia)|smart assistant|ai (?:assistant|"
+    r"presentation|writer|video|search|notetaker|meeting|agent|chat|tool))\b",
+    re.I,
+)
 
 
 def _tokens(domain: str) -> list[str]:
@@ -30,17 +69,11 @@ def _tokens(domain: str) -> list[str]:
 
 
 def heuristic_score(domain: str) -> tuple[float, str]:
-    """Puntaje por el nombre del dominio, sin red y sin modelo.
-
-    Es deliberadamente conservador: prefiere no clasificar antes que clasificar
-    mal, porque un veredicto equivocado se propaga a todos los clientes.
-    """
-
     partes = _tokens(domain)
     fuertes = [t for t in partes if any(token in t for token in _TOKENS_FUERTES)]
     debiles = [t for t in partes if t in _TOKENS_DEBILES]
 
-    puntaje = min(1.0, 0.6 * len(fuertes) + 0.25 * len(debiles))
+    puntaje = min(1.0, 0.7 * len(fuertes) + 0.25 * len(debiles))
     if fuertes:
         motivo = f"El nombre contiene {', '.join(fuertes)}"
     else:
@@ -51,61 +84,118 @@ def heuristic_score(domain: str) -> tuple[float, str]:
     return puntaje, motivo
 
 
-_PROMPT = """Analiza el dominio {domain} y responde SOLO con un JSON:
+def content_score(evidencia: Evidence) -> tuple[float, str]:
+    """Puntua lo que el sitio dice de si mismo en su portada."""
+
+    if not evidencia.reachable:
+        resultado = (0.0, "El sitio no respondio")
+    else:
+        encabezado = f"{evidencia.title} {evidencia.description}"
+        texto = f"{encabezado} {evidencia.snippet}".lower()
+        fuertes = [f for f in _FRASES_FUERTES if f in texto]
+        debiles = [f for f in _FRASES_DEBILES if f in texto]
+
+        puntaje = min(1.0, 0.5 * len(fuertes) + 0.15 * len(debiles))
+        titular = ""
+        if _IA_EN_TITULO.search(encabezado):
+            puntaje += 0.5
+            titular = "se anuncia como IA en su titulo"
+        if _ASISTENTE.search(texto):
+            puntaje += 0.5
+            titular = titular or "se presenta como un asistente"
+        puntaje = min(1.0, puntaje)
+
+        if titular:
+            motivo = f"El sitio {titular}"
+        else:
+            if fuertes:
+                motivo = f"El sitio se describe con: {', '.join(fuertes[:3])}"
+            else:
+                if debiles:
+                    motivo = f"El sitio menciona: {', '.join(debiles[:3])}"
+                else:
+                    motivo = "El sitio no se presenta como un servicio de IA"
+        resultado = (puntaje, motivo)
+    return resultado
+
+
+_PROMPT = """Sos un clasificador de seguridad. Decidi si este dominio ofrece un
+servicio de inteligencia artificial al que un empleado podria pegarle texto o
+subirle archivos de la empresa.
+
+Dominio: {domain}
+{evidencia}
+
+Es IA si el sitio ofrece un modelo de lenguaje, un asistente conversacional, un
+generador de texto, un transcriptor, o cualquier funcion donde lo que el usuario
+escribe o sube lo procesa un modelo. No es IA si es una tienda, un banco, un
+medio, una herramienta interna o un sitio corporativo comun.
+
+Responde SOLO con un JSON:
 {{"es_ia": true|false, "tipo": "llm_chat|llm_api|ai_feature|non_ai",
 "confianza": 0.0-1.0, "evidencia": "una frase corta en espanol"}}
 
-Es IA si el sitio ofrece un modelo de lenguaje, un asistente conversacional, o
-una funcion donde el usuario pega texto o sube archivos que procesa un modelo.
-No incluyas contenido del usuario en tu respuesta."""
+No incluyas contenido del usuario en tu respuesta: solo estas viendo una pagina
+publica."""
 
 
-def classify(domain: str, ask_model=None) -> Verdict:
-    """Devuelve el veredicto de un dominio.
+def classify(domain: str, ask_model=None, buscar_evidencia=fetch) -> Verdict:
+    """Investiga un dominio y devuelve su veredicto.
 
-    ``ask_model`` recibe un prompt y devuelve texto; se inyecta para poder
-    probar el flujo completo sin llamar a ninguna API.
+    Tres fuentes, en orden de peso: lo que el modelo concluye viendo la portada,
+    lo que la portada dice de si misma, y como se llama el dominio. La ultima es
+    la mas debil y solo manda cuando el sitio no responde.
     """
 
-    puntaje, motivo = heuristic_score(domain)
+    evidencia = buscar_evidencia(domain)
+    puntaje_nombre, motivo_nombre = heuristic_score(domain)
+    puntaje_sitio, motivo_sitio = content_score(evidencia)
+
     fuente = "heuristic"
-    tipo = "llm_chat" if puntaje >= 0.6 else "non_ai"
-    confianza = puntaje
-    evidencia = motivo
+    # El nombre pesa menos que el sitio: hay negocios legitimos con "ia" en el
+    # nombre y servicios de IA que no lo tienen. Pero cuando el sitio no
+    # responde es lo unico que queda, y un "chatgpt-libre.co" no merece el
+    # beneficio de la duda.
+    confianza = max(puntaje_sitio, puntaje_nombre * 0.9)
+    razon = motivo_sitio if evidencia.reachable else motivo_nombre
+    tipo = "llm_chat" if confianza >= UMBRAL_IA else "non_ai"
 
     if ask_model is not None:
-        respuesta = _ask(ask_model, domain)
+        respuesta = _ask(ask_model, domain, evidencia)
         if respuesta is not None:
             fuente = "llm_classifier"
             tipo = respuesta.get("tipo", tipo)
             confianza = float(respuesta.get("confianza", confianza))
-            evidencia = str(respuesta.get("evidencia", evidencia))[:200]
+            razon = str(respuesta.get("evidencia", razon))[:200]
             if not respuesta.get("es_ia"):
                 tipo = "non_ai"
 
-    es_ia = tipo != "non_ai" and confianza >= 0.6
+    es_ia = tipo != "non_ai" and confianza >= UMBRAL_IA
     return Verdict(
         domain=domain.lower().strip("."),
         classification="ai_unapproved" if es_ia else "non_ai",
         kind=tipo,
         confidence=round(confianza, 2),
-        evidence=evidencia,
+        evidence=razon,
         source=fuente,
         classified_at=time.time(),
     )
 
 
-def _ask(ask_model, domain: str) -> dict | None:
-    import json
-
+def _ask(ask_model, domain: str, evidencia: Evidence) -> dict | None:
     try:
-        crudo = ask_model(_PROMPT.format(domain=domain))
+        crudo = ask_model(
+            _PROMPT.format(
+                domain=domain,
+                evidencia=evidencia.as_text() or "El sitio no respondio.",
+            )
+        )
         inicio = crudo.index("{")
         fin = crudo.rindex("}") + 1
         respuesta = json.loads(crudo[inicio:fin])
     except Exception:
-        # Si el modelo falla, queda la heuristica. Un backend caido no puede
-        # dejar sin veredicto a toda la red.
+        # Si el modelo falla, quedan el sitio y el nombre. Un backend a medias no
+        # puede dejar sin veredicto a toda la red.
         respuesta = None
     return respuesta
 
@@ -117,7 +207,6 @@ def anthropic_model():
     if not api_key:
         cliente = None
     else:
-        import json
         import urllib.request
 
         def cliente(prompt: str) -> str:

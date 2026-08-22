@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO / "backend"))
 from aegis_agent.domains import DomainClient  # noqa: E402
 from aegis_backend.app import serve  # noqa: E402
 from aegis_backend.classifier import classify, heuristic_score  # noqa: E402
+from aegis_backend.evidence import Evidence  # noqa: E402
 from aegis_backend.store import DomainStore, Verdict  # noqa: E402
 
 TIMEOUT = 6
@@ -76,6 +77,16 @@ class TestStore(unittest.TestCase):
         self.assertIsNotNone(store.get("IA-MAGICA.CO."))
 
 
+def sin_sitio(domain):
+    """Fetcher falso: los tests no salen a internet.
+
+    Un test que depende de que un dominio exista falla el dia que alguien lo
+    registra, y en la mitad de una demo.
+    """
+
+    return Evidence(domain=domain, reachable=False, error="sin red en los tests")
+
+
 class TestClasificador(unittest.TestCase):
     def test_un_nombre_con_senales_de_ia_puntua_alto(self):
         puntaje, _ = heuristic_score("chat-gpt-libre.com")
@@ -86,7 +97,7 @@ class TestClasificador(unittest.TestCase):
         self.assertLess(puntaje, 0.6)
 
     def test_sin_modelo_usa_la_heuristica(self):
-        veredicto = classify("asistente-ia-legal.co")
+        veredicto = classify("asistente-ia-legal.co", buscar_evidencia=sin_sitio)
         self.assertEqual(veredicto.source, "heuristic")
 
     def test_con_modelo_manda_el_modelo(self):
@@ -101,7 +112,7 @@ class TestClasificador(unittest.TestCase):
             )
 
         # Un dominio que la heuristica jamas marcaria: solo el modelo lo ve.
-        veredicto = classify("herramienta-productividad.co", modelo)
+        veredicto = classify("herramienta-productividad.co", modelo, sin_sitio)
         self.assertEqual(veredicto.source, "llm_classifier")
         self.assertEqual(veredicto.classification, "ai_unapproved")
 
@@ -109,7 +120,7 @@ class TestClasificador(unittest.TestCase):
         def modelo(_prompt: str) -> str:
             raise RuntimeError("la API no responde")
 
-        veredicto = classify("chatbot-ventas.co", modelo)
+        veredicto = classify("chatbot-ventas.co", modelo, sin_sitio)
         self.assertEqual(veredicto.source, "heuristic")
         self.assertEqual(veredicto.classification, "ai_unapproved")
 
@@ -120,7 +131,7 @@ class TestClasificador(unittest.TestCase):
             capturado["prompt"] = prompt
             return '{"es_ia": false, "tipo": "non_ai", "confianza": 0.9, "evidencia": "x"}'
 
-        classify("ejemplo.co", modelo)
+        classify("ejemplo.co", modelo, sin_sitio)
         self.assertIn("ejemplo.co", capturado["prompt"])
         self.assertIn("No incluyas contenido del usuario", capturado["prompt"])
 

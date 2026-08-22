@@ -11,6 +11,7 @@ from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for
 from ..policy import Classification, Policy, classify, decide, looks_like_ai_api
+from ..signals import SignalCollector
 from . import blockpage
 
 # Solo estos metodos llevan payload hacia afuera. Un GET a una IA aprobada no se
@@ -77,6 +78,9 @@ class Aegis:
         self.domains = DomainClient(
             enabled=os.environ.get("AEGIS_BACKEND_DISABLED") != "1"
         )
+        # Senales de comportamiento: lo unico que encuentra al shadow AI que no
+        # esta en ninguna lista y que tampoco parece nada por su nombre.
+        self.signals = SignalCollector()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
@@ -106,6 +110,24 @@ class Aegis:
                         payload_bytes=len(message.content),
                         truncated=result.truncated,
                     )
+
+    def response(self, flow: http.HTTPFlow) -> None:
+        """Mira como responde el servidor, no solo que le pidieron.
+
+        El streaming por eventos es la huella mas fiable de un modelo: casi
+        ningun servicio normal responde asi y casi todos los chats con modelo si.
+        """
+
+        host = flow.request.pretty_host
+        if classify(host, self.policy) == "non_ai" and flow.response is not None:
+            self.signals.observe_response(
+                host, flow.response.headers.get("Content-Type", "")
+            )
+            self._maybe_classify(host)
+
+    def _maybe_classify(self, host: str) -> None:
+        if self.signals.should_classify(host):
+            self.domains.request_classification(host)
 
     def _handle(self, flow: http.HTTPFlow) -> None:
         host = flow.request.pretty_host
@@ -156,11 +178,11 @@ class Aegis:
         # importan, porque el dato nunca estuvo yendo a un modelo.
         if classification == "non_ai":
             preview = body[:PREVIEW_BYTES].decode("utf-8", errors="replace")
-            if looks_like_ai_api(flow.request.path, preview):
+            tiene_forma = looks_like_ai_api(flow.request.path, preview)
+            self.signals.observe_request(host, tiene_forma, preview)
+            self._maybe_classify(host)
+            if tiene_forma:
                 classification = "ai_unknown"
-                # Se manda a clasificar para que la proxima vez el veredicto ya
-                # exista, aca y en todos los demas clientes de la red.
-                self.domains.request_classification(host)
 
         if classification != "non_ai":
             result = scan_payload(body, query)
