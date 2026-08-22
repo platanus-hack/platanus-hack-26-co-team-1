@@ -35,6 +35,8 @@ agent/tests/e2e/panel.png
 aegis-events.jsonl
 aegis-domains-cache.json
 aegis-domains.json
+# La politica que escribe el panel: es de la empresa que corre esto, no del repo.
+aegis-policies.json
 
 
 # Datos del panel desplegado, si se corre local
