@@ -67,7 +67,7 @@ h1, h2, h3, h4, h5, h6 {
   background: #cfc9b8;
 }
 
-/* Clases compartidas — en @layer components para que las utilidades de
+/* Clases compartidas (en @layer components) para que las utilidades de
    Tailwind (ej. text-aegis-accent aplicada junto a .aegis-label) siempre
    puedan sobreescribirlas, sin depender del orden en el HTML. */
 @layer components {

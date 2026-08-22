@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TabsComponent, TabItem } from '../../../shared/ui/tabs/tabs.component';
 import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
+import { colorForName } from '../../../shared/utils/color-hash';
 
 interface Herramienta {
   nombre: string;
@@ -35,6 +36,8 @@ interface Excepcion {
   templateUrl: './politicas.component.html',
 })
 export class PoliticasComponent {
+  protected readonly colorForName = colorForName;
+
   readonly tabs: TabItem[] = [
     { id: 'herramientas', label: 'Herramientas y URLs' },
     { id: 'dlp', label: 'Reglas de DLP' },
@@ -52,6 +55,21 @@ export class PoliticasComponent {
     { nombre: 'Gemini', permitida: false },
     { nombre: 'GitHub Copilot', permitida: true },
   ];
+
+  // URLs que se cortan siempre, más allá de qué herramienta las sirva (ej. deepseek.com, grok.com).
+  urlsBloqueadas: string[] = ['deepseek.com', 'grok.com'];
+  nuevaUrlBloqueada = '';
+
+  agregarUrlBloqueada(): void {
+    const url = this.nuevaUrlBloqueada.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (!url || this.urlsBloqueadas.includes(url)) return;
+    this.urlsBloqueadas = [...this.urlsBloqueadas, url];
+    this.nuevaUrlBloqueada = '';
+  }
+
+  quitarUrlBloqueada(url: string): void {
+    this.urlsBloqueadas = this.urlsBloqueadas.filter((u) => u !== url);
+  }
 
   excepciones: Excepcion[] = [
     { tipo: 'Perfil', detalle: 'Equipo de I+D', alcances: ['Todas las IAs permitidas'] },

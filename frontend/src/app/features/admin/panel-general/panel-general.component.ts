@@ -1,28 +1,21 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { StatTileComponent } from '../../../shared/ui/stat-tile/stat-tile.component';
 import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
+import { AvatarStackComponent } from '../../../shared/ui/avatar-stack/avatar-stack.component';
+import { COLABORADORES } from '../../../shared/data/colaboradores';
 
 interface Ranking {
   nombre: string;
   valor: number;
 }
 
-interface ColaboradorResumen {
-  id: string;
-  nombre: string;
-  area: string;
-  estado: 'pendiente' | 'activo';
-  intentos: number;
-}
-
 /** Panel general: dashboard agregado semanal con widgets de actividad DLP. */
 @Component({
   selector: 'app-panel-general',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, StatTileComponent, BadgeComponent],
+  imports: [CommonModule, RouterLink, StatTileComponent, BadgeComponent, AvatarStackComponent],
   templateUrl: './panel-general.component.html',
 })
 export class PanelGeneralComponent {
@@ -50,18 +43,14 @@ export class PanelGeneralComponent {
     { nombre: 'Copilot', valor: 5 },
   ];
 
-  colaboradores: ColaboradorResumen[] = [
-    { id: '1', nombre: 'Marcos Iñiguez', area: 'Contabilidad', estado: 'activo', intentos: 9 },
-    { id: '2', nombre: 'Renata Sotomayor', area: 'Marketing', estado: 'pendiente', intentos: 0 },
-    { id: '3', nombre: 'Tobías Fuentes', area: 'Ingeniería', estado: 'activo', intentos: 2 },
-    { id: '4', nombre: 'Camila Ordóñez', area: 'Contabilidad', estado: 'activo', intentos: 6 },
-  ];
+  // Solo quienes tienen algo que revisar esta semana: el directorio completo vive en /admin/colaboradores.
+  readonly colaboradores = COLABORADORES.filter((c) => c.intentos > 0).sort((a, b) => b.intentos - a.intentos);
 
   max(lista: Ranking[]): number {
     return Math.max(...lista.map((x) => x.valor));
   }
 
   get pendientes(): number {
-    return this.colaboradores.filter((c) => c.estado === 'pendiente').length;
+    return COLABORADORES.filter((c) => c.estado === 'pendiente').length;
   }
 }

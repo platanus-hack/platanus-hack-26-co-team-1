@@ -12,7 +12,9 @@
   </header>
 
   <section class="relative overflow-hidden border-t border-aegis-border">
-    <div class="mx-auto grid max-w-6xl grid-cols-1 items-center gap-4 px-6 py-16 sm:px-10 lg:grid-cols-[1.1fr_0.9fr] lg:py-24">
+    <app-particles-field color="#0e5fa8"></app-particles-field>
+
+    <div class="relative mx-auto grid max-w-6xl grid-cols-1 items-center gap-4 px-6 py-16 sm:px-10 lg:grid-cols-[1.1fr_0.9fr] lg:py-24">
       <div>
         <span class="aegis-label mb-6 inline-block animate-riseIn">DLP conversacional para equipos que usan IA</span>
 
@@ -45,7 +47,66 @@
     </div>
   </section>
 
-  <section id="problema" class="border-t border-aegis-border px-6 py-24 sm:px-10">
+  <section class="px-6 py-16 sm:px-10">
+    <div class="relative mx-auto max-w-6xl">
+      <app-scroll-grow style="background: linear-gradient(155deg, #0e5fa8 0%, #072e4d 100%)">
+        <app-gradient-waves></app-gradient-waves>
+      </app-scroll-grow>
+
+      <div class="relative z-10 grid grid-cols-1 gap-10 p-8 sm:p-12 lg:grid-cols-[0.85fr_1fr_1fr]">
+        <div>
+          <app-logo [light]="true"></app-logo>
+          <p class="mt-4 max-w-xs text-sm leading-relaxed text-white/70">DLP conversacional que corre en tu equipo, no en la nube. Así funciona por dentro.</p>
+        </div>
+
+        <div>
+          <span class="font-display text-[11px] uppercase tracking-[0.13em] text-white/50">Cómo funciona</span>
+          <ol class="mt-4 flex flex-col gap-3.5 text-sm leading-relaxed text-white/85">
+            <li class="flex gap-3">
+              <span class="mt-0.5 shrink-0 font-display text-xs font-semibold text-aegis-highlight">01</span>
+              <span>Un proxy local (con certificado propio) intercepta el tráfico hacia servicios de IA: CLI, navegador, IDE o app de escritorio.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="mt-0.5 shrink-0 font-display text-xs font-semibold text-aegis-highlight">02</span>
+              <span>Cada envío pasa por dos capas de detección: reglas deterministas al instante, y un modelo liviano para lo que las reglas no cubren.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="mt-0.5 shrink-0 font-display text-xs font-semibold text-aegis-highlight">03</span>
+              <span>La decisión de bloquear es 100% local: sin conexión, Aegis te sigue protegiendo.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="mt-0.5 shrink-0 font-display text-xs font-semibold text-aegis-highlight">04</span>
+              <span>A la nube solo suben eventos ya redactados (nunca el contenido real de lo que escribiste).</span>
+            </li>
+          </ol>
+        </div>
+
+        <div>
+          <span class="font-display text-[11px] uppercase tracking-[0.13em] text-white/50">Qué hace</span>
+          <ul class="mt-4 flex flex-col gap-3.5 text-sm leading-relaxed text-white/85">
+            <li class="flex gap-3">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 bg-aegis-highlight"></span>
+              <span>Detecta shadow AI: servicios no aprobados, incluso los que nadie catalogó todavía, por cómo se comportan.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 bg-aegis-highlight"></span>
+              <span>Catálogo de más de 110 servicios de IA reconocidos de entrada.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 bg-aegis-highlight"></span>
+              <span>Panel para la empresa: quién reincide, qué áreas están más expuestas, qué se intentó enviar.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="mt-1.5 h-1.5 w-1.5 shrink-0 bg-aegis-highlight"></span>
+              <span>Modo estricto (corta el acceso) o equilibrado (deja usar la herramienta, pero nunca deja salir un dato sensible).</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="problema" class="border-t border-aegis-border px-6 py-20 sm:px-10">
     <div class="mx-auto max-w-6xl">
       <div class="max-w-xl">
         <span class="aegis-label text-aegis-accent">El problema</span>
@@ -57,7 +118,7 @@
         </p>
       </div>
 
-      <div class="mt-14 flex flex-col gap-6 border-y border-aegis-border py-12 lg:flex-row lg:items-center lg:gap-16">
+      <div class="mt-14 flex flex-col gap-6 border-b border-aegis-border pb-12 lg:flex-row lg:items-center lg:gap-16">
         <span class="shrink-0 whitespace-nowrap text-5xl font-semibold tracking-[-0.03em] text-aegis-highlight sm:text-6xl lg:text-7xl">
           <app-count-up [target]="headlineStat.from" suffix="%"></app-count-up>
           <span class="mx-1 inline-block">→</span>
@@ -69,9 +130,9 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-aegis-border">
         @for (stat of stats; track stat.target) {
-          <div class="flex flex-col gap-3 border-b border-aegis-border py-8 lg:border-b-0 lg:border-r lg:pr-6 last:lg:border-r-0 lg:[&:not(:first-child)]:pl-6">
+          <div class="flex flex-col gap-3 border-b border-aegis-border py-8 lg:border-b-0 lg:px-6 lg:first:pl-0 lg:last:pr-0">
             <span class="text-3xl font-semibold tracking-[-0.03em] text-aegis-accent">
               <app-count-up [target]="stat.target" suffix="%"></app-count-up>
             </span>
@@ -83,14 +144,14 @@
     </div>
   </section>
 
-  <section id="como-funciona" class="border-t border-aegis-border px-6 py-24 sm:px-10">
+  <section id="como-funciona" class="px-6 py-16 sm:px-10">
     <div class="mx-auto max-w-6xl">
       <span class="aegis-label text-aegis-accent">Cómo funciona</span>
       <h2 class="mt-3 max-w-xl text-3xl font-semibold tracking-[-0.02em] text-aegis-text sm:text-4xl">
         Instálalo una vez, olvídate del resto
       </h2>
 
-      <div class="mt-14 grid grid-cols-1 gap-10 border-t border-aegis-border pt-10 sm:grid-cols-3">
+      <div class="mt-10 grid grid-cols-1 gap-10 border-t border-aegis-border pt-10 sm:grid-cols-3">
         @for (paso of pasos; track paso.titulo; let i = $index) {
           <div>
             <span class="block text-4xl font-medium text-aegis-accent/25">0{{ i + 1 }}</span>
@@ -102,7 +163,7 @@
     </div>
   </section>
 
-  <section class="border-t border-aegis-border px-6 py-24 sm:px-10">
+  <section class="px-6 py-16 sm:px-10">
     <div class="mx-auto grid max-w-6xl grid-cols-1 gap-px bg-aegis-border lg:grid-cols-2">
       <div class="relative flex flex-col justify-between gap-16 overflow-hidden p-8 sm:p-12" style="background: linear-gradient(155deg, #0e5fa8 0%, #0a4879 100%)">
         <app-gradient-waves></app-gradient-waves>

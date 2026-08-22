@@ -2,6 +2,7 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { BadgeComponent, BadgeTone } from '../../../shared/ui/badge/badge.component';
+import { AvatarStackComponent } from '../../../shared/ui/avatar-stack/avatar-stack.component';
 
 interface Intento {
   fecha: string;
@@ -80,13 +81,91 @@ const DATA: Record<string, ColaboradorDetalle> = {
       { fecha: '10 ago, 2026', herramienta: 'ChatGPT', regla: 'Campañas activas', accion: 'Advertido' },
     ],
   },
+  '5': {
+    nombre: 'Ismael Vega',
+    cargo: 'Growth marketer',
+    area: 'Marketing',
+    instaladoDesde: '9 de febrero, 2026',
+    herramientas: [
+      { nombre: 'ChatGPT', porcentaje: 70 },
+      { nombre: 'Claude', porcentaje: 30 },
+    ],
+    temas: ['Copy de campañas', 'Investigación de mercado', 'Redacción de correos'],
+    intentos: [
+      { fecha: '17 ago, 2026', herramienta: 'ChatGPT', regla: 'Campañas activas', accion: 'Advertido' },
+      { fecha: '09 ago, 2026', herramienta: 'ChatGPT', regla: 'Lista de clientes', accion: 'Advertido' },
+      { fecha: '30 jul, 2026', herramienta: 'Claude', regla: 'Estrategia de negocio', accion: 'Registrado' },
+    ],
+  },
+  '6': {
+    nombre: 'Valentina Rojas',
+    cargo: 'Frontend engineer',
+    area: 'Ingeniería',
+    instaladoDesde: '22 de mayo, 2026',
+    herramientas: [
+      { nombre: 'Copilot', porcentaje: 55 },
+      { nombre: 'Claude Code', porcentaje: 45 },
+    ],
+    temas: ['Componentes de UI', 'Debugging'],
+    intentos: [],
+  },
+  '7': {
+    nombre: 'Joaquín Herrera',
+    cargo: 'DevOps engineer',
+    area: 'Ingeniería',
+    instaladoDesde: '14 de junio, 2026',
+    herramientas: [
+      { nombre: 'Claude Code', porcentaje: 62 },
+      { nombre: 'ChatGPT', porcentaje: 38 },
+    ],
+    temas: ['Infraestructura', 'Scripts de despliegue'],
+    intentos: [
+      { fecha: '11 ago, 2026', herramienta: 'Claude Code', regla: 'Bases de datos', accion: 'Registrado' },
+    ],
+  },
+  '8': {
+    nombre: 'Fernanda Lagos',
+    cargo: 'Abogada corporativa',
+    area: 'Legal',
+    instaladoDesde: '3 de agosto, 2026',
+    herramientas: [{ nombre: 'ChatGPT', porcentaje: 100 }],
+    temas: ['Redacción de contratos'],
+    intentos: [],
+  },
+  '9': {
+    nombre: 'Cristóbal Muñoz',
+    cargo: 'Data engineer',
+    area: 'Ingeniería',
+    instaladoDesde: '6 de abril, 2026',
+    herramientas: [
+      { nombre: 'Claude', porcentaje: 54 },
+      { nombre: 'Gemini CLI', porcentaje: 46 },
+    ],
+    temas: ['Pipelines de datos', 'Consultas SQL'],
+    intentos: [
+      { fecha: '21 ago, 2026', herramienta: 'Gemini CLI', regla: 'Bases de datos', accion: 'Bloqueado' },
+      { fecha: '16 ago, 2026', herramienta: 'Gemini CLI', regla: 'Credenciales', accion: 'Bloqueado' },
+      { fecha: '08 ago, 2026', herramienta: 'Claude', regla: 'Estrategia de negocio', accion: 'Advertido' },
+      { fecha: '01 ago, 2026', herramienta: 'Gemini CLI', regla: 'API keys', accion: 'Bloqueado' },
+    ],
+    estrategiaSugerida: 'Cristóbal corre consultas de producción a través de Gemini CLI, una herramienta no aprobada (ver Agent Inventory). Antes de una capacitación sobre credenciales, conviene resolver el acceso: probablemente lo usa porque cubre algo que sus herramientas aprobadas no hacen.',
+  },
+  '10': {
+    nombre: 'Bárbara Concha',
+    cargo: 'Reclutadora',
+    area: 'RR.HH.',
+    instaladoDesde: 'Aún no instala la app',
+    herramientas: [],
+    temas: [],
+    intentos: [],
+  },
 };
 
 /** Vista de detalle de un colaborador, accedida desde el panel general. */
 @Component({
   selector: 'app-panel-colaborador',
   standalone: true,
-  imports: [CommonModule, RouterLink, BadgeComponent],
+  imports: [CommonModule, RouterLink, BadgeComponent, AvatarStackComponent],
   templateUrl: './panel-colaborador.component.html',
 })
 export class PanelColaboradorComponent {
