@@ -64,6 +64,21 @@ Las investigaciones que sustentan estas decisiones viven **fuera del repo**, en
 | [0002](docs/adr/0002-el-proxy-es-el-producto.md) | El proxy es el producto; las integraciones por aplicación son opcionales |
 | [0003](docs/adr/0003-frontera-de-datos-local-decide-remoto-ensena.md) | Lo local decide, lo remoto enseña: el contenido interceptado nunca sale del equipo |
 
+## Dos modos, y la empresa elige
+
+| Modo | Qué hace con una IA no aprobada |
+|---|---|
+| `equilibrado` (por defecto) | La deja usar y analiza cada envío. El sitio abre normal, el trabajo fluye, y lo que no sale es el dato sensible. El uso queda registrado igual, así que el panel sigue mostrando el shadow AI. |
+| `estricto` | Corta el destino. Nadie usa lo que no está aprobado. |
+
+```bash
+AEGIS_MODO=estricto      # o equilibrado
+```
+
+El equilibrado es el que sostiene una empresa real: bloquear la herramienta que
+la gente ya usa termina en excepciones, VPNs y teléfonos personales, que es
+exactamente donde nadie ve nada.
+
 ## Qué detecta
 
 No solo credenciales. Tres familias, veinte reglas y una señal de volumen:
@@ -107,6 +122,12 @@ python -m aegis_agent.install.windows uninstall   # revierte todo
 
 Medido en un portátil, sin GPU: un prompt típico se inspecciona en **0.16 ms**, y un archivo de
 44.000 caracteres en 29 ms. La decisión de bloquear no hace una sola llamada de red.
+
+## Panel desplegado
+
+https://aegis-theta-eight.vercel.app — el mismo código de métricas y render que
+corre local. Con `AEGIS_EVENTS_URL` apuntando ahí, el agente sube sus eventos
+redactados en segundo plano y el panel los muestra en vivo.
 
 ## Contexto
 

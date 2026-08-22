@@ -79,7 +79,9 @@ eso que estan.</p>
     )
 
 
-def content_blocked(host: str, rule_id: str, evidence: str, lesson: dict[str, str]) -> str:
+def content_blocked(
+    host: str, rule_id: str, evidence: str, lesson: dict[str, str], aprobada: bool = True
+) -> str:
     lesson_html = f"""<section class="lesson">
 <h2>{escape(lesson["title"])}</h2>
 <p>{escape(lesson["why"])}</p>
@@ -90,8 +92,19 @@ def content_blocked(host: str, rule_id: str, evidence: str, lesson: dict[str, st
         lead=(
             f"El destino ({host}) es una herramienta aprobada, asi que podes seguir "
             "usandola. Lo que Aegis freno es el dato, no la herramienta."
+            if aprobada
+            else (
+                f"Aegis no te corta {host}: podes seguir usandolo para trabajo "
+                "normal. Lo que freno es este envio en concreto, porque lleva "
+                "informacion que no puede salir de la empresa."
+            )
         ),
-        rows=[("Destino", host), ("Deteccion", rule_id), ("Evidencia", evidence)],
+        rows=[
+            ("Destino", host),
+            ("Estado", "aprobada por tu empresa" if aprobada else "no aprobada"),
+            ("Deteccion", rule_id),
+            ("Evidencia", evidence),
+        ],
         lesson_html=lesson_html,
         foot="Aegis nunca envio el contenido a ningun lado. El analisis ocurrio en tu equipo.",
     )

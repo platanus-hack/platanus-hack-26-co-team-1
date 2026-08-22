@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 
 from mitmproxy import http
 
@@ -26,6 +28,9 @@ _HTML_HEADERS = {"Content-Type": "text/html; charset=utf-8"}
 _JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 
 _WS_REDACTED = "[Aegis bloqueo este mensaje: contenia informacion sensible]"
+
+# Cada cuanto se vuelve a registrar el uso de una misma herramienta no aprobada.
+PAUSA_USO = 600
 
 
 def _is_navigation(flow: http.HTTPFlow) -> bool:
@@ -81,6 +86,8 @@ class Aegis:
         # Senales de comportamiento: lo unico que encuentra al shadow AI que no
         # esta en ninguna lista y que tampoco parece nada por su nombre.
         self.signals = SignalCollector()
+        self._ultimo_uso: dict[str, float] = {}
+        self._lock_uso = threading.Lock()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
@@ -138,9 +145,17 @@ class Aegis:
             if compartido == "ai_unapproved":
                 classification = "ai_unapproved"
 
-        if classification == "ai_unapproved":
+        corta_destino = (
+            classification == "ai_unapproved"
+            and self.policy.unapproved_ai_action == "block_destination"
+        )
+        if corta_destino:
             self._block_destination(flow, host, classification)
         else:
+            if classification == "ai_unapproved":
+                # Aunque se deje pasar, el uso de una herramienta no aprobada es
+                # justamente lo que la empresa necesita ver en el panel.
+                self._registrar_uso(host, classification)
             if flow.request.method in METHODS_WITH_PAYLOAD and classification != "passthrough":
                 self._inspect(flow, host, classification)
 
@@ -203,7 +218,11 @@ class Aegis:
                 _deny(
                     flow,
                     blockpage.content_blocked(
-                        host, worst.rule_id, worst.evidence, leccion
+                        host,
+                        worst.rule_id,
+                        worst.evidence,
+                        leccion,
+                        aprobada=classification == "ai_approved",
                     ),
                     f"Aegis bloqueo el envio: {leccion['title']}. "
                     f"{leccion['what_to_do']}",
@@ -222,6 +241,28 @@ class Aegis:
                         payload_bytes=len(body),
                         truncated=result.truncated,
                     )
+
+    def _registrar_uso(self, host: str, classification: Classification) -> None:
+        """Un evento por dominio cada tanto, no uno por peticion.
+
+        Una sola pestana de chat dispara decenas de peticiones por minuto: sin
+        esta pausa el panel se vuelve ilegible y la cola, inutil.
+        """
+
+        ahora = time.time()
+        with self._lock_uso:
+            reciente = ahora - self._ultimo_uso.get(host, 0) < PAUSA_USO
+            if not reciente:
+                self._ultimo_uso[host] = ahora
+        if not reciente:
+            self._record(
+                host=host,
+                classification=classification,
+                finding=None,
+                action="allowed",
+                payload_bytes=0,
+                truncated=False,
+            )
 
     def _record(
         self,

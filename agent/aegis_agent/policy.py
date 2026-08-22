@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -25,6 +26,25 @@ PASSTHROUGH_DOMAINS: frozenset[str] = frozenset(
 )
 
 
+# Dos formas de tratar una IA no aprobada, y la eleccion es de la empresa:
+#
+#   estricto     se corta el destino. Nadie usa lo que no esta aprobado.
+#   equilibrado  se deja usar, pero se inspecciona cada envio y no sale ni un
+#                dato sensible. El uso queda igual registrado en el panel, asi
+#                que la visibilidad del shadow AI no se pierde.
+#
+# El segundo es mas facil de sostener en una empresa real: bloquear la
+# herramienta que la gente ya usa termina en excepciones, VPNs y telefonos
+# personales, que es exactamente donde nadie ve nada.
+MODOS: dict[str, str] = {"estricto": "block_destination", "equilibrado": "inspect"}
+MODO_POR_DEFECTO = "equilibrado"
+
+
+def _accion_para_no_aprobadas() -> str:
+    modo = os.environ.get("AEGIS_MODO", MODO_POR_DEFECTO).strip().lower()
+    return MODOS.get(modo, MODOS[MODO_POR_DEFECTO])
+
+
 @dataclass(frozen=True)
 class Policy:
     """Politica de la empresa. En produccion llega del backend y se cachea en disco."""
@@ -35,6 +55,7 @@ class Policy:
     # seguro; para la demo se advierte, que es lo que pediria una empresa real
     # antes de frenarle el trabajo a la gente.
     unknown_domain_action: Action = "warn"
+    unapproved_ai_action: str = field(default_factory=_accion_para_no_aprobadas)
     block_categories: frozenset[str] = field(
         default_factory=lambda: frozenset({"secret", "internal_data"})
     )
@@ -159,7 +180,7 @@ def decide(classification: Classification, categories: set[str], policy: Policy)
     if classification in ("passthrough", "non_ai"):
         action: Action = "allow"
     else:
-        if classification == "ai_unapproved":
+        if classification == "ai_unapproved" and policy.unapproved_ai_action == "block_destination":
             action = "block_destination"
         else:
             if categories & policy.block_categories:

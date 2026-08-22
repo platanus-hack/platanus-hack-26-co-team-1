@@ -11,7 +11,10 @@ import unittest
 from aegis_agent.catalog import AI_DOMAINS, CATEGORIES, category_of
 from aegis_agent.policy import Policy, classify, decide, looks_like_ai_api
 
-POLICY = Policy()
+# La clasificacion no depende del modo; la accion si. Se fijan los dos de forma
+# explicita para que estos tests no cambien de significado si cambia el default.
+POLICY = Policy(unapproved_ai_action="block_destination")
+PERMISIVA = Policy(unapproved_ai_action="inspect")
 UNAPPROVED = sorted(AI_DOMAINS - POLICY.approved_ai)
 
 
@@ -55,6 +58,35 @@ class TestCatalogoCompleto(unittest.TestCase):
         for name in ("meetings", "writing", "code", "model_api", "media"):
             with self.subTest(categoria=name):
                 self.assertGreaterEqual(len(CATEGORIES[name]), 8)
+
+
+class TestModoEquilibrado(unittest.TestCase):
+    """Con la politica permisiva no se corta el sitio, se corta el envio.
+
+    Es la forma que sostiene una empresa real: bloquear la herramienta que la
+    gente ya usa termina en excepciones, VPNs y telefonos personales, que es
+    exactamente donde nadie ve nada.
+    """
+
+    def test_la_ia_no_aprobada_se_puede_usar(self):
+        for domain in UNAPPROVED[:15]:
+            with self.subTest(domain=domain):
+                self.assertEqual(classify(domain, PERMISIVA), "ai_unapproved")
+                self.assertEqual(decide("ai_unapproved", set(), PERMISIVA), "allow")
+
+    def test_pero_no_sale_un_secreto(self):
+        self.assertEqual(decide("ai_unapproved", {"secret"}, PERMISIVA), "block_content")
+
+    def test_ni_datos_internos(self):
+        self.assertEqual(
+            decide("ai_unapproved", {"internal_data"}, PERMISIVA), "block_content"
+        )
+
+    def test_un_dato_personal_suelto_advierte(self):
+        self.assertEqual(decide("ai_unapproved", {"pii"}, PERMISIVA), "warn")
+
+    def test_el_modo_estricto_sigue_cortando(self):
+        self.assertEqual(decide("ai_unapproved", set(), POLICY), "block_destination")
 
 
 class TestShadowAiSinCatalogar(unittest.TestCase):

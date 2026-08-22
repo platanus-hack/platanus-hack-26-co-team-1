@@ -48,7 +48,14 @@ def _port_open(port: int) -> bool:
 
 
 class ProxyHarness:
-    """Mixin para tests que necesitan el proxy y un navegador."""
+    """Mixin para tests que necesitan el proxy y un navegador.
+
+    MODO decide que hace el agente con una IA no aprobada. Se fija por clase y no
+    por variable de entorno global para que las dos politicas se puedan probar en
+    la misma corrida.
+    """
+
+    MODO = "estricto"
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -61,6 +68,7 @@ class ProxyHarness:
         env["PYTHONPATH"] = str(AGENT_ROOT)
         # Los e2e no dependen del backend: lo que se prueba aca es el agente.
         env["AEGIS_BACKEND_DISABLED"] = "1"
+        env["AEGIS_MODO"] = cls.MODO
         env["AEGIS_DOMAIN_CACHE"] = str(Path(cls.workdir.name) / "dominios.json")
 
         cls.proxy = subprocess.Popen(
