@@ -39,3 +39,4 @@ aegis-domains.json
 
 # Datos del panel desplegado, si se corre local
 eventos.jsonl
+aegis-lessons-cache.json

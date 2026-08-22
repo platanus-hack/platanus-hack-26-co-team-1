@@ -203,7 +203,12 @@ def _ask(ask_model, domain: str, evidencia: Evidence) -> dict | None:
 def anthropic_model():
     """Cliente real, solo si hay API key en el entorno. Si no, devuelve None."""
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    # No solo del entorno: ver secretos.py, poner ANTHROPIC_API_KEY como
+    # variable de usuario le cambia la autenticacion a los CLI de IA de esa
+    # maquina.
+    from .secretos import cargar
+
+    api_key = cargar("ANTHROPIC_API_KEY")
     if not api_key:
         cliente = None
     else:

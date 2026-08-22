@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import json
+import os
+import threading
+import urllib.error
+import urllib.request
+from pathlib import Path
+
 # Lecciones locales de respaldo. La version buena la genera el backend con un LLM
 # a partir del evento redactado (ADR 0003), pero el bloqueo no puede esperar a la
 # red: si el backend no responde, el empleado igual tiene que entender que paso.
+#
+# El orden es el mismo que usa domains.py y por la misma razon: se lee del cache
+# en disco, siempre, y la red solo actualiza ese cache en segundo plano. La
+# consecuencia hay que decirla en voz alta: a la PRIMERA persona a la que se le
+# corta una regla le toca la leccion escrita a mano, y a partir de ahi la
+# generada. Es el precio de que la red nunca este en el camino de la proteccion,
+# y es el precio correcto.
 
 _DEFAULT = {
     "title": "Esta informacion no deberia salir de la empresa",
@@ -141,5 +155,88 @@ _BY_RULE: dict[str, dict[str, str]] = {
 }
 
 
+RUTA_CACHE = Path(
+    os.environ.get("AEGIS_LESSONS_CACHE", "aegis-lessons-cache.json")
+)
+
+TIMEOUT = 20
+
+_lock = threading.Lock()
+_pedidas: set[str] = set()
+
+
+def _cache() -> dict[str, dict[str, str]]:
+    """Lo que ya escribio el modelo, de disco. Un cache ilegible no es un error."""
+
+    try:
+        datos = json.loads(RUTA_CACHE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        datos = {}
+    return datos if isinstance(datos, dict) else {}
+
+
+def _guardar(rule_id: str, leccion: dict) -> None:
+    datos = _cache()
+    datos[rule_id] = {
+        "title": leccion.get("title", ""),
+        "why": leccion.get("why", ""),
+        "what_to_do": leccion.get("what_to_do", ""),
+    }
+    try:
+        RUTA_CACHE.write_text(
+            json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        # Sin disco donde escribir se pierde el cache, no la leccion: la proxima
+        # vez se vuelve a pedir y mientras tanto queda la escrita a mano.
+        pass
+
+
 def lesson_for(rule_id: str) -> dict[str, str]:
-    return _BY_RULE.get(rule_id, _DEFAULT)
+    """La leccion para una regla: la generada si ya existe, si no la de siempre."""
+
+    generada = _cache().get(rule_id)
+    completa = isinstance(generada, dict) and all(
+        generada.get(clave) for clave in ("title", "why", "what_to_do")
+    )
+    return generada if completa else _BY_RULE.get(rule_id, _DEFAULT)
+
+
+def pedir_en_segundo_plano(evento: dict, url_base: str, repeticiones: int = 0) -> None:
+    """Le pide al backend la leccion de esta regla, para la proxima vez.
+
+    No devuelve nada y nadie la espera: el bloqueo ya se resolvio con lo que
+    habia en disco. Se pide una sola vez por regla y por proceso, porque el
+    backend ya cachea y no tiene sentido pagar dos veces la misma llamada.
+    """
+
+    rule_id = ((evento.get("detection") or {}).get("rule_id")) or ""
+    if not rule_id:
+        return
+
+    with _lock:
+        if rule_id in _pedidas or rule_id in _cache():
+            return
+        _pedidas.add(rule_id)
+
+    def _tarea() -> None:
+        try:
+            cuerpo = json.dumps(
+                {"event": evento, "repeticiones": repeticiones}
+            ).encode()
+            peticion = urllib.request.Request(
+                f"{url_base.rstrip('/')}/v1/lessons",
+                data=cuerpo,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(peticion, timeout=TIMEOUT) as respuesta:
+                leccion = json.loads(respuesta.read())
+            if leccion.get("generada_por") in ("modelo", "cache"):
+                _guardar(rule_id, leccion)
+        except (urllib.error.URLError, OSError, ValueError, TypeError):
+            # Backend caido, sin red o respuesta rara: queda la leccion escrita a
+            # mano y se puede volver a pedir en el proximo arranque.
+            with _lock:
+                _pedidas.discard(rule_id)
+
+    threading.Thread(target=_tarea, daemon=True).start()

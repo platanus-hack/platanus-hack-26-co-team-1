@@ -13,7 +13,7 @@ from ..detect.payload import ScanResult, scan_payload
 from ..domains import DomainClient
 from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
-from ..lessons import lesson_for
+from ..lessons import lesson_for, pedir_en_segundo_plano
 from ..policy import (
     Classification,
     Policy,
@@ -331,7 +331,7 @@ class Aegis:
             worst = result.findings[0] if result.findings else None
 
             if action == "block_content" and worst is not None:
-                self._record(
+                evento = self._record(
                     host=host,
                     classification=classification,
                     finding=worst,
@@ -339,6 +339,13 @@ class Aegis:
                     payload_bytes=len(body),
                     truncated=result.truncated,
                 )
+                # La leccion sale del cache en disco, siempre. Esto solo le pide
+                # al backend la version generada para la PROXIMA vez: nadie la
+                # espera y el bloqueo ya esta resuelto.
+                if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
+                    pedir_en_segundo_plano(
+                        evento, os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686")
+                    )
                 leccion = lesson_for(worst.rule_id)
                 _deny(
                     flow,
@@ -398,7 +405,7 @@ class Aegis:
         action: str,
         payload_bytes: int,
         truncated: bool,
-    ) -> None:
+    ) -> dict:
         event = build_event(
             tenant_id=self.policy.tenant_id,
             user_id=self.user_id,
@@ -412,6 +419,7 @@ class Aegis:
             truncated=truncated,
         )
         enqueue(event, self.queue)
+        return event
 
 
 # Aca NO va `addons = [Aegis()]`. mitmproxy carga el addon desde aegis_mitm.py,

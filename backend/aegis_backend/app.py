@@ -7,6 +7,7 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import lecciones
 from .classifier import anthropic_model, classify
 from .store import DomainStore, PolicyStore, Verdict
 
@@ -89,7 +90,17 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self._send(202, {"accepted": evento.get("event_id")})
         else:
             if self.path.startswith("/v1/lessons"):
-                self._send(200, _lesson(self._body()))
+                peticion = self._body()
+                # Misma frontera que en /v1/events, y por la misma razon: el
+                # endpoint es publico y no puede depender de que el agente se
+                # porte bien. Una leccion no necesita el contenido.
+                if _carries_content(peticion.get("event") or peticion):
+                    self._send(422, {"error": "el evento contiene campos prohibidos"})
+                else:
+                    self._send(
+                        200,
+                        lecciones.generar(peticion, self.ask_model, _CACHE_DE_LECCIONES),
+                    )
             else:
                 self._send(404, {"error": "ruta desconocida"})
 
@@ -144,12 +155,10 @@ def _policy() -> dict:
     }
 
 
-def _lesson(peticion: dict) -> dict:
-    return {
-        "event_id": peticion.get("event_id"),
-        "title": "Revisa que estas compartiendo",
-        "body": "El agente bloqueo el envio. Consulta la leccion en tu equipo.",
-    }
+# La cache vive en el modulo y no en la peticion: dos empleados a los que se les
+# corta la misma regla hacia el mismo tipo de destino merecen la misma leccion, y
+# generarla dos veces es pagarla dos veces.
+_CACHE_DE_LECCIONES: dict[tuple, dict] = {}
 
 
 def serve(
