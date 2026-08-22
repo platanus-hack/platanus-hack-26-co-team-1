@@ -39,6 +39,13 @@ destino y lo reportamos como *tráfico no inspeccionable*.
 | E | **Sensor de conexiones por proceso** | Todo el equipo | No, solo destino | Baja | **Sí** |
 | F | Red / DNS (firewall, DNS filtering) | Todo el dispositivo | No | N/A (infra) | No aplica |
 
+> **Cuál de estas capas es el producto.** La cobertura la da **C**, porque intercepta por destino y
+> no por aplicación: el mismo código cubre ChatGPT en el navegador, Cursor, un script de Python o
+> una app de escritorio que nadie sabe que está instalada. La capa **A** es una *mejora opcional*
+> sobre herramientas concretas — agrega contexto y un canal de vuelta, pero no se construye
+> cobertura herramienta por herramienta, porque el shadow AI es justamente aquella para la que
+> nadie escribió una integración. Ver [ADR 0002](../adr/0002-el-proxy-es-el-producto.md).
+
 La capa D es la que uno imagina cuando dice "interceptar todo", y es lo que hacen Zscaler, Netskope
 o CrowdStrike. Es también la que **no** se construye en un fin de semana: en macOS un
 `NETransparentProxyProvider` exige un *system extension* con entitlement aprobado por Apple, y en
@@ -63,9 +70,10 @@ propio Claude Code.
   JSON de decisión.
 
 Esto nos da, sin drivers ni certificados: el texto en claro, el archivo que se está adjuntando, el
-comando que se va a correr — y **un canal de vuelta para explicarle al usuario por qué se bloqueó**.
-Ese canal es literalmente el producto: la intervención pedagógica en el momento exacto del error.
-Con *managed settings* (política gestionada por la empresa) el empleado no puede desactivarlo.
+comando que se va a correr — y **un canal de vuelta para explicarle al usuario por qué se bloqueó**,
+que es el mejor lugar posible para la intervención pedagógica dentro de esa herramienta. Con
+*managed settings* (política gestionada por la empresa) el empleado no puede desactivarlo. Pero es
+un complemento del proxy, no un sustituto: cubre una herramienta, no la máquina.
 
 **Gateway.** La otra vía para Claude Code es `ANTHROPIC_BASE_URL`: apuntar el CLI a un endpoint
 propio compatible con la API de Anthropic, que inspecciona, decide y reenvía. Ve el request completo
@@ -231,11 +239,14 @@ Dos principios que sostienen esto:
 ### Qué construir, en orden
 
 1. **Aegis Agent** — proxy MITM local, generación e instalación de la CA, instalador de un comando.
-2. **Hook de Claude Code** — la demo estrella: el bloqueo y la lección se ven dentro del propio CLI.
-3. **Clasificador de destinos** + base de datos central compartida con cache.
-4. **Detector de contenido** en dos etapas.
-5. **Panel** de empresa y de empleado con incidentes, patrones y lecciones.
-6. **Sensor de conexiones** (Windows primero) para el inventario de shadow AI.
+   Es la cobertura: sin esto no hay producto.
+2. **Clasificador de destinos** + base de datos central compartida con cache.
+3. **Detector de contenido** en cascada (ver [Investigación 02](02-motor-de-deteccion.md)).
+4. **Panel** de empresa y de empleado con incidentes, patrones y lecciones.
+5. **Sensor de conexiones** (Windows primero) para el inventario de shadow AI y para detectar el
+   tráfico que se escapó del proxy.
+6. **Hook de Claude Code** — opcional, si sobra tiempo: hace la demo más vistosa porque el bloqueo
+   y la lección se ven dentro del propio CLI, pero no agrega cobertura.
 
 ### Qué NO hacer en el hackathon
 
