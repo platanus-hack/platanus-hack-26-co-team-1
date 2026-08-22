@@ -288,7 +288,19 @@ class TestEnVivo(unittest.TestCase):
         return buffer.getvalue()
 
     def test_las_reglas_de_contexto_sobreviven_al_ruido(self):
-        with patch.dict(os.environ, {"AEGIS_OCR": "1"}):
+        # El presupuesto se levanta a proposito. Este test mide CORRECCION --que
+        # las reglas de contexto sobrevivan al ruido del OCR-- y no velocidad, y
+        # con el presupuesto de produccion el resultado depende de cuan cargada
+        # este la maquina: se cayo una vez por eso, justo despues de un rebase, y
+        # parecio una regresion cuando era la CPU ocupada. Un test intermitente
+        # en una suite de seguridad se termina borrando, y con el se va la unica
+        # verificacion de que el OCR funciona de verdad.
+        #
+        # Que el presupuesto se respete se mide aparte, en el test de arriba que
+        # usa motor falso, donde el tiempo no depende de nada externo.
+        with patch.dict(os.environ, {"AEGIS_OCR": "1"}), patch.object(
+            ocr, "PRESUPUESTO_MS", 120_000
+        ):
             cuerpo = json.dumps(
                 {
                     "messages": [
