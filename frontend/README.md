@@ -2,14 +2,15 @@
 
 Frontend en Angular de Aegis: landing pública, flujos de colaborador (login,
 onboarding, actividad) y panel de administrador (registro de empresa,
-colaboradores, políticas, dashboards). Standalone components, Tailwind CSS y
-efectos WebGL propios (`ogl`) para los fondos animados.
+colaboradores, políticas, agent inventory, dashboards). Standalone
+components, Tailwind CSS y efectos WebGL propios (`ogl`) para los fondos
+animados.
 
 ## Desarrollo
 
 ```bash
 npm install
-npm start        # ng serve — http://localhost:4200
+npm start        # ng serve (http://localhost:4200)
 ```
 
 ## Build
@@ -30,8 +31,11 @@ npm test          # Vitest
 src/app/
   features/
     colaborador/   Landing, login, onboarding, actividad
-    admin/         Shell, registro de empresa, colaboradores, políticas, paneles
+    admin/         Shell, registro de empresa, colaboradores, políticas,
+                    agent inventory, paneles
   shared/
-    ui/            Componentes de presentación reutilizables (badge, tabs, logo, ...)
-    effects/       Fondos y gráficos animados (gradient-waves, radar, halftone-shield)
+    ui/            Componentes de presentación reutilizables (badge, tabs,
+                    logo, avatar-stack, ...)
+    effects/       Fondos y gráficos animados (gradient-waves, radar,
+                    halftone-shield)
 ```

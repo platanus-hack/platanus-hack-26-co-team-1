@@ -1,10 +1,10 @@
-<header class="border-b border-aegis-border bg-aegis-surface px-8 py-6">
+<header class="border-b border-aegis-border bg-aegis-surface px-4 py-6 sm:px-8">
   <p class="aegis-label">Configuración inicial</p>
   <h1 class="mt-1 font-display text-xl font-semibold text-aegis-text">Alta de colaboradores</h1>
   <p class="mt-1 max-w-2xl text-sm text-aegis-dim">Da acceso a tu equipo de forma individual o mediante carga masiva. Cada colaborador inicia en estado "pendiente" hasta su primer login.</p>
 </header>
 
-<main class="flex-1 px-8 py-6">
+<main class="flex-1 px-4 py-6 sm:px-8">
   <app-tabs [tabs]="tabs" [active]="activeTab" (activeChange)="activeTab = $event"></app-tabs>
 
   @if (activeTab === 'individual') {

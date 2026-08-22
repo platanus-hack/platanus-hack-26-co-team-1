@@ -23,5 +23,9 @@ export class AdminShellComponent {
     { path: '/admin/panel', label: 'Panel general', icon: 'chart' },
     { path: '/admin/colaboradores', label: 'Colaboradores', icon: 'users' },
     { path: '/admin/politicas', label: 'Políticas', icon: 'shield' },
+    { path: '/admin/inventario', label: 'Agent Inventory', icon: 'radar' },
   ];
+
+  /** Sidebar como drawer fuera de pantalla en mobile/tablet; fija desde lg. */
+  sidebarOpen = false;
 }

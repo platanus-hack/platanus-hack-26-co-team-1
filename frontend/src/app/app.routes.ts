@@ -35,6 +35,11 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/admin/panel-colaborador/panel-colaborador.component').then((m) => m.PanelColaboradorComponent),
       },
+      {
+        path: 'inventario',
+        loadComponent: () =>
+          import('./features/admin/inventario/inventario.component').then((m) => m.InventarioComponent),
+      },
     ],
   },
 
