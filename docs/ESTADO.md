@@ -7,7 +7,7 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** PENDIENTE en verde (`python run_tests.py` desde la raíz).
+**Tests:** 502 en verde (`python run_tests.py` desde la raíz).
 **Entorno:** `agent/requirements.txt` para el proxy y los tests;
 `agent/requirements-modelo.txt` para T2, que va aparte porque es opcional y pesa.
 
