@@ -31,14 +31,21 @@ la nube son eventos ya redactados, según el [contrato de datos](docs/spec/contr
 ## Estructura
 
 ```
-agent/          Agente local: proxy de intercepción y motor de detección
-  aegis_agent/detect/   Motor T1 (reglas deterministas) + redacción
-  tests/                Tests del motor, incluidos los invariantes del contrato
-  bench/                Medición de latencia en el camino crítico
+agent/
+  aegis_agent/
+    detect/       Motor T1: reglas deterministas, normalización y redacción
+    proxy/        Addon de mitmproxy: clasifica, decide, bloquea y explica
+    panel/        Panel de la empresa: métricas sobre eventos redactados
+    catalog.py    Catálogo semilla de servicios de IA (112 dominios)
+    policy.py     Política, clasificación de destinos y detección por forma
+    lessons.py    Lecciones locales de respaldo
+  tests/          96 tests: reglas, evasión, shadow AI, datos, panel y e2e
+  bench/          Medición de latencia en el camino crítico
+  demo/           Demo manual con navegador
 docs/
-  00-propuesta.md       El producto: problema, propuesta y requisitos del MVP
-  adr/                  Decisiones de arquitectura y por qué se tomaron
-  spec/                 Contrato de datos entre el agente y el backend
+  00-propuesta.md   El producto: problema, propuesta y requisitos del MVP
+  adr/              Decisiones de arquitectura y por qué se tomaron
+  spec/             Contrato de datos entre el agente y el backend
 ```
 
 Las investigaciones que sustentan estas decisiones viven **fuera del repo**, en
@@ -52,15 +59,40 @@ Las investigaciones que sustentan estas decisiones viven **fuera del repo**, en
 | [0002](docs/adr/0002-el-proxy-es-el-producto.md) | El proxy es el producto; las integraciones por aplicación son opcionales |
 | [0003](docs/adr/0003-frontera-de-datos-local-decide-remoto-ensena.md) | Lo local decide, lo remoto enseña: el contenido interceptado nunca sale del equipo |
 
+## Qué detecta
+
+No solo credenciales. Tres familias, veinte reglas y una señal de volumen:
+
+| Familia | Ejemplos |
+|---|---|
+| **Credenciales** | Llaves de AWS, Anthropic, OpenAI, GitHub, Google, Slack, Stripe; llaves privadas, JWT, cadenas de conexión |
+| **Datos de la empresa** | Volcados de base de datos, filas con datos reales, esquemas con columnas de salarios, exports de clientes en CSV, documentos marcados como internos |
+| **Datos personales** | Tarjetas con Luhn, cédulas y documentos latinoamericanos, IBAN, correos |
+
+La señal de volumen es la que ninguna regla individual puede dar: un correo en un prompt es una
+mención, quince en el mismo envío son una base de clientes.
+
+Y resiste los caminos por los que un dato se escapa sin que nadie lo intente: base64 simple y doble,
+gzip, `.docx`, UTF-16, percent-encoding, escapes de JSON, texto partido con espacios y secretos
+escondidos al final de un archivo grande.
+
 ## Desarrollo
 
 Requiere Python 3.11 o superior. El motor de detección no tiene dependencias externas.
 
 ```bash
 cd agent
-python -m unittest discover -s tests -t .   # tests
+python -m pip install -r requirements.txt   # mitmproxy y playwright
+python -m playwright install chromium
+
+python -m unittest discover -s tests -t .   # los 96 tests
 python -m bench.latency                     # latencia del motor T1
+python -m demo.run                          # demo con navegador
+python -m aegis_agent.panel.server          # panel en :8787
 ```
+
+Medido en un portátil, sin GPU: un prompt típico se inspecciona en **0.16 ms**, y un archivo de
+44.000 caracteres en 29 ms. La decisión de bloquear no hace una sola llamada de red.
 
 ## Contexto
 

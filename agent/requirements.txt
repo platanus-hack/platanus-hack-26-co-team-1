@@ -1,0 +1,4 @@
+# El motor de deteccion no necesita nada de esto: corre con la biblioteca
+# estandar. Estas dependencias son del proxy y de los tests de navegador.
+mitmproxy>=11
+playwright>=1.40
