@@ -314,3 +314,38 @@ def decide(classification: Classification, categories: set[str], policy: Policy)
                 else:
                     action = "allow"
     return action
+
+
+def decidir_sobre(classification: Classification, findings: list, policy: Policy) -> Action:
+    """La decision completa, incluida la rebaja de autoridad del modelo.
+
+    Vive aca y no en el addon porque el banco de pruebas tiene que medir lo
+    mismo que hace el proxy. Un banco que mide otra cosa es peor que no tener
+    banco: reporta en verde una configuracion que en produccion corta lo que no
+    debe, o al reves, reporta ocho bloqueos falsos que nunca ocurrieron.
+
+    La rebaja: lo que ve el modelo no bloquea a ciegas. Una contrasena o un dato
+    de empresa cortan igual que si los hubiera visto T1; todo lo demas advierte,
+    porque un hallazgo probabilistico no puede frenar a nadie con la misma
+    autoridad que una llave de AWS con formato reconocido.
+    """
+
+    from .detect.model import etiqueta_de
+
+    categorias = {hallazgo.category for hallazgo in findings}
+    action = decide(classification, categorias, policy)
+    peor = findings[0] if findings else None
+
+    if peor is not None and action == "block_content" and peor.rule_id.startswith("modelo:"):
+        if policy.model_action == "warn":
+            # Interruptor general: la empresa no confia en el modelo y ningun
+            # hallazgo suyo bloquea, sin importar la categoria.
+            action = "warn"
+        else:
+            autorizada = (
+                peor.category in policy.model_block_categories
+                and etiqueta_de(peor.rule_id) in policy.model_block_labels
+            )
+            if not autorizada:
+                action = "warn"
+    return action

@@ -6,8 +6,13 @@ Todo lo que hace falta para instalarlo, entender qué hace, medirlo y refinarlo.
 
 ## 1. Qué es y qué no es
 
-**Es** un extractor de entidades de ~50M de parámetros que corre en CPU:
+**Es** un extractor de entidades de **289M de parámetros** que corre en CPU:
 [`urchade/gliner_multi-v2.1`](https://huggingface.co/urchade/gliner_multi-v2.1).
+
+> Este documento decía ~50M y son 289M, casi seis veces más. El número no era una
+> curiosidad: sostenía la afirmación de que el modelo es liviano, y esa afirmación
+> es la que decide si esto se puede instalar en el equipo de cada empleado. Se
+> midió contando parámetros, no leyendo la tarjeta del modelo.
 
 **No es** un modelo de lenguaje. Un LLM local serían gigabytes de RAM y segundos
 de latencia, y esto está en el camino crítico de cada envío. La confusión entre
@@ -25,9 +30,10 @@ cd agent
 python -m pip install gliner onnxruntime
 ```
 
-El modelo se descarga solo la primera vez que se usa (~500 MB desde Hugging Face,
-unos 20 segundos de carga en frío). Queda en la caché de `huggingface_hub`, así
-que la segunda vez arranca directo.
+El modelo se descarga solo la primera vez que se usa. Pesa **1.1 GB** y deja
+**2.3 GB** en la caché de `huggingface_hub`, porque baja los pesos dos veces (en
+`safetensors` y en `pytorch_model.bin`). La carga en frío son unos 9 segundos; la
+segunda vez arranca directo.
 
 **Está apagado por defecto.** Se prende con:
 
@@ -35,7 +41,7 @@ que la segunda vez arranca directo.
 AEGIS_T2=1
 ```
 
-Arrancar descargando medio giga la primera vez que alguien abre un chat sería una
+Arrancar descargando un giga la primera vez que alguien abre un chat sería una
 forma rara de presentarse, y el agente protege igual sin él.
 
 ## 3. Las etiquetas
@@ -113,7 +119,7 @@ Por grupo, en 0.5:
 |---|---|
 | Fugas de datos de empresa | 13/14 detectadas |
 | Datos personales y de salud | 8/8 detectadas |
-| Credenciales en lenguaje natural | 0/3 — las ve T1 con `credencial_en_espanol` |
+| Credenciales en lenguaje natural | 2/8 — **las ve T1**, 8/8, con dos reglas deterministas |
 | Trabajo de rutina | 0/12 marcadas |
 | Menciones de empresa sin fuga | 5/6 marcadas, **0 bloqueadas** |
 
@@ -172,14 +178,14 @@ menos.
 la empresa es un cambio chico. Candidatas obvias: `numero de poliza`,
 `numero de contrato`, `codigo de proyecto`.
 
-**c. Un modelo más chico.** `gliner_small-v2.1` (~50M) pesa menos que el multi y
-puede alcanzar si el corpus es solo español. Se cambia con `AEGIS_T2_MODELO`.
+**c. Un modelo más chico.** Ya está medido: ver la sección 9. `gliner_small-v2.1`
+pesa la cuarta parte y no detecta menos. Se cambia con `AEGIS_T2_MODELO`.
 
 **d. Exportar a ONNX cuantizado.** Bajaría el peso en disco y la RAM. Vale la
 pena cuando haya que distribuirlo en un instalador; hoy `pip install` lo resuelve.
 
-**e. Afinar el modelo.** Solo con corpus etiquetado propio, y solo si a, b y c ya
-se agotaron. Antes de entrenar nada, medí: puede que no haga falta.
+**e. Afinar el modelo.** Ver la sección 9: hoy la respuesta medida es **no**, y
+hay una razón concreta, no un "todavía no". Antes de entrenar nada, medí.
 
 ## 8. Sobre distribuir los pesos
 
@@ -192,7 +198,67 @@ Si más adelante afinamos un modelo propio con corpus de la empresa, ahí sí ti
 sentido una release con los pesos, y el lugar natural es `AEGIS_T2_MODELO`
 apuntando a una ruta local en vez de a un identificador de Hugging Face.
 
-## 9. Variables
+## 9. ¿Otro modelo? ¿Fine tuning? Las dos, medidas
+
+Cuatro candidatos de la misma familia, el mismo corpus, la misma política:
+
+```bash
+cd agent
+AEGIS_T2=1 python -m bench.comparar_modelos
+```
+
+| Modelo | Detecta | **Bloquea mal** | Avisa de más | p50 | Peso |
+|---|---|---|---|---|---|
+| `gliner_multi-v2.1` (actual) | 23/30 | **0**/54 | 21/54 | 372 ms | 1156 MB |
+| `gliner_multi_pii-v1` | 25/30 | **0**/54 | 22/54 | 393 ms | 1156 MB |
+| `gliner_medium-v2.1` | 22/30 | **0**/54 | 18/54 | 402 ms | 781 MB |
+| **`gliner_small-v2.1`** | **26/30** | **0**/54 | 21/54 | **294 ms** | **611 MB** |
+
+*(Las latencias están infladas: los cuatro modelos estaban cargados en memoria a
+la vez. Medido solo, el actual da p50 126 ms.)*
+
+**Lo que dice la tabla, y lo que no.** Con 30 frases sensibles, la diferencia
+entre 22 y 26 son cuatro frases: **eso es ruido, no una jerarquía.** Lo que sí es
+sólido es que **los cuatro bloquean cero trabajo legítimo**, y que el peso y la
+velocidad se diferencian de verdad.
+
+**Conclusión 1: sí, conviene otro modelo, pero no por detectar más.**
+`gliner_small-v2.1` pesa la cuarta parte y es más rápido, sin que se pueda medir
+que detecte menos. En un producto que se instala en el equipo de cada empleado,
+1.7 GB menos por máquina es una diferencia real y la detección extra del modelo
+grande no lo es. Falta confirmarlo con un corpus más grande antes de cambiar el
+default: `gliner_small` está construido sobre un DeBERTa en inglés, y que gane en
+español con 30 frases es justamente el tipo de resultado que se da vuelta cuando
+el corpus crece.
+
+**Conclusión 2: no, no hay que afinar nada todavía**, y la razón no es "más
+adelante". Es esta: **lo que el modelo falla no se arregla entrenando.**
+
+- Las credenciales las erraba porque una contraseña **no es un tipo de entidad**.
+  `Temporal#2026` no se parece a nada; es secreta por el contexto, no por su
+  forma. Un extractor de entidades nunca va a ser la herramienta. Se resolvió con
+  dos reglas deterministas, y la cascada pasó de dejar escapar 2 de 3 a **8/8**.
+- Lo que marca de más es siempre lo mismo: **no distingue mencionar de filtrar.**
+  *"Explicame qué hace Bancolombia"* y un contrato con Bancolombia tienen la
+  misma entidad. Eso no es un déficit de entrenamiento, es que la tarea está mal
+  planteada: reconocer entidades no es lo mismo que juzgar si algo es una fuga.
+  Afinar GLiNER con más ejemplos lo haría más seguro de sí mismo sobre la
+  pregunta equivocada.
+- Y el argumento que cierra el caso: **con 30 frases sensibles no se puede medir
+  si un fine tuning sirvió.** Una mejora de tres frases es indistinguible del
+  azar. Entrenar sin poder medir es gastar en fe.
+
+**El orden correcto, entonces:** (1) crecer el corpus con casos reales del
+negocio, (2) con ese corpus, decidir el modelo con una diferencia que se pueda
+creer, (3) recién ahí evaluar fine tuning — y si se hace, sobre la tarea correcta
+(clasificar "¿esto es una fuga?"), no sobre extracción de entidades.
+
+**Y lo más importante: el modelo no es lo que protege.** La cascada completa,
+medida sobre el corpus, deja escapar **1 de 30** y bloquea **0 de 54** frases
+legítimas. Las credenciales, las cédulas y los exports los ve T1 con certeza. El
+modelo agrega los casos sin formato, y por eso avisa en vez de cortar.
+
+## 10. Variables
 
 | Variable | Por defecto | Qué hace |
 |---|---|---|

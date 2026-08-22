@@ -7,7 +7,7 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 276 en verde (`python run_tests.py` desde la raíz).
+**Tests:** 331 en verde (`python run_tests.py` desde la raíz).
 **Entorno:** `agent/requirements.txt` para el proxy y los tests;
 `agent/requirements-modelo.txt` para T2, que va aparte porque es opcional y pesa.
 
@@ -101,6 +101,10 @@ Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
 | El prompt viaja dentro de un JSON, así que `password = "..."` llega escapado y ninguna regla lo veía. | `test_proveedores.py` |
 | Responder a un `fetch` con HTML deja la aplicación girando para siempre. Ahora se responde JSON si no es una navegación. | `test_respuesta_bloqueo.py` |
 | Las etiquetas del modelo se eligen midiendo, no por intuición: `empresa` encontraba 13/25 pero bloqueaba 6/36 frases de trabajo normal. | `bench/evaluar_modelo.py` |
+| **"contraseña" con eñe no la veía ninguna regla.** Las reglas y el corpus estaban escritos sin tildes, así que la cobertura se veía perfecta y la palabra más importante del idioma para este producto pasaba de largo. No era una evasión: era la ortografía. | `test_credenciales_en_lenguaje_natural.py` |
+| El escape del JSON fabrica credenciales: "explícitamente" viaja como `explícitamente`, y esos dígitos vuelven una palabra corriente indistinguible de una contraseña. Cerca de "usuario" bloqueó una sesión entera de Claude Code por su propio archivo de memoria. | `test_credenciales_en_lenguaje_natural.py` |
+| Importar `proxy/addon.py` levantaba un agente de verdad (`addons = [Aegis()]` al final del módulo): la suite le escribía `~/.aegis/politica.json` al desarrollador. | `test_politica.py` |
+| `AEGIS_MODO` dejó de existir cuando la política pasó a vivir en disco: el archivo mandaba siempre. | `test_politica.py` |
 | Con Aegis en el medio, **Claude Code no podia ni autenticarse**: su propio token hacia api.anthropic.com se leia como una fuga. Una credencial que va hacia su dueño no es una fuga. | `test_dueno_de_la_credencial.py` |
 | La regla genérica disparaba sobre marcado: un `` `git ... `` en el contexto bloqueaba una sesión limpia. | `test_dueno_de_la_credencial.py` |
 
@@ -132,9 +136,10 @@ En el orden en que más valor agregan:
    API key; el código y los tests con modelo simulado ya están.
 2. **La pantalla que edita la política.** La cañería ya está: `Policy.a_dict()`,
    `policy_store` y `PUT /v1/policy/{tenant}`. Falta el formulario y los roles.
-3. **Más casos de negocio en el corpus.** `bench/corpus.py` tiene 61 frases y
-   con eso ya se eligieron etiquetas y umbral. Donde el modelo ve menos es en
-   datos de la empresa: esas frases son las que más rinde agregar.
+3. **Más casos de negocio en el corpus.** `bench/corpus.py` tiene 84 frases y
+   con eso ya se eligieron etiquetas y umbral. Es también lo que bloquea la
+   decisión del modelo: con 30 frases sensibles, la diferencia entre dos modelos
+   no se puede distinguir del azar (ver [MODELO-LOCAL §9](MODELO-LOCAL.md)).
 4. **Un disco en Render** (o un KV) para que el panel desplegado no pierda los
    eventos: el código ya persiste en disco si `AEGIS_DATA_DIR` apunta a uno, pero
    el plan gratuito no monta discos y hoy degrada a memoria.

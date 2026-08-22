@@ -14,7 +14,14 @@ from ..domains import DomainClient
 from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for
-from ..policy import Classification, Policy, classify, decide, looks_like_ai_api
+from ..policy import (
+    Classification,
+    Policy,
+    classify,
+    decide,
+    decidir_sobre,
+    looks_like_ai_api,
+)
 from ..policy_store import cargar as cargar_politica
 from ..policy_store import refrescar_en_segundo_plano
 from ..sensor import SensorDePuntosCiegos
@@ -317,29 +324,11 @@ class Aegis:
             result = ScanResult(
                 findings=hallazgos, truncated=result.truncated, views=result.views
             )
-            categories = {finding.category for finding in result.findings}
-            action = decide(classification, categories, self.policy)
+            # La decision vive en policy.decidir_sobre y no aca: es la misma que
+            # tiene que medir el banco de pruebas. Cuando eran dos copias, el
+            # banco reportaba ocho bloqueos falsos que el proxy nunca hacia.
+            action = decidir_sobre(classification, result.findings, self.policy)
             worst = result.findings[0] if result.findings else None
-
-            # Lo que vio el modelo no bloquea a ciegas: manda la categoria. Una
-            # contrasena o un dato de empresa cortan igual que si los hubiera
-            # visto T1; un dato personal suelto solo advierte, porque un
-            # hallazgo probabilistico no puede frenar a nadie con la misma
-            # autoridad que una llave de AWS con formato reconocido.
-            del_modelo = worst is not None and worst.rule_id.startswith("modelo:")
-            if del_modelo and action == "block_content":
-                if self.policy.model_action == "warn":
-                    # Interruptor general: la empresa no confia en el modelo y
-                    # ningun hallazgo suyo bloquea, sin importar la categoria.
-                    action = "warn"
-                else:
-                    etiqueta = model.etiqueta_de(worst.rule_id)
-                    autorizada = (
-                        worst.category in self.policy.model_block_categories
-                        and etiqueta in self.policy.model_block_labels
-                    )
-                    if not autorizada:
-                        action = "warn"
 
             if action == "block_content" and worst is not None:
                 self._record(

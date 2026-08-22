@@ -24,7 +24,7 @@ os.environ.setdefault("AEGIS_T2", "1")
 
 from aegis_agent.detect import model  # noqa: E402
 from aegis_agent.detect.payload import scan_payload  # noqa: E402
-from aegis_agent.policy import Policy  # noqa: E402
+from aegis_agent.policy import Policy, decidir_sobre  # noqa: E402
 from bench.corpus import GRUPOS_NORMALES, GRUPOS_SENSIBLES, NORMAL, SENSIBLE  # noqa: E402
 
 # Se usa la politica de verdad y no una copia de sus reglas: un banco que mide
@@ -142,7 +142,8 @@ def _cascada() -> None:
     falsos: list[str] = []
     for frase in NORMAL:
         hallazgos = scan_payload(_cuerpo(frase)).findings
-        if any(h.category in POLITICA.block_categories for h in hallazgos):
+        # La misma funcion que usa el proxy, no una copia de sus reglas.
+        if decidir_sobre("ai_approved", hallazgos, POLITICA) == "block_content":
             falsos.append(frase)
     print(f"   normal    {'bloqueos falsos':<22} {len(falsos)}/{len(NORMAL)}")
     for frase in falsos:
