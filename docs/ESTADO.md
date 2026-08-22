@@ -49,8 +49,16 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | OCR de imágenes (el pantallazo) | Funciona, **apagado por defecto**: cuesta ~2 s | `agent/aegis_agent/detect/ocr.py`, `imagenes.py` |
 | PDF con FlateDecode, hex, invisibles y homoglifos | Funciona | `agent/aegis_agent/detect/payload.py` |
 | Presupuesto de latencia de T1 (500 ms, cabeza y cola siempre) | Funciona | `agent/aegis_agent/detect/payload.py` |
+| Base duradera en Supabase (eventos, dominios, políticas) | Funciona | `backend/aegis_backend/supabase.py` |
+| Rutas del backend colaborativo, **desplegadas** | Funciona | `backend/aegis_backend/rutas.py`, `web/app.py` |
 
 **Desplegado:** https://aegis-panel.onrender.com — un solo servicio con el front y el API
+
+El almacén tiene cuatro niveles (Supabase → KV → disco → memoria) y corre el
+primero disponible; `/v1/health` dice cuál. Antes de Supabase el servicio
+guardaba en memoria y el plan gratuito de Render no tiene disco, así que cada
+redespliegue —y se redespliega solo cuando nadie entra un rato— se llevaba
+todo, y la semana simulada tapaba el hueco.
 
 ## 3. Qué NO existe todavía
 
@@ -103,6 +111,9 @@ Están en `docs/adr/`. Las tres que más condicionan el código:
 - **[ADR 0003](adr/0003-frontera-de-datos-local-decide-remoto-ensena.md)** — la
   decisión es 100% local y el contenido nunca sale del equipo. Todo lo que sube
   es un evento redactado ([contrato](spec/contrato-de-datos.md)).
+- **[ADR 0005](adr/0005-la-base-es-del-servidor-el-navegador-nunca-la-toca.md)** —
+  la base hospedada se habla sólo desde el servidor, lo que cruza está nombrado
+  columna por columna, y no hay ninguna donde quepa el contenido.
 
 Y dos reglas de producto que están sostenidas por medición, no por gusto:
 
@@ -117,6 +128,12 @@ Y dos reglas de producto que están sostenidas por medición, no por gusto:
 ## 5. Bugs reales que ya encontramos (no los reintroduzcas)
 
 Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
+
+0. **`do_GET` leía el almacén antes de mirar la ruta.** Con los eventos en
+   memoria era gratis. En cuanto el almacén pasó a ser una base hospedada, cada
+   `.js`, cada fuente y cada icono del panel se volvía una consulta de red para
+   armar una respuesta que ni los mira. El test que lo fija espía `eventos()`
+   mientras se pide un archivo del front y exige cero llamadas.
 
 | Qué pasaba | Dónde está el test |
 |---|---|

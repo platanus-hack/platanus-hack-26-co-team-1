@@ -133,6 +133,20 @@ Debe dar **27 de 27**. Si alguna se escapa, es un hueco real.
 | `AEGIS_DB` | `aegis-domains.json` | Dónde persiste la base de dominios |
 | `AEGIS_BACKEND_PORT` | `8686` | Puerto |
 | `ANTHROPIC_API_KEY` | — | Si está, clasifica dominios con un modelo en vez de heurística |
+| `SUPABASE_URL` | — | La base duradera. Sin ella, todo persiste en JSON local |
+| `SUPABASE_SERVICE_KEY` | — | La clave `service_role`. **No la `anon`**: ver abajo |
+
+`ANTHROPIC_API_KEY`, `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` salen del entorno
+del proceso o, si no está ahí, de `~/.aegis/secretos.env`. El archivo existe por
+una razón concreta y molesta: `ANTHROPIC_API_KEY` puesta como variable de
+usuario se la come cualquier proceso de la máquina, incluidos los CLI de IA, que
+cambian su forma de autenticarse cuando la encuentran. Ver `secretos.py`.
+
+Es la **`service_role`** y no la `anon` porque las tablas tienen RLS prendida
+sin políticas: la `anon` no puede tocar nada. Y la `service_role` **nunca sale
+del servidor** — el navegador jamás habla con Supabase — porque con ella se lee
+el diccionario de términos de la empresa, que es la lista más sensible que hay
+en todo el sistema.
 
 ### El panel
 
@@ -144,6 +158,13 @@ Debe dar **27 de 27**. Si alguna se escapa, es un hueco real.
 | `AEGIS_DATA_DIR` | — | Disco donde persistir los eventos del panel desplegado |
 | `AEGIS_KV_URL` / `AEGIS_KV_TOKEN` | — | Almacén compatible con Upstash para el panel desplegado |
 
+El almacén tiene **cuatro niveles** y corre el primero disponible: Supabase, KV,
+disco, memoria. Los de abajo no son sólo el caso «sin configurar»: son la red
+que atrapa al de arriba cuando se cae. Un evento que Supabase no aceptó se
+escribe igual en disco o en memoria, porque perderlo sería perder justo el
+incidente que pasó mientras el almacén estaba caído. `/v1/health` dice cuál está
+corriendo.
+
 ## 8. Lo desplegado
 
 **https://aegis-panel.onrender.com** — un solo servicio.
@@ -154,7 +175,18 @@ Debe dar **27 de 27**. Si alguna se escapa, es un hueco real.
 | `/api/metrics` | Las métricas en JSON, que es lo que el panel consume |
 | `/v1/health` | Estado y tipo de almacenamiento |
 | `POST /v1/events` | Ingesta de eventos redactados (422 si traen contenido) |
+| `GET /v1/policy` | La política por defecto, para un agente sin la suya |
+| `GET`/`PUT /v1/policy/{tenant}` | La política de una empresa. El PUT es lo que escribe el panel |
+| `GET /v1/domains/{dominio}` | Veredicto compartido, o 202 mientras se averigua |
+| `POST /v1/lessons` | La lección de un corte (422 si trae contenido) |
+| `GET /v1/stats` | Cuántos dominios hay clasificados |
 | `/panel` | El panel en HTML que arma Python, de respaldo |
+
+Las cinco rutas de `/v1/` estaban escritas y **no estaban desplegadas**: el
+blueprint levanta `web/app.py` y nada más, así que fuera de una máquina de
+desarrollo el agente le pedía su política al aire. Corren en el mismo servicio y
+comparten el código con el backend local (`aegis_backend/rutas.py`), que es lo
+que evita que la frontera del ADR 0003 quede escrita dos veces.
 
 El front y el API van **juntos en el mismo servicio** a propósito. Separados
 hacen falta dos servicios, una URL para cada uno y CORS en el medio, y todo eso
