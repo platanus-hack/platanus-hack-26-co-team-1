@@ -6,6 +6,8 @@ dato nunca estuvo yendo a un modelo. Se detecto corriendo contra trafico real.
 """
 
 import unittest
+
+from tests.aislamiento import entorno_aislado
 from unittest.mock import patch
 
 from aegis_agent.policy import Policy, classify, looks_like_ai_api
@@ -36,7 +38,8 @@ class FakeFlow:
 def make_addon(tmp_queue):
     from aegis_agent.proxy.addon import Aegis
 
-    addon = Aegis()
+    with entorno_aislado(tmp_queue.parent):
+        addon = Aegis()
     addon.queue = tmp_queue
     addon.domains.enabled = False
     return addon

@@ -7,6 +7,7 @@ import time
 
 from mitmproxy import http
 
+from ..detect import model
 from ..detect.owners import exento
 from ..detect.payload import ScanResult, scan_payload
 from ..domains import DomainClient
@@ -14,6 +15,9 @@ from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for
 from ..policy import Classification, Policy, classify, decide, looks_like_ai_api
+from ..policy_store import cargar as cargar_politica
+from ..policy_store import refrescar_en_segundo_plano
+from ..sensor import SensorDePuntosCiegos
 from ..signals import SignalCollector
 from . import blockpage
 
@@ -32,6 +36,20 @@ _WS_REDACTED = "[Aegis bloqueo este mensaje: contenia informacion sensible]"
 
 # Cada cuanto se vuelve a registrar el uso de una misma herramienta no aprobada.
 PAUSA_USO = 600
+
+# Cada cuanto mira el sensor la tabla de conexiones. Va lento a proposito: no
+# esta en el camino de ninguna decision y no tiene por que competir por CPU.
+INTERVALO_DEL_SENSOR = 10
+
+
+def _ruta_del_proceso(pid: int) -> str:
+    try:
+        import psutil
+
+        ruta = psutil.Process(pid).exe()
+    except Exception:
+        ruta = ""
+    return ruta
 
 
 def _is_navigation(flow: http.HTTPFlow) -> bool:
@@ -75,7 +93,11 @@ def _deny(flow: http.HTTPFlow, html: str, mensaje: str, cabeceras: dict) -> None
 
 class Aegis:
     def __init__(self) -> None:
-        self.policy = Policy()
+        # La politica llega del archivo local, no de constantes en el codigo: es
+        # lo que permite que la empresa la edite desde el panel. Se lee de disco
+        # y nunca de la red, asi que sin conexion se aplica la ultima conocida
+        # (ADR 0003). El refresco deja el archivo listo para el proximo arranque.
+        self.policy = cargar_politica()
         self.user_id = os.environ.get("AEGIS_USER", "u_demo")
         self.area = os.environ.get("AEGIS_AREA", "marketing")
         self.queue = DEFAULT_QUEUE
@@ -89,6 +111,89 @@ class Aegis:
         self.signals = SignalCollector()
         self._ultimo_uso: dict[str, float] = {}
         self._lock_uso = threading.Lock()
+        # El modelo tarda unos ocho segundos en cargar. Hacerlo en el primer
+        # envio significa que la primera persona que abre un chat espera todo eso
+        # con el request frenado, y llega a la conclusion correcta: que Aegis
+        # rompe las cosas. Se carga aca, mientras nadie esta esperando.
+        if model.habilitado():
+            threading.Thread(target=model.cargar, daemon=True).start()
+
+        if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
+            refrescar_en_segundo_plano(
+                os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686"),
+                self.policy.tenant_id,
+            )
+
+        # Capa D: lo que Aegis no puede ver. Una aplicacion con su propio stack
+        # de red no consulta el proxy y su trafico no pasa por aca nunca. El
+        # sensor no lo intercepta, lo hace visible.
+        self.sensor = SensorDePuntosCiegos(
+            pid_del_proxy=os.getpid(),
+            es_ia=lambda host: classify(host, self.policy) != "non_ai",
+        )
+        self._puntos_ciegos_cortados: set[str] = set()
+        if os.environ.get("AEGIS_SENSOR") != "0":
+            threading.Thread(target=self._vigilar, daemon=True).start()
+
+    def _vigilar(self) -> None:
+        """Mira la tabla de conexiones cada tanto, lejos del camino critico.
+
+        Primero resuelve el catalogo, que tarda unos segundos y se hace una sola
+        vez. Despues cada pasada cuesta milisegundos porque ya no consulta nada.
+        """
+
+        from ..catalog import AI_DOMAINS
+
+        self.sensor.cargar_catalogo(sorted(AI_DOMAINS))
+        while True:
+            try:
+                for punto in self.sensor.revisar():
+                    self._reportar_punto_ciego(punto)
+            except Exception:
+                # El sensor es visibilidad, no proteccion: que falle no puede
+                # llevarse puesto al proxy, que es lo que si esta protegiendo.
+                pass
+            time.sleep(INTERVALO_DEL_SENSOR)
+
+    def _reportar_punto_ciego(self, punto) -> None:
+        """Lo registra y, si la empresa lo pidio, le saca la ruta directa.
+
+        Aca no se puede mirar el contenido: si la aplicacion esquivo el proxy, su
+        trafico va cifrado y directo. La decision del administrador no es sobre
+        el dato sino sobre el punto ciego en si.
+        """
+
+        cortar = self.policy.blind_spot_action == "block"
+        if cortar and punto.proceso not in self._puntos_ciegos_cortados:
+            self._puntos_ciegos_cortados.add(punto.proceso)
+            threading.Thread(
+                target=self._cortar_ruta_directa, args=(punto,), daemon=True
+            ).start()
+
+        hallazgo = Finding(
+            rule_id="punto_ciego",
+            category="policy",
+            severity="high",
+            confidence=1.0,
+            evidence=f"<{punto.proceso}>"[:32],
+            start=0,
+            end=0,
+        )
+        self._record(
+            host=punto.host,
+            classification="ai_unapproved",
+            finding=hallazgo,
+            action="blocked" if cortar else "warned",
+            payload_bytes=0,
+            truncated=False,
+        )
+
+    def _cortar_ruta_directa(self, punto) -> None:
+        from ..install import firewall
+
+        ruta = _ruta_del_proceso(punto.pid)
+        if ruta:
+            firewall.bloquear_programa(ruta, self.sensor.ips_conocidas())
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
@@ -216,12 +321,25 @@ class Aegis:
             action = decide(classification, categories, self.policy)
             worst = result.findings[0] if result.findings else None
 
-            # Lo que vio el modelo se advierte, no se corta, salvo que la empresa
-            # lo pida. Un hallazgo probabilistico no puede frenar a nadie con la
-            # misma autoridad que una llave de AWS con formato reconocible.
+            # Lo que vio el modelo no bloquea a ciegas: manda la categoria. Una
+            # contrasena o un dato de empresa cortan igual que si los hubiera
+            # visto T1; un dato personal suelto solo advierte, porque un
+            # hallazgo probabilistico no puede frenar a nadie con la misma
+            # autoridad que una llave de AWS con formato reconocido.
             del_modelo = worst is not None and worst.rule_id.startswith("modelo:")
-            if del_modelo and self.policy.model_action == "warn" and action == "block_content":
-                action = "warn"
+            if del_modelo and action == "block_content":
+                if self.policy.model_action == "warn":
+                    # Interruptor general: la empresa no confia en el modelo y
+                    # ningun hallazgo suyo bloquea, sin importar la categoria.
+                    action = "warn"
+                else:
+                    etiqueta = model.etiqueta_de(worst.rule_id)
+                    autorizada = (
+                        worst.category in self.policy.model_block_categories
+                        and etiqueta in self.policy.model_block_labels
+                    )
+                    if not autorizada:
+                        action = "warn"
 
             if action == "block_content" and worst is not None:
                 self._record(
@@ -307,4 +425,12 @@ class Aegis:
         enqueue(event, self.queue)
 
 
-addons = [Aegis()]
+# Aca NO va `addons = [Aegis()]`. mitmproxy carga el addon desde aegis_mitm.py,
+# que existe justamente para eso; tenerlo tambien aca significa que importar
+# este modulo (un test, una herramienta, un `python -c`) levanta un agente de
+# verdad: lee la politica del HOME, se la pide al backend por la red y arranca
+# el sensor de conexiones.
+#
+# Esto ya paso. La suite le escribia ~/.aegis/politica.json al desarrollador con
+# lo que respondiera el backend que tuviera levantado, y los e2e despues leian
+# ese archivo. Importar no puede tener efectos.

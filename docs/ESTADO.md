@@ -7,7 +7,9 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 225 en verde (`python run_tests.py` desde la raíz).
+**Tests:** 276 en verde (`python run_tests.py` desde la raíz).
+**Entorno:** `agent/requirements.txt` para el proxy y los tests;
+`agent/requirements-modelo.txt` para T2, que va aparte porque es opcional y pesa.
 
 ---
 
@@ -22,7 +24,11 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Pieza | Estado | Dónde |
 |---|---|---|
 | Motor T1: 26 reglas deterministas + firmas de archivo | Funciona | `agent/aegis_agent/detect/` |
-| Motor T2: modelo local (GLiNER) | Funciona, **apagado por defecto** | `agent/aegis_agent/detect/model.py` |
+| Motor T2: modelo local (GLiNER) | Funciona, **apagado por defecto**. Etiquetas y umbral elegidos midiendo | `agent/aegis_agent/detect/model.py` |
+| Sensor de puntos ciegos (capa D) | Funciona | `agent/aegis_agent/sensor.py` |
+| Corte del punto ciego por firewall | Funciona, requiere administrador | `agent/aegis_agent/install/firewall.py` |
+| Política como dato, editable desde el backend | Funciona | `agent/aegis_agent/policy_store.py` |
+| Verificación de cobertura de escritorio | Funciona | `install/windows.py verificar` |
 | Normalización anti-evasión (base64, gzip, docx, UTF-16…) | Funciona | `agent/aegis_agent/detect/payload.py` |
 | Proxy de intercepción (mitmproxy) | Funciona | `agent/aegis_agent/proxy/` |
 | Catálogo de 112 dominios de IA | Funciona | `agent/aegis_agent/catalog.py` |
@@ -47,13 +53,15 @@ Por orden de lo que más falta para el pitch:
 2. **El clasificador de dominios tampoco usa un modelo.** Descarga la portada del
    sitio y decide con una heurística de contenido. El camino del modelo está
    escrito y probado con uno simulado; espera la misma API key.
-3. **No hay perfil de empresa ni de empleado.** El panel es de un solo tenant y
-   la política vive en código (`policy.py`), no en una base de datos. El MVP de
-   la propuesta pide los dos roles.
+3. **No hay perfil de empresa ni de empleado.** El panel es de un solo tenant.
+   La política ya **no** vive en código: se lee de `~/.aegis/politica.json` y el
+   backend la sirve por `GET`/`PUT /v1/policy/{tenant}`. Lo que falta es la
+   pantalla que la edite y los dos roles.
 4. **No hay instalador para macOS ni Linux.** Solo Windows.
-5. **Las apps que ignoran el proxy del sistema no están cubiertas.** Es la capa D
-   del ADR 0001 (driver WFP / System Extension). Se detecta el hueco con el
-   sensor de conexiones, no se cierra.
+5. **Las apps que ignoran el proxy del sistema no se pueden interceptar.** Es la
+   capa D del ADR 0001. Lo que sí existe ahora: el sensor las detecta, y con
+   `blind_spot_action = "block"` se les corta la ruta directa por firewall. Lo
+   que no existe es *ver* qué mandaron: para eso haría falta un driver WFP.
 6. **El almacenamiento del panel desplegado es efímero.** Sin `AEGIS_KV_URL` los
    eventos viven mientras la función esté caliente.
 
@@ -75,8 +83,10 @@ Y dos reglas de producto que están sostenidas por medición, no por gusto:
 - **El destino filtra antes que el contenido.** Solo se inspecciona el payload de
   las conexiones que van a una IA. Correr contra tráfico real mostró que sin esto
   el agente escanea cada POST de la navegación y llena el panel de ruido.
-- **Lo que ve el modelo advierte, no bloquea.** T1 detecta con certeza y T2 con
-  probabilidad. Se sube a bloqueo con `AEGIS_T2_ACCION=block`.
+- **Lo que ve el modelo bloquea según la categoría, no a ciegas.** T1 detecta
+  con certeza y T2 con probabilidad: `secret` e `internal_data` cortan igual
+  que si los hubiera visto T1, pero `pii` suelto solo advierte. Se baja todo a
+  advertencia, sin mirar la categoría, con `AEGIS_T2_ACCION=warn`.
 
 ## 5. Bugs reales que ya encontramos (no los reintroduzcas)
 
@@ -90,7 +100,7 @@ Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
 | `AWS_SECRET_ACCESS_KEY=` no matcheaba: los guiones bajos son caracteres de palabra y el `\b` nunca casaba. | `test_proveedores.py` |
 | El prompt viaja dentro de un JSON, así que `password = "..."` llega escapado y ninguna regla lo veía. | `test_proveedores.py` |
 | Responder a un `fetch` con HTML deja la aplicación girando para siempre. Ahora se responde JSON si no es una navegación. | `test_respuesta_bloqueo.py` |
-| Las etiquetas descriptivas le funcionan peor al modelo que las cortas. | `bench/evaluar_modelo.py` |
+| Las etiquetas del modelo se eligen midiendo, no por intuición: `empresa` encontraba 13/25 pero bloqueaba 6/36 frases de trabajo normal. | `bench/evaluar_modelo.py` |
 | Con Aegis en el medio, **Claude Code no podia ni autenticarse**: su propio token hacia api.anthropic.com se leia como una fuga. Una credencial que va hacia su dueño no es una fuga. | `test_dueno_de_la_credencial.py` |
 | La regla genérica disparaba sobre marcado: un `` `git ... `` en el contexto bloqueaba una sesión limpia. | `test_dueno_de_la_credencial.py` |
 
@@ -120,10 +130,11 @@ En el orden en que más valor agregan:
 1. **Conectar el modelo a las lecciones y al clasificador de dominios.** Es lo
    único que separa el producto actual del que dice la propuesta. Solo falta la
    API key; el código y los tests con modelo simulado ya están.
-2. **Perfil de empresa y de empleado**, con la política en base de datos en vez
-   de en `policy.py`.
-3. **Corpus en español propio** para validar T2 y decidir el umbral con datos.
-   El actual son 17 frases escritas a mano en `bench/evaluar_modelo.py`.
+2. **La pantalla que edita la política.** La cañería ya está: `Policy.a_dict()`,
+   `policy_store` y `PUT /v1/policy/{tenant}`. Falta el formulario y los roles.
+3. **Más casos de negocio en el corpus.** `bench/corpus.py` tiene 61 frases y
+   con eso ya se eligieron etiquetas y umbral. Donde el modelo ve menos es en
+   datos de la empresa: esas frases son las que más rinde agregar.
 4. **Un disco en Render** (o un KV) para que el panel desplegado no pierda los
    eventos: el código ya persiste en disco si `AEGIS_DATA_DIR` apunta a uno, pero
    el plan gratuito no monta discos y hoy degrada a memoria.

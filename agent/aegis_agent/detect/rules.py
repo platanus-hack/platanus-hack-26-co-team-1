@@ -199,6 +199,27 @@ _SECRETS: tuple[Rule, ...] = (
         group=1,
         validator=looks_random,
     ),
+    Rule(
+        id="credencial_en_espanol",
+        category="secret",
+        severity="critical",
+        confidence=0.85,
+        pattern=_compile(
+            # Nadie escribe password=... cuando le esta contando algo a un chat.
+            # Escribe "la contrasena del servidor de produccion es X", con media
+            # frase entre la palabra y el valor. Medido sobre el corpus: el
+            # modelo local no encuentra ninguna de estas y una regla las ve.
+            #
+            # Lo que sostiene la precision es looks_random sobre el valor: sin
+            # eso, "la clave es la de siempre" entraria como incidente critico.
+            r"(?i)(?:contrasena|contrasenas|clave|claves|credencial|credenciales"
+            r"|usuario y clave|acceso)\b[^.\n]{0,40}?\s(?:es|son|:)\s+"
+            r"\\?[\"']?([^\s\"'\\]{12,})"
+        ),
+        description="Credencial dicha en lenguaje natural, no como asignacion",
+        group=1,
+        validator=looks_random,
+    ),
 )
 
 # Familia 2: datos de la empresa. Un .env es lo mas facil de detectar y lo menos

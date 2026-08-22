@@ -20,11 +20,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO / "backend"))
 
+from aegis_agent import policy_store  # noqa: E402
 from aegis_agent.domains import DomainClient  # noqa: E402
+from aegis_agent.policy import Policy  # noqa: E402
 from aegis_backend.app import serve  # noqa: E402
 from aegis_backend.classifier import classify, heuristic_score  # noqa: E402
 from aegis_backend.evidence import Evidence  # noqa: E402
-from aegis_backend.store import DomainStore, Verdict  # noqa: E402
+from aegis_backend.store import DomainStore, PolicyStore, Verdict  # noqa: E402
 
 TIMEOUT = 6
 
@@ -143,6 +145,7 @@ class BackendVivo(unittest.TestCase):
     def setUpClass(cls):
         cls.workdir = tempfile.TemporaryDirectory()
         cls.store = DomainStore(Path(cls.workdir.name) / "dominios.json")
+        cls.policy_store = PolicyStore(Path(cls.workdir.name) / "politicas.json")
         cls.port = free_port()
 
         def modelo(prompt: str) -> str:
@@ -156,7 +159,7 @@ class BackendVivo(unittest.TestCase):
                 }
             )
 
-        cls.server = serve(cls.store, cls.port, modelo)
+        cls.server = serve(cls.store, cls.port, modelo, cls.policy_store)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
 
     @classmethod
@@ -174,6 +177,19 @@ class BackendVivo(unittest.TestCase):
             f"http://127.0.0.1:{self.port}{ruta}",
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(peticion, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as error:
+            return error.code, json.loads(error.read())
+
+    def _put(self, ruta: str, payload: dict):
+        peticion = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{ruta}",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="PUT",
         )
         try:
             with urllib.request.urlopen(peticion, timeout=5) as r:
@@ -221,6 +237,61 @@ class TestBackend(BackendVivo):
             },
         )
         self.assertEqual(estado, 202)
+
+
+class TestPolicyRoutes(BackendVivo):
+    """La politica es un dato que el backend guarda y devuelve, tenant a tenant."""
+
+    def test_get_de_un_tenant_sin_politica_devuelve_vacio(self):
+        estado, datos = self._get("/v1/policy/nadie-la-configuro")
+        self.assertEqual(estado, 200)
+        self.assertEqual(datos, {})
+
+    def test_put_seguido_de_get_devuelve_lo_que_se_guardo(self):
+        politica = Policy(tenant_id="empresa-put", model_threshold=0.7).a_dict()
+
+        estado_put, _ = self._put("/v1/policy/empresa-put", politica)
+        self.assertEqual(estado_put, 200)
+
+        estado_get, datos = self._get("/v1/policy/empresa-put")
+        self.assertEqual(estado_get, 200)
+        self.assertEqual(datos, politica)
+
+    def test_un_tenant_no_ve_la_politica_de_otro(self):
+        self._put("/v1/policy/tenant-a", Policy(tenant_id="tenant-a").a_dict())
+        self._put("/v1/policy/tenant-b", Policy(tenant_id="tenant-b").a_dict())
+
+        _, datos_a = self._get("/v1/policy/tenant-a")
+        _, datos_b = self._get("/v1/policy/tenant-b")
+
+        self.assertEqual(datos_a["tenant_id"], "tenant-a")
+        self.assertEqual(datos_b["tenant_id"], "tenant-b")
+
+
+class TestRefrescoDeLaPolitica(BackendVivo):
+    """El agente pide su politica al backend en segundo plano, sin bloquear."""
+
+    def test_refrescar_deja_la_politica_del_backend_guardada_en_disco(self):
+        self._put("/v1/policy/empresa-refresco", Policy(tenant_id="empresa-refresco", model_threshold=0.9).a_dict())
+        ruta = Path(self.workdir.name) / "politica-agente.json"
+
+        hilo = policy_store.refrescar_en_segundo_plano(
+            f"http://127.0.0.1:{self.port}", "empresa-refresco", ruta
+        )
+        hilo.join(timeout=5)
+
+        self.assertEqual(policy_store.cargar(ruta).tenant_id, "empresa-refresco")
+        self.assertEqual(policy_store.cargar(ruta).model_threshold, 0.9)
+
+    def test_refrescar_sin_politica_en_el_backend_no_deja_nada(self):
+        ruta = Path(self.workdir.name) / "politica-inexistente.json"
+
+        hilo = policy_store.refrescar_en_segundo_plano(
+            f"http://127.0.0.1:{self.port}", "tenant-sin-politica-nunca-configurado", ruta
+        )
+        hilo.join(timeout=5)
+
+        self.assertFalse(ruta.exists())
 
 
 class TestClienteDelAgente(BackendVivo):
@@ -300,6 +371,20 @@ class TestBackendCaido(unittest.TestCase):
         ruta.write_text("{esto no es json", encoding="utf-8")
         cliente = DomainClient("http://127.0.0.1:1", ruta)
         self.assertEqual(cliente.known_domains(), [])
+
+    def test_refrescar_la_politica_sin_backend_no_lanza_y_no_bloquea(self):
+        workdir = tempfile.TemporaryDirectory()
+        self.addCleanup(workdir.cleanup)
+        ruta = Path(workdir.name) / "politica.json"
+
+        hilo = policy_store.refrescar_en_segundo_plano(
+            f"http://127.0.0.1:{free_port()}", "cualquiera", ruta
+        )
+        hilo.join(timeout=5)
+
+        # Sin backend, el archivo no se toca: la ultima politica conocida (acá,
+        # ninguna) sigue siendo la que se usa.
+        self.assertFalse(ruta.exists())
 
 
 if __name__ == "__main__":

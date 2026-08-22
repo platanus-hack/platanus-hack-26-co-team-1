@@ -43,47 +43,89 @@ forma rara de presentarse, y el agente protege igual sin él.
 El modelo recibe las etiquetas **como texto**, así que agregar un tipo de dato es
 configuración de la empresa y no un release del producto.
 
-| Etiqueta | Categoría | Severidad |
+Y tienen dos niveles de autoridad, que es la decisión central de este documento:
+
+| Etiqueta | Categoría | Qué hace |
 |---|---|---|
-| `contrasena` | secret | critical |
-| `empresa` | internal_data | high |
-| `organizacion` | internal_data | high |
-| `dinero` | internal_data | high |
-| `enfermedad` | pii | high |
-| `persona` | pii | medium |
-| `direccion` | pii | medium |
+| `nombre de cliente` | internal_data | **corta el envío** |
+| `empresa` | internal_data | avisa |
+| `dinero` | internal_data | avisa |
+| `credencial` | pii | avisa |
+| `condicion de salud` | pii | avisa |
+| `persona` | pii | avisa |
+| `empleado` | pii | avisa |
+| `domicilio` | pii | avisa |
 
-**Van cortas a propósito, y esto es lo más importante de este documento.** Medido
-con este mismo modelo:
+**Avisar no le cuesta nada a la persona.** El envío sale igual, no ve ningún
+cartel, no se frena su trabajo: el hallazgo solo queda registrado en el panel, y
+de ahí salen las lecciones. Por eso una etiqueta que se equivoca seguido puede
+avisar sin problema, pero no puede cortar.
 
-| Etiqueta larga | Resultado | Etiqueta corta | Resultado |
+La autoridad se decide **por etiqueta y no por categoría** (`model_block_labels`
+en `Policy`), porque dos etiquetas del mismo tipo de dato miden muy distinto:
+`empresa` y `nombre de cliente` son las dos `internal_data`, pero la primera se
+equivoca en 6 de 36 frases normales y la segunda en 1.
+
+**Cómo se eligieron, y qué hay que desaprender.** Se midió etiqueta por etiqueta
+sobre el corpus de `bench/corpus.py` (25 frases sensibles, 36 de trabajo normal):
+
+| Etiqueta | Encuentra | Ensucia | Veredicto |
 |---|---|---|---|
-| `nombre de cliente o empresa` | 0.37 sobre la palabra equivocada | `empresa` | **0.70** sobre "Grupo Exito" |
-| `diagnostico medico` | no encuentra nada | `enfermedad` | **0.87** sobre "hipertension" |
-| `nombre de persona` | 0.70 | `persona` | **0.95** |
+| `empresa` / `organizacion` | 13/25 | **6/36** | descartadas: ruidosas |
+| `nombre de cliente` | 9/25 | 1/36 | **elegida** |
+| `persona` | 13/25 | 4/36 | elegida, pero solo advierte |
+| `dinero` / `monto` | 5/25 | 3/36 | descartadas: ruidosas |
+| `condicion de salud` | 5/25 | **0/36** | elegida |
+| `domicilio` | 3/25 | **0/36** | elegida (mejor que `direccion`) |
+| `contrasena` / `clave` | **0/25** | — | descartadas: no encuentran nada |
+| `diagnostico medico` | **0/25** | — | descartada |
 
-Una etiqueta descriptiva se lee mejor en el código y le funciona peor al modelo.
-Si vas a agregar una, medila antes de darla por buena.
+Dos cosas que este documento afirmaba y la medición corrigió:
+
+1. **La etiqueta corta no siempre gana.** `nombre de cliente` es más precisa que
+   `empresa`, y `condicion de salud` más limpia que `enfermedad`. Lo que importa
+   no es el largo: es que la etiqueta nombre **la relación**, no la cosa. Un
+   extractor de entidades no distingue mencionar de filtrar, y "empresa" marca
+   *"explicame qué hace Bancolombia como negocio"* igual que marca un contrato.
+2. **`contrasena` no encuentra contraseñas.** Cero sobre 25. Detecta la palabra,
+   no el secreto: marca *"cómo genero una contraseña segura"* y no ve
+   *"la contraseña del servidor es Verano2026Bogota"*. Ese caso lo cubre T1 con
+   la regla `credencial_en_espanol`, que es determinista.
 
 ## 4. Métricas medidas
 
-Con `bench/evaluar_modelo.py` sobre 7 frases sensibles y 10 de trabajo normal en
-español, en CPU sin GPU:
+Con `bench/evaluar_modelo.py` sobre el corpus completo (25 frases sensibles, 36
+de trabajo normal), en CPU sin GPU, dándole al modelo el prompt ya extraído:
 
-| Umbral | Detecta | Falsos positivos |
-|---|---|---|
-| 0.50 | 7/7 | **0**/10 |
-| 0.60 (actual) | 6/7 | **0**/10 |
-| 0.75 | 4/7 | **0**/10 |
+| Umbral | Detecta | **Bloquea trabajo normal** | Avisa de más |
+|---|---|---|---|
+| 0.50 (actual) | 21/25 | **0**/36 | 13/36 |
+| 0.60 | 21/25 | **0**/36 | 10/36 |
 
 ```
-Latencia:  p50 108 ms | p95 118 ms | presupuesto 700 ms
-Carga:     ~17 s en frío, una sola vez por proceso
+Latencia:  p50 88 ms | p95 99 ms | presupuesto 700 ms
+Carga:     ~5 s, en un hilo al arrancar el proxy y no en el primer envío
 ```
 
-**Por qué 0.6 y no 0.5**, que midió mejor: el corpus son 17 frases escritas a
-mano. Con un corpus real de la empresa esto se decide con datos y no con
-prudencia. Mientras tanto, el margen.
+Por grupo, en 0.5:
+
+| Grupo | Resultado |
+|---|---|
+| Fugas de datos de empresa | 13/14 detectadas |
+| Datos personales y de salud | 8/8 detectadas |
+| Credenciales en lenguaje natural | 0/3 — las ve T1 con `credencial_en_espanol` |
+| Trabajo de rutina | 0/12 marcadas |
+| Menciones de empresa sin fuga | 5/6 marcadas, **0 bloqueadas** |
+
+**Lo que hay que saber para no sobrevender esto.** El modelo no distingue
+mencionar de filtrar: marca *"explicame qué hace Bancolombia"* igual que marca un
+contrato. Por eso lo que ve **avisa y no corta**, salvo la única etiqueta que
+midió lo bastante bien. El bloqueo con autoridad sigue siendo trabajo de T1.
+
+Dos mediciones anteriores de este documento quedan anuladas: estaban hechas sobre
+17 frases y sobre el cuerpo crudo del request. Con el JSON completo el modelo
+marcaba 8 de cada 10 frases normales, porque los nombres de parámetros le daban
+entidades por todos lados.
 
 ## 5. Cómo medirlo vos
 
@@ -103,9 +145,13 @@ peor que no tener T2, porque enseña a la gente a ignorar los avisos.
    gastar 110 ms más no cambia la decisión ni la lección.
 2. **Tiene un presupuesto de latencia duro.** Si tarda más de 700 ms se descarta
    su respuesta y queda lo de T1. Un modelo lento no puede frenar a la persona.
-3. **Advierte, no bloquea.** T1 detecta con certeza y el modelo con probabilidad.
-   Frenarle el trabajo a alguien por una probabilidad es la forma más rápida de
-   que desinstalen Aegis. Se sube a bloqueo con `AEGIS_T2_ACCION=block`.
+3. **Bloquea según la categoría, no a ciegas.** T1 detecta con certeza y el
+   modelo con probabilidad, así que no toda categoría merece la misma
+   autoridad: `secret` e `internal_data` cortan igual que si los hubiera visto
+   T1, pero `pii` suelto (nombre, dirección) solo advierte, porque ahí el costo
+   de un falso positivo es más alto que el de dejarlo pasar. `AEGIS_T2_ACCION=warn`
+   es la salida de emergencia completa para la empresa que no confía nada en el
+   modelo: con eso, ningún hallazgo del modelo bloquea, sin importar la categoría.
 
 Y una cuarta, implícita: **si no está instalado, el agente funciona igual.** Hay
 tests que verifican que el motor sigue detectando todo lo de T1 con el modelo
@@ -117,7 +163,9 @@ Por orden de lo que más rinde:
 
 **a. Corpus propio en español.** Es lo que más falta. Ampliá las dos listas de
 `bench/evaluar_modelo.py` con frases reales del negocio (anonimizadas) y volvé a
-medir los umbrales. 17 frases no alcanzan para decidir nada con confianza.
+medir los umbrales. El corpus actual son 61 frases en `bench/corpus.py`, y lo
+que más rinde es agregar casos de negocio reales: ahí es donde el modelo hoy ve
+menos.
 
 **b. Etiquetas del negocio.** `AEGIS_T2_ETIQUETAS` no existe todavía, pero
 `scan_model()` ya recibe las etiquetas como parámetro: exponerlo en la política de
@@ -150,4 +198,4 @@ apuntando a una ruta local en vez de a un identificador de Hugging Face.
 |---|---|---|
 | `AEGIS_T2` | apagado | `1` prende el modelo |
 | `AEGIS_T2_MODELO` | `urchade/gliner_multi-v2.1` | Identificador de Hugging Face o ruta local |
-| `AEGIS_T2_ACCION` | `warn` | `block` para que sus hallazgos bloqueen |
+| `AEGIS_T2_ACCION` | `block` | `warn` para que ningún hallazgo del modelo bloquee, sin importar la categoría |

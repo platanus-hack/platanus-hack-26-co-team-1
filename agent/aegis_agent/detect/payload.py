@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import base64
 import binascii
-import gzip
 import io
 import re
 import zipfile
+import zlib
 from collections import Counter
 from dataclasses import dataclass
 from urllib.parse import unquote_plus
@@ -13,6 +13,7 @@ from urllib.parse import unquote_plus
 from .engine import scan
 from .files import scan_files
 from .model import scan_model
+from .prompt import extract_prompt
 from .types import Finding
 
 # Un secreto casi nunca viaja en texto plano y derecho: viaja dentro de un JSON
@@ -38,6 +39,10 @@ _GZIP_MAGIC = b"\x1f\x8b"
 # Comprimir el texto esquiva cualquier escaner de reglas, y no hace falta ser
 # malicioso para lograrlo: basta con adjuntar un .gz o un .docx.
 MAX_DECOMPRESSED_BYTES = 4_000_000
+
+# Cuantos contenedores embebidos se intentan abrir por payload. Acotado porque la
+# firma de gzip son dos bytes y aparece por casualidad en cualquier binario.
+MAX_CONTENEDORES = 3
 
 # Un secreto partido con espacios o saltos deja de matchear cualquier regex. La
 # vista compacta lo vuelve a unir; va limitada por tamano porque recorre todo.
@@ -119,11 +124,54 @@ def _zip_views(payload: bytes) -> list[str]:
 
 
 def _gunzip(payload: bytes) -> bytes:
+    """Descomprime tolerando lo que venga pegado atras.
+
+    gzip.decompress exige que el stream termine donde termina el buffer, y en un
+    multipart siempre hay un boundary despues del archivo.
+    """
+
     try:
-        data = gzip.decompress(payload)[:MAX_DECOMPRESSED_BYTES]
-    except (OSError, EOFError):
+        data = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(
+            payload, MAX_DECOMPRESSED_BYTES
+        )
+    except zlib.error:
         data = b""
     return data
+
+
+def _container_views(payload: bytes) -> list[str]:
+    """Abre los contenedores que vienen embebidos, no solo el que arranca el body.
+
+    Un archivo casi nunca llega solo: viaja dentro de un multipart, con las
+    cabeceras del formulario adelante y el cierre del boundary atras. Buscar la
+    firma unicamente en el primer byte deja pasar el gesto mas comun que existe,
+    que es arrastrar un .docx a un chat de IA.
+    """
+
+    views: list[str] = []
+
+    if _ZIP_MAGIC in payload:
+        # zipfile ubica el directorio central desde el final, asi que tolera por
+        # si solo tanto lo que viene antes del zip como lo que viene despues.
+        views.extend(_zip_views(payload))
+        inicio = payload.find(_ZIP_MAGIC)
+        if not views and inicio > 0:
+            views.extend(_zip_views(payload[inicio:]))
+
+    # El tercer byte de una cabecera gzip es el metodo de compresion, y siempre
+    # es deflate. Incluirlo en la busqueda evita perseguir cada par de bytes que
+    # coincide por casualidad dentro de un binario.
+    desde = 0
+    for _ in range(MAX_CONTENEDORES):
+        desde = payload.find(_GZIP_MAGIC + b"\x08", desde)
+        if desde < 0:
+            break
+        crudo = _gunzip(payload[desde:])
+        if crudo:
+            views.append(_decode(crudo))
+        desde += len(_GZIP_MAGIC)
+
+    return views
 
 
 def _base64_views(text: str, depth: int = BASE64_MAX_DEPTH) -> list[str]:
@@ -192,8 +240,7 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
     if payload:
         if payload.startswith(_GZIP_MAGIC):
             payload = _gunzip(payload) or payload
-        if payload.startswith(_ZIP_MAGIC):
-            views.extend(_zip_views(payload))
+        views.extend(_container_views(payload))
         principal = _decode(payload)
         views.append(principal)
         views.extend(_derived_views(principal))
@@ -236,7 +283,11 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
     # credencial detectada, gastar 150 ms mas no cambia la decision ni la
     # leccion; y si T1 vio algo, lo vio con certeza y sin adivinar.
     if not findings and principal:
-        findings.extend(scan_model(principal))
+        # Al modelo se le da lo que escribio la persona, no el sobre que lo
+        # lleva. Si la forma del request no se reconoce se mira todo: un
+        # servicio que nadie clasifico todavia tampoco tiene una forma conocida,
+        # y recortar ahi seria recortar justo el caso peligroso.
+        findings.extend(scan_model(extract_prompt(principal) or principal))
 
     # Se reordena al final para que el primero sea el hallazgo mas especifico, no
     # el ultimo que se agrego. De ese primero sale la leccion que ve la persona,

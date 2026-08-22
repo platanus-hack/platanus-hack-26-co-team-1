@@ -64,9 +64,10 @@ paso existe para no pagar el siguiente.
    e. se ordenan por especificidad
 
 6. Se cruza el hallazgo con la política:
-   secret o internal_data  → bloquear
-   pii suelto              → advertir
-   hallazgo del modelo     → advertir (salvo AEGIS_T2_ACCION=block)
+   secret o internal_data       → bloquear
+   pii suelto                   → advertir
+   hallazgo del modelo, secret/internal_data → bloquear (salvo AEGIS_T2_ACCION=warn)
+   hallazgo del modelo, pii     → advertir
 
 7. Si se bloquea:
    navegación → página HTML con la lección

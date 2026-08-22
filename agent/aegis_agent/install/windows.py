@@ -215,6 +215,124 @@ def status(port: int) -> dict:
     }
 
 
+# -- verificacion de cobertura ----------------------------------------------
+
+# Destino inexistente a proposito. Verificar contra un servicio real significaria
+# mandarle una credencial de juguete a un tercero justo cuando Aegis podria no
+# estar funcionando, que es el unico momento en que eso llegaria a destino. El
+# camino "/v1/chat/completions" alcanza para que el agente lo trate como IA.
+URL_AUTOPRUEBA = "https://aegis-autoprueba.invalid/v1/chat/completions"
+
+# Llave de ejemplo publicada por AWS en su documentacion: no abre nada.
+SECRETO_DE_JUGUETE = "AKIAIOSFODNN7EXAMPLE"
+
+
+def leer_variables_de_usuario() -> dict[str, str]:
+    """Lo que quedo grabado de verdad, no lo que este proceso tiene en memoria."""
+
+    winreg = _registry()
+    valores: dict[str, str] = {}
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as clave:
+        for nombre in env_vars(0):
+            try:
+                valores[nombre] = winreg.QueryValueEx(clave, nombre)[0]
+            except FileNotFoundError:
+                pass
+    return valores
+
+
+def probar_en_vivo(port: int) -> tuple[bool, str]:
+    """Manda un secreto de juguete por el proxy y mira si lo cortan.
+
+    Es la unica fila de la tabla que no confia en la configuracion: la prueba.
+    """
+
+    import json
+    import ssl
+    import urllib.error
+    import urllib.request
+
+    contexto = ssl.create_default_context()
+    if CA_PEM.exists():
+        try:
+            contexto.load_verify_locations(str(CA_PEM))
+        except OSError:
+            pass
+
+    proxy = urllib.request.ProxyHandler(
+        {"http": f"http://127.0.0.1:{port}", "https": f"http://127.0.0.1:{port}"}
+    )
+    abridor = urllib.request.build_opener(
+        proxy, urllib.request.HTTPSHandler(context=contexto)
+    )
+    peticion = urllib.request.Request(
+        URL_AUTOPRUEBA,
+        data=json.dumps(
+            {"messages": [{"role": "user", "content": f"mi llave es {SECRETO_DE_JUGUETE}"}]}
+        ).encode(),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+
+    try:
+        with abridor.open(peticion, timeout=15) as respuesta:
+            resultado = (False, f"el envio salio con codigo {respuesta.status}")
+    except urllib.error.HTTPError as error:
+        cortado = error.code == 403 and b"aegis_blocked" in error.read()
+        if cortado:
+            resultado = (True, "el secreto de prueba fue interceptado y cortado")
+        else:
+            resultado = (False, f"respondio {error.code}, pero no fue Aegis")
+    except Exception as error:
+        # Sin proxy escuchando no hay nada que verificar, y decirlo es mas util
+        # que reportar una fila en rojo que suena a que Aegis esta roto.
+        resultado = (False, f"no se pudo probar: {type(error).__name__}")
+    return resultado
+
+
+def verificar(port: int) -> list[tuple[str, bool, str]]:
+    """Que camino queda cubierto y cual no, sobre esta maquina y no en teoria."""
+
+    proxy = read_proxy_settings()
+    ca_lista = CA_CERT.exists() and ca_is_trusted()
+    sistema = proxy["enabled"] and proxy["server"] == f"127.0.0.1:{port}"
+
+    variables = leer_variables_de_usuario()
+    faltantes = [nombre for nombre in env_vars(port) if nombre not in variables]
+    entorno = not faltantes and CA_PEM.exists()
+
+    if ca_lista:
+        motivo_ca = "CA propia confiada en tu usuario"
+    else:
+        motivo_ca = "falta confiar la CA: corre el instalador"
+
+    if sistema:
+        motivo_sistema = motivo_ca
+    else:
+        motivo_sistema = "el proxy del sistema no apunta a Aegis"
+
+    if entorno:
+        motivo_entorno = motivo_ca
+    else:
+        if faltantes:
+            motivo_entorno = f"faltan variables: {', '.join(faltantes)}"
+        else:
+            motivo_entorno = f"falta el archivo de CA en {CA_PEM}"
+
+    por_sistema = sistema and ca_lista
+    por_entorno = entorno and ca_lista
+
+    filas = [
+        ("Navegador (Chrome, Edge)", por_sistema, motivo_sistema),
+        ("App de escritorio (ChatGPT, Claude)", por_sistema, motivo_sistema),
+        ("CLI de IA (Claude Code, Codex)", por_entorno, motivo_entorno),
+        ("IDE con IA (Cursor, Copilot)", por_sistema and por_entorno, motivo_sistema if not por_sistema else motivo_entorno),
+    ]
+
+    cortado, detalle = probar_en_vivo(port)
+    filas.append(("Prueba en vivo con un secreto", cortado, detalle))
+    return filas
+
+
 def install(port: int, mitmdump: str) -> list[str]:
     hechos = []
     if ensure_ca(mitmdump):
@@ -276,6 +394,13 @@ def main() -> int:
                 for hecho in uninstall():
                     print(f"  {hecho}")
                 codigo = 0
+            elif accion == "verificar":
+                filas = verificar(puerto)
+                for camino, cubierto, motivo in filas:
+                    marca = "SI " if cubierto else "NO "
+                    print(f"  [{marca}] {camino}")
+                    print(f"         {motivo}")
+                codigo = 0 if all(cubierto for _, cubierto, _ in filas) else 1
             else:
                 for clave, valor in status(puerto).items():
                     print(f"  {clave}: {valor}")

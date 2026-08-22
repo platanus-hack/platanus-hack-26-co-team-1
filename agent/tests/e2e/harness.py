@@ -19,6 +19,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from tests.aislamiento import variables_aisladas
+
 HERE = Path(__file__).resolve().parent
 AGENT_ROOT = HERE.parent.parent
 
@@ -27,12 +29,25 @@ HOST = "127.0.0.1"
 
 
 def mitmdump_path() -> str:
-    """mitmdump se instala como ejecutable, no como modulo invocable."""
+    """mitmdump se instala como ejecutable, no como modulo invocable.
 
+    Se busca primero al lado del interprete que esta corriendo, que es donde
+    queda dentro de un entorno virtual. El esquema del usuario apunta al site
+    global y ahi no hay nada si el proyecto se instalo en un venv, que es como
+    se trabaja aca.
+    """
+
+    nombre = "mitmdump.exe" if os.name == "nt" else "mitmdump"
     scheme = "nt_user" if os.name == "nt" else "posix_user"
-    scripts = Path(sysconfig.get_path("scripts", scheme=scheme))
-    candidate = scripts / ("mitmdump.exe" if os.name == "nt" else "mitmdump")
-    return str(candidate) if candidate.exists() else "mitmdump"
+    candidatos = (
+        Path(sys.executable).parent / nombre,
+        Path(sysconfig.get_path("scripts")) / nombre,
+        Path(sysconfig.get_path("scripts", scheme=scheme)) / nombre,
+    )
+    for candidato in candidatos:
+        if candidato.exists():
+            return str(candidato)
+    return "mitmdump"
 
 
 def _free_port() -> int:
@@ -70,6 +85,10 @@ class ProxyHarness:
         env["AEGIS_BACKEND_DISABLED"] = "1"
         env["AEGIS_MODO"] = cls.MODO
         env["AEGIS_DOMAIN_CACHE"] = str(Path(cls.workdir.name) / "dominios.json")
+        # Sin esto el proxy hijo lee ~/.aegis/politica.json, o sea lo que haya
+        # dejado cualquier otra corrida en la maquina, y el MODO de arriba se
+        # vuelve decorativo.
+        env.update(variables_aisladas(cls.workdir.name))
 
         cls.proxy = subprocess.Popen(
             [
