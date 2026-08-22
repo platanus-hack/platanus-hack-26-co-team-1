@@ -38,6 +38,19 @@ export interface Politica {
   unapproved_ai_action: string;
   model_action: string;
   model_threshold: number;
+  /**
+   * Las cuentas de la empresa en las herramientas aprobadas.
+   *
+   * `approved_ai` dice "ChatGPT se puede usar" y no alcanza: la cuenta personal
+   * del empleado entra por el mismo dominio aprobado. Esto declara cuáles
+   * cuentas son de la empresa; lo que no esté acá es de otro.
+   *
+   * Son huellas e identificadores de organización, nunca credenciales: el
+   * agente hashea la llave antes de que salga del equipo, así que este campo
+   * no puede llevar un secreto ni por error.
+   */
+  corporate_accounts: string[];
+  foreign_account_action: string;
 }
 
 const VACIA: Politica = {
@@ -55,6 +68,8 @@ const VACIA: Politica = {
   unapproved_ai_action: 'warn',
   model_action: 'block',
   model_threshold: 0.7,
+  corporate_accounts: [],
+  foreign_account_action: 'warn',
 };
 
 @Injectable({ providedIn: 'root' })
