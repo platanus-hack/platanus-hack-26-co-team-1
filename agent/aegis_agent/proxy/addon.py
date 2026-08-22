@@ -5,6 +5,7 @@ import os
 from mitmproxy import http
 
 from ..detect.payload import scan_payload
+from ..domains import DomainClient
 from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for
@@ -26,6 +27,11 @@ class Aegis:
         self.user_id = os.environ.get("AEGIS_USER", "u_demo")
         self.area = os.environ.get("AEGIS_AREA", "marketing")
         self.queue = DEFAULT_QUEUE
+        # La base colaborativa extiende el catalogo en caliente. Se consulta solo
+        # contra el cache local: la red nunca esta en el camino de la decision.
+        self.domains = DomainClient(
+            enabled=os.environ.get("AEGIS_BACKEND_DISABLED") != "1"
+        )
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
@@ -59,6 +65,11 @@ class Aegis:
     def _handle(self, flow: http.HTTPFlow) -> None:
         host = flow.request.pretty_host
         classification = classify(host, self.policy)
+
+        if classification == "non_ai":
+            compartido = self.domains.cached(host)
+            if compartido == "ai_unapproved":
+                classification = "ai_unapproved"
 
         if classification == "ai_unapproved":
             self._block_destination(flow, host, classification)
@@ -97,6 +108,9 @@ class Aegis:
             preview = body[:4000].decode("utf-8", errors="replace")
             if looks_like_ai_api(flow.request.path, preview):
                 classification = "ai_unknown"
+                # Se manda a clasificar para que la proxima vez el veredicto ya
+                # exista, aca y en todos los demas clientes de la red.
+                self.domains.request_classification(host)
 
         if classification == "non_ai":
             action = "allow"

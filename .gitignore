@@ -33,3 +33,5 @@ Thumbs.db
 # Capturas de trabajo del panel
 agent/tests/e2e/panel.png
 aegis-events.jsonl
+aegis-domains-cache.json
+aegis-domains.json
