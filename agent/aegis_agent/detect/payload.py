@@ -13,8 +13,10 @@ from dataclasses import dataclass
 from urllib.parse import unquote_plus
 
 from . import diccionario
+from . import ocr
 from .engine import scan
 from .files import scan_files
+from .imagenes import extraer as extraer_imagenes
 from .model import scan_model
 from .prompt import extract_prompt
 from .types import Finding
@@ -501,6 +503,16 @@ def scan_payload(
         principal = _decode(payload)
         views.append(principal)
         views.extend(_derived_views(principal))
+
+        # El pantallazo. Va al final y detras de una bandera porque es la unica
+        # vista que cuesta SEGUNDOS y no milisegundos (ver detect/ocr.py), asi
+        # que todo lo de arriba ya se resolvio antes de considerar pagarla. La
+        # extraccion de las imagenes es barata y siempre corre; lo que esta
+        # apagado por defecto es leerlas.
+        if ocr.habilitado():
+            imagenes = extraer_imagenes(payload, principal)
+            if imagenes:
+                views.extend(ocr.vistas(imagenes))
 
     # El espanol de verdad lleva tildes y enes. Las reglas estan escritas sin
     # ellas, asi que una regla veia "la contrasena del servidor" y NINGUNA veia

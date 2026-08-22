@@ -1,0 +1,16 @@
+# OCR de imagenes. Va aparte de requirements.txt --igual que el modelo local--
+# porque es opcional, y ademas porque su costo NO es el peso sino la LATENCIA:
+# medido en CPU sobre una captura de 900x260, la inferencia da p50 1.7 s en una
+# maquina descansada y entre 5 y 9 s con la maquina ocupada.
+#
+# Eso es entre dos y trece veces el presupuesto COMPLETO de T2 (700 ms), asi que
+# leer imagenes esta APAGADO por defecto y se prende con AEGIS_OCR=1. El detalle
+# de por que, y del modo asincronico que lo resolveria, esta en
+# aegis_agent/detect/ocr.py.
+#
+# Los modelos vienen dentro del wheel (~15 MB): a diferencia de T2, no hay una
+# descarga de un giga la primera vez que alguien manda una imagen.
+rapidocr-onnxruntime>=1.2.3
+# El escalado previo. Medido: la llave de AWS no se leyo a 900 px de ancho y si
+# se leyo a 1800, asi que agrandar la imagen chica no es cosmetico.
+pillow>=10.0
