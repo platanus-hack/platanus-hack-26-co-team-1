@@ -2,7 +2,7 @@
 
 - **Estado:** aceptado
 - **Fecha:** 2026-08-22
-- **Contexto:** [Investigación 01](../research/01-interceptacion-de-trafico.md)
+- **Contexto:** Investigación 01 (fuera del repo, ver README)
 
 ## Contexto
 

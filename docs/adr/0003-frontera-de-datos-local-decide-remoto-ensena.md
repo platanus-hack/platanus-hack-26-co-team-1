@@ -3,7 +3,7 @@
 - **Estado:** aceptado
 - **Fecha:** 2026-08-22
 - **Complementa:** [ADR 0002](0002-el-proxy-es-el-producto.md)
-- **Contexto:** [Investigación 02](../research/02-motor-de-deteccion.md)
+- **Contexto:** Investigación 02 (fuera del repo, ver README)
 
 ## Contexto
 

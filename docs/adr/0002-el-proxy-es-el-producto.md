@@ -3,7 +3,7 @@
 - **Estado:** aceptado
 - **Fecha:** 2026-08-22
 - **Complementa:** [ADR 0001](0001-interceptar-en-el-endpoint-por-capas.md)
-- **Contexto:** [Investigación 01](../research/01-interceptacion-de-trafico.md), [Investigación 02](../research/02-motor-de-deteccion.md)
+- **Contexto:** Investigación 01 y 02 (fuera del repo, ver README)
 
 ## Contexto
 
@@ -67,7 +67,7 @@ En consecuencia:
 
 ## Nota sobre el modelo local
 
-Discusión aparte, resuelta en la [Investigación 02](../research/02-motor-de-deteccion.md): correr un
+Discusión aparte, resuelta en la Investigación 02 (fuera del repo, ver README): correr un
 LLM local para analizar todo lo que se envía **no** es el diseño. El destino filtra primero (queda
 un 1-3% del tráfico), y sobre ese resto corre una cascada barato → caro donde lo local son reglas
 deterministas y un encoder pequeño cuantizado, y el LLM aparece solo para lo ambiguo y para generar
