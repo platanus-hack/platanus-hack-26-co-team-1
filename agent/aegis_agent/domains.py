@@ -8,6 +8,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from .suffixes import most_specific_match
+
 # Cliente de la base colaborativa. Dos reglas gobiernan este archivo:
 #
 #   1. Nunca bloquea el camino critico. Si el veredicto no esta en el cache
@@ -66,10 +68,17 @@ class DomainClient:
     # -- consulta -----------------------------------------------------------
 
     def cached(self, domain: str) -> str | None:
-        """Clasificacion conocida para el dominio, sin tocar la red."""
+        """Clasificacion conocida para el dominio, sin tocar la red.
+
+        Camina por sufijos (ver suffixes.py) para que un veredicto sobre
+        acme.com cubra tambien chat.acme.com: el shadow AI de una empresa
+        casi siempre vive bajo el mismo dominio padre, y no hay que
+        reinvestigar cada subdominio nuevo desde cero.
+        """
 
         with self._lock:
-            entrada = self._cache.get(self._normalize(domain))
+            match = most_specific_match(self._normalize(domain), self._cache)
+            entrada = self._cache.get(match) if match else None
         return entrada.get("classification") if entrada else None
 
     def evidence(self, domain: str) -> str:
