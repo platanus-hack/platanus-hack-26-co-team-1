@@ -77,7 +77,7 @@ class TestHallazgosDelModelo(unittest.TestCase):
     def test_un_nombre_de_cliente_es_dato_de_la_empresa(self):
         hallazgos = self._correr(
             ModeloSimulado(
-                [{"label": "nombre de cliente o empresa", "score": 0.91, "start": 11, "end": 23}]
+                [{"label": "empresa", "score": 0.91, "start": 11, "end": 23}]
             )
         )
         self.assertEqual(len(hallazgos), 1)
@@ -86,14 +86,14 @@ class TestHallazgosDelModelo(unittest.TestCase):
 
     def test_un_dato_personal_suelto_es_pii(self):
         hallazgos = self._correr(
-            ModeloSimulado([{"label": "nombre de persona", "score": 0.88, "start": 0, "end": 3}])
+            ModeloSimulado([{"label": "persona", "score": 0.88, "start": 0, "end": 3}])
         )
         self.assertEqual(hallazgos[0].category, "pii")
 
     def test_la_evidencia_no_lleva_el_texto_detectado(self):
         # Vale la misma regla que para T1: sale el tipo, nunca el dato.
         hallazgos = self._correr(
-            ModeloSimulado([{"label": "nombre de cliente o empresa", "score": 0.9}])
+            ModeloSimulado([{"label": "empresa", "score": 0.9}])
         )
         self.assertNotIn("Bancolombia", hallazgos[0].evidence)
         self.assertLessEqual(len(hallazgos[0].evidence), 32)
@@ -102,8 +102,8 @@ class TestHallazgosDelModelo(unittest.TestCase):
         hallazgos = self._correr(
             ModeloSimulado(
                 [
-                    {"label": "nombre de persona", "score": 0.9},
-                    {"label": "nombre de persona", "score": 0.8},
+                    {"label": "persona", "score": 0.9},
+                    {"label": "persona", "score": 0.8},
                 ]
             )
         )
@@ -126,7 +126,7 @@ class TestDegradacion(unittest.TestCase):
     def test_si_tarda_demasiado_se_descarta_su_respuesta(self):
         # El presupuesto es duro: un modelo lento no puede frenar a la persona.
         lento = ModeloSimulado(
-            [{"label": "nombre de persona", "score": 0.99}],
+            [{"label": "persona", "score": 0.99}],
             demora=(model.LATENCIA_MAXIMA_MS + 200) / 1000,
         )
         self._con(lento)
@@ -134,7 +134,7 @@ class TestDegradacion(unittest.TestCase):
         self.assertEqual(lento.llamadas, 1)
 
     def test_texto_vacio_no_lo_llama(self):
-        simulado = ModeloSimulado([{"label": "nombre de persona", "score": 0.9}])
+        simulado = ModeloSimulado([{"label": "persona", "score": 0.9}])
         self._con(simulado)
         self.assertEqual(model.scan_model("   "), [])
         self.assertEqual(simulado.llamadas, 0)
@@ -142,7 +142,7 @@ class TestDegradacion(unittest.TestCase):
 
 class TestOrdenDeLaCascada(unittest.TestCase):
     def test_si_t1_encontro_algo_el_modelo_no_corre(self):
-        simulado = ModeloSimulado([{"label": "nombre de persona", "score": 0.99}])
+        simulado = ModeloSimulado([{"label": "persona", "score": 0.99}])
         parches = con_modelo(simulado)
         for p in parches:
             p.start()
@@ -154,7 +154,7 @@ class TestOrdenDeLaCascada(unittest.TestCase):
 
     def test_si_t1_no_vio_nada_el_modelo_si_corre(self):
         simulado = ModeloSimulado(
-            [{"label": "nombre de cliente o empresa", "score": 0.9, "start": 0, "end": 5}]
+            [{"label": "empresa", "score": 0.9, "start": 0, "end": 5}]
         )
         parches = con_modelo(simulado)
         for p in parches:

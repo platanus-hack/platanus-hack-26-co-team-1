@@ -23,23 +23,31 @@ from .types import Finding
 
 # Etiquetas en espanol: el modelo las recibe como texto, asi que agregar un tipo
 # de dato es configuracion de la empresa y no un release del producto.
+#
+# Van cortas a proposito. Medido con este mismo modelo: "nombre de cliente o
+# empresa" daba 0.37 sobre la palabra equivocada, y "empresa" da 0.70 sobre
+# "Grupo Exito". Lo mismo con salud: "diagnostico medico" no encontraba nada y
+# "enfermedad" da 0.87 sobre "hipertension". Una etiqueta descriptiva se lee
+# bien en el codigo y le funciona peor al modelo.
 ETIQUETAS_POR_DEFECTO = (
-    "nombre de persona",
-    "documento de identidad",
-    "numero de telefono",
+    "persona",
+    "empresa",
+    "organizacion",
     "direccion",
-    "nombre de cliente o empresa",
-    "informacion financiera",
-    "diagnostico medico",
-    "credencial o contrasena",
+    "dinero",
+    "enfermedad",
+    "contrasena",
 )
 
-# Debajo de esto el modelo esta adivinando, y un T2 ruidoso es peor que no tener
-# T2: ensena a la gente a ignorar los avisos.
-UMBRAL_POR_DEFECTO = 0.75
+# Medido con bench/evaluar_modelo sobre 7 frases sensibles y 10 de trabajo normal
+# en espanol: 0.5 detecta 7/7, 0.6 detecta 6/7 y 0.75 detecta 4/7, los tres con
+# CERO falsos positivos. El corpus es chico, asi que se deja 0.6 por margen; con
+# un corpus real de la empresa esto se decide con datos y no con prudencia.
+UMBRAL_POR_DEFECTO = 0.6
 
-# Presupuesto duro. Si el modelo tarda mas, se corta y se sigue con lo de T1.
-LATENCIA_MAXIMA_MS = 400
+# Presupuesto duro. Si el modelo tarda mas, se descarta su respuesta y queda lo
+# de T1. Medido en CPU sin GPU: p50 108 ms, p95 118 ms.
+LATENCIA_MAXIMA_MS = 700
 
 # Cuanto texto se le da. El resto ya lo miro T1 con reglas.
 MAX_CARACTERES = 4000
@@ -49,10 +57,11 @@ MODELO_POR_DEFECTO = "urchade/gliner_multi-v2.1"
 # Las etiquetas que, cuando el modelo las ve, valen como dato de la empresa y no
 # como dato personal suelto.
 _CATEGORIA_POR_ETIQUETA = {
-    "credencial o contrasena": ("secret", "critical"),
-    "nombre de cliente o empresa": ("internal_data", "high"),
-    "informacion financiera": ("internal_data", "high"),
-    "diagnostico medico": ("pii", "high"),
+    "contrasena": ("secret", "critical"),
+    "empresa": ("internal_data", "high"),
+    "organizacion": ("internal_data", "high"),
+    "dinero": ("internal_data", "high"),
+    "enfermedad": ("pii", "high"),
 }
 
 _lock = threading.Lock()

@@ -56,6 +56,12 @@ class Policy:
     # antes de frenarle el trabajo a la gente.
     unknown_domain_action: Action = "warn"
     unapproved_ai_action: str = field(default_factory=_accion_para_no_aprobadas)
+    # Que hacer con lo que encuentra el modelo. Advertir por defecto: T1 detecta
+    # con certeza y el modelo con probabilidad, y bloquearle el trabajo a alguien
+    # por una probabilidad es la forma mas rapida de que desinstalen Aegis.
+    model_action: str = field(
+        default_factory=lambda: os.environ.get("AEGIS_T2_ACCION", "warn")
+    )
     block_categories: frozenset[str] = field(
         default_factory=lambda: frozenset({"secret", "internal_data"})
     )

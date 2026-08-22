@@ -205,6 +205,13 @@ class Aegis:
             action = decide(classification, categories, self.policy)
             worst = result.findings[0] if result.findings else None
 
+            # Lo que vio el modelo se advierte, no se corta, salvo que la empresa
+            # lo pida. Un hallazgo probabilistico no puede frenar a nadie con la
+            # misma autoridad que una llave de AWS con formato reconocible.
+            del_modelo = worst is not None and worst.rule_id.startswith("modelo:")
+            if del_modelo and self.policy.model_action == "warn" and action == "block_content":
+                action = "warn"
+
             if action == "block_content" and worst is not None:
                 self._record(
                     host=host,
