@@ -89,7 +89,10 @@ class TestClasificacionPorContenido(unittest.TestCase):
             )
         )
         self.assertGreaterEqual(puntaje, 0.6)
-        self.assertIn("se describe", motivo)
+        # El motivo tiene que nombrar la senal concreta, porque termina en el
+        # panel y un administrador necesita poder discutir el veredicto.
+        self.assertIn("El sitio", motivo)
+        self.assertNotIn("no se presenta", motivo)
 
     def test_una_tienda_no_puntua(self):
         puntaje, _ = content_score(
