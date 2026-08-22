@@ -40,6 +40,7 @@ def entorno_aislado(workdir: str | Path):
         os.environ,
         {
             "AEGIS_POLITICA": str(Path(workdir) / "politica.json"),
+            "AEGIS_LESSONS_CACHE": str(Path(workdir) / "lecciones.json"),
             "AEGIS_BACKEND_DISABLED": "1",
             "AEGIS_SENSOR": "0",
         },
@@ -55,4 +56,10 @@ def variables_aisladas(workdir: str | Path) -> dict[str, str]:
     va lo que nunca deben heredar del HOME.
     """
 
-    return {"AEGIS_POLITICA": str(Path(workdir) / "politica.json")}
+    return {
+        "AEGIS_POLITICA": str(Path(workdir) / "politica.json"),
+        # El cache de lecciones es lo mismo que la politica: si el proxy hijo lo
+        # hereda, los e2e afirman sobre el texto que escribio un modelo en otra
+        # corrida en vez de sobre el que el codigo garantiza.
+        "AEGIS_LESSONS_CACHE": str(Path(workdir) / "lecciones.json"),
+    }
