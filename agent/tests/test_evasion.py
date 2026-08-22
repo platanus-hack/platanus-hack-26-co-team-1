@@ -61,8 +61,11 @@ class TestEncodingEvasion(unittest.TestCase):
 
 class TestContainerEvasion(unittest.TestCase):
     def _docx(self, text: str) -> bytes:
+        # Comprimido de verdad, como lo escribe Word. Sin esto el texto queda
+        # legible dentro del zip y el test pasa aunque nadie lo haya abierto,
+        # que es la peor forma de tener cobertura: la que miente.
         buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w") as archive:
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("[Content_Types].xml", "<Types/>")
             archive.writestr("word/document.xml", f"<w:t>{text}</w:t>")
         return buffer.getvalue()
@@ -79,6 +82,38 @@ class TestContainerEvasion(unittest.TestCase):
             + b"--X--\r\n"
         )
         self.assertIn("aws_access_key_id", rules(body))
+
+    def _adjunto(self, nombre: str, tipo: str, contenido: bytes) -> bytes:
+        return (
+            b"--X\r\n"
+            + f'Content-Disposition: form-data; name="file"; filename="{nombre}"\r\n'.encode()
+            + f"Content-Type: {tipo}\r\n\r\n".encode()
+            + contenido
+            + b"\r\n--X--\r\n"
+        )
+
+    def test_docx_adjuntado_en_un_multipart(self):
+        """El gesto real: arrastrar un Word a un chat de IA.
+
+        El .docx no llega como cuerpo entero sino envuelto en un multipart, asi
+        que el zip arranca en el medio del payload y no en el primer byte. Mirar
+        solo el principio deja pasar el caso mas comun que existe.
+        """
+
+        cuerpo = self._adjunto(
+            "propuesta.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            self._docx(f"la llave es {AWS_KEY}"),
+        )
+        self.assertIn("aws_access_key_id", rules(cuerpo))
+
+    def test_gzip_adjuntado_en_un_multipart(self):
+        cuerpo = self._adjunto(
+            "notas.gz",
+            "application/gzip",
+            gzip.compress(f"AWS_ACCESS_KEY_ID={AWS_KEY}".encode()),
+        )
+        self.assertIn("aws_access_key_id", rules(cuerpo))
 
     def test_zip_corrupto_no_revienta(self):
         self.assertEqual(rules(b"PK\x03\x04basura que no es un zip"), set())
