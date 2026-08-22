@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import io
+import json
 import re
 import unicodedata
 import zipfile
@@ -224,6 +225,80 @@ def _derived_views(text: str) -> list[str]:
             views.append(compact)
 
     return views
+
+
+def texto_para_inyeccion(body: bytes | None) -> str:
+    """El texto que la persona (o el agente) escribio, listo para inspeccionar.
+
+    Reusa el mismo decodificado que el resto del archivo en vez de una copia:
+    una inyeccion escondida en un cuerpo gzipeado o en un JSON escapado tiene
+    que verse igual que una en texto plano.
+    """
+
+    if not body:
+        texto = ""
+    else:
+        crudo = body[:MAX_INSPECT_BYTES]
+        if crudo.startswith(_GZIP_MAGIC):
+            crudo = _gunzip(crudo) or crudo
+        principal = _decode(crudo)
+        texto = extract_prompt(principal) or principal
+    return texto
+
+
+def texto_de_respuesta(cuerpo: bytes | None) -> str:
+    """El texto que escribio el modelo, sin el sobre JSON que lo lleva.
+
+    Hace falta extraerlo: el texto de una respuesta empieza justo despues de una
+    comilla (`"text":"Ignora las...`), y la regla de inyeccion exige que la orden
+    ABRA una oracion. Sin separar los valores del JSON, una orden puesta al
+    principio de la respuesta no se veia.
+
+    Aflojar la regla para que una comilla cuente como inicio seria peor: volveria
+    a marcar a cualquiera que cite una inyeccion entre comillas para explicarla,
+    que es lo que hace toda la documentacion de seguridad. Se extrae el texto y
+    la regla se queda como esta.
+
+    Cubre las tres formas en que contesta una API de modelos: JSON, streaming
+    por eventos (`data: {...}`) y texto plano.
+    """
+
+    if not cuerpo:
+        return ""
+
+    crudo = cuerpo[:MAX_INSPECT_BYTES].decode("utf-8", "replace")
+    partes: list[str] = []
+
+    for linea in crudo.splitlines():
+        limpia = linea.strip()
+        if limpia.startswith("data:"):
+            limpia = limpia[5:].strip()
+        if limpia and limpia[0] in "{[":
+            try:
+                partes.extend(_cadenas(json.loads(limpia)))
+                continue
+            except ValueError:
+                pass
+        partes.append(limpia)
+
+    return "\n".join(partes) if partes else crudo
+
+
+def _cadenas(dato) -> list[str]:
+    """Todas las cadenas de una estructura JSON, en orden."""
+
+    encontradas: list[str] = []
+    if isinstance(dato, str):
+        encontradas.append(dato)
+    else:
+        if isinstance(dato, dict):
+            for valor in dato.values():
+                encontradas.extend(_cadenas(valor))
+        else:
+            if isinstance(dato, list):
+                for valor in dato:
+                    encontradas.extend(_cadenas(valor))
+    return encontradas
 
 
 def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
