@@ -10,7 +10,11 @@ from pathlib import Path
 # Nunca el contenido, nunca quien lo visito: solo "este dominio tiene un modelo
 # detras". Por eso la base puede crecer sola sin comprometer a nadie.
 
-DEFAULT_TTL = 7 * 24 * 3600
+# Cuanto dura un veredicto antes de que convenga volver a mirarlo. No es un
+# numero fijo: depende de que tan solido fue el veredicto (ver ttl_for).
+TTL_ALTA_CONFIANZA = 30 * 24 * 3600
+TTL_FRAGIL = 48 * 3600
+UMBRAL_CONFIANZA_ALTA = 0.8
 
 
 @dataclass(frozen=True)
@@ -23,13 +27,41 @@ class Verdict:
     source: str  # seed_list | llm_classifier | heuristic | manual_review
     classified_at: float
 
-    def as_response(self, ttl: int = DEFAULT_TTL) -> dict:
+    def as_response(self) -> dict:
         payload = asdict(self)
         payload["classified_at"] = time.strftime(
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.classified_at)
         )
-        payload["ttl_seconds"] = ttl
+        payload["ttl_seconds"] = ttl_for(self)
         return payload
+
+
+def ttl_for(verdict: Verdict) -> int | None:
+    """Cuanto puede durar `verdict` antes de que convenga volver a mirarlo.
+
+    Un veredicto que el modelo vio con confianza alta es solido: 30 dias. Uno
+    que se decidio casi por el nombre -- el sitio no respondio, o la
+    confianza quedo pegada al umbral -- es el mas fragil que produce el
+    sistema, y no deberia sobrevivir mas de un par de dias. Uno que un humano
+    reviso en el panel no lo pisa nada automatico: None significa que nunca
+    vence.
+    """
+
+    if verdict.source == "manual_review":
+        ttl: int | None = None
+    else:
+        if verdict.source == "llm_classifier" and verdict.confidence >= UMBRAL_CONFIANZA_ALTA:
+            ttl = TTL_ALTA_CONFIANZA
+        else:
+            ttl = TTL_FRAGIL
+    return ttl
+
+
+def vencido(verdict: Verdict, ahora: float) -> bool:
+    """Si `verdict` ya paso su TTL y conviene volver a investigarlo."""
+
+    ttl = ttl_for(verdict)
+    return ttl is not None and (ahora - verdict.classified_at) > ttl
 
 
 class DomainStore:

@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .classifier import anthropic_model, classify
-from .store import DomainStore, PolicyStore, Verdict
+from .store import DomainStore, PolicyStore, Verdict, vencido
 
 DEFAULT_PORT = 8686
 
@@ -101,6 +102,11 @@ class BackendHandler(BaseHTTPRequestHandler):
         domain = domain.split("?")[0].strip("/").lower()
         verdict = self.store.get(domain)
         if verdict is not None:
+            # El camino critico nunca se queda sin respuesta: un veredicto
+            # vencido igual se manda, y la reclasificacion se encola aparte.
+            # Un veredicto viejo siempre es mejor que ninguno.
+            if vencido(verdict, time.time()):
+                self._enqueue(domain)
             self._send(200, verdict.as_response())
         else:
             self._enqueue(domain)

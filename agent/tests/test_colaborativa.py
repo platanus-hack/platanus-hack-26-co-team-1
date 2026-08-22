@@ -26,7 +26,7 @@ from aegis_agent.policy import Policy  # noqa: E402
 from aegis_backend.app import serve  # noqa: E402
 from aegis_backend.classifier import classify, heuristic_score  # noqa: E402
 from aegis_backend.evidence import Evidence  # noqa: E402
-from aegis_backend.store import DomainStore, PolicyStore, Verdict  # noqa: E402
+from aegis_backend.store import DomainStore, PolicyStore, Verdict, ttl_for, vencido  # noqa: E402
 
 TIMEOUT = 6
 
@@ -77,6 +77,88 @@ class TestStore(unittest.TestCase):
         store = DomainStore(self.path)
         store.put(self._verdict())
         self.assertIsNotNone(store.get("IA-MAGICA.CO."))
+
+
+class TestTTL(unittest.TestCase):
+    """Cuanto dura un veredicto antes de que convenga volver a mirarlo.
+
+    DEFAULT_TTL estaba declarado y nadie lo leia: un veredicto quedaba
+    permanente, y un dominio non_ai que lanza su asistente meses despues
+    seguia permitido para siempre. El TTL real depende de que tan solido fue
+    el veredicto, no de un numero fijo.
+    """
+
+    def _verdict(self, source, confidence, hace):
+        return Verdict(
+            domain="x.co",
+            classification="non_ai",
+            kind="non_ai",
+            confidence=confidence,
+            evidence="x",
+            source=source,
+            classified_at=time.time() - hace,
+        )
+
+    def test_confianza_alta_del_modelo_dura_treinta_dias(self):
+        veredicto = self._verdict("llm_classifier", 0.95, hace=0)
+        self.assertEqual(ttl_for(veredicto), 30 * 24 * 3600)
+
+    def test_heuristica_es_el_veredicto_mas_fragil(self):
+        veredicto = self._verdict("heuristic", 0.9, hace=0)
+        self.assertLessEqual(ttl_for(veredicto), 48 * 3600)
+
+    def test_confianza_pegada_al_umbral_tambien_es_fragil(self):
+        # El modelo dijo que si, pero apenas: no es mas confiable que la
+        # heuristica del nombre.
+        veredicto = self._verdict("llm_classifier", 0.61, hace=0)
+        self.assertLessEqual(ttl_for(veredicto), 48 * 3600)
+
+    def test_manual_review_no_vence_nunca(self):
+        veredicto = self._verdict("manual_review", 1.0, hace=365 * 24 * 3600)
+        self.assertIsNone(ttl_for(veredicto))
+        self.assertFalse(vencido(veredicto, time.time()))
+
+    def test_un_veredicto_fragil_viejo_esta_vencido(self):
+        veredicto = self._verdict("heuristic", 0.9, hace=49 * 3600)
+        self.assertTrue(vencido(veredicto, time.time()))
+
+    def test_un_veredicto_fragil_reciente_no_esta_vencido(self):
+        veredicto = self._verdict("heuristic", 0.9, hace=1)
+        self.assertFalse(vencido(veredicto, time.time()))
+
+
+class TestCacheDeSubdominios(unittest.TestCase):
+    """El cache local del cliente hereda por sufijo, igual que policy.classify.
+
+    Sin esto, un veredicto sobre acme.com no cubre chat.acme.com: cada
+    subdominio nuevo del mismo shadow AI se investigaria de cero.
+    """
+
+    def setUp(self):
+        self.workdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.workdir.cleanup)
+        self.cache_path = Path(self.workdir.name) / "cache.json"
+        self.cache_path.write_text(
+            json.dumps(
+                {
+                    "acme.com": {
+                        "classification": "ai_unapproved",
+                        "kind": "llm_chat",
+                        "confidence": 0.9,
+                        "evidence": "Asistente interno",
+                        "source": "heuristic",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.cliente = DomainClient(cache_path=self.cache_path, enabled=False)
+
+    def test_un_subdominio_hereda_el_veredicto_del_padre(self):
+        self.assertEqual(self.cliente.cached("chat.acme.com"), "ai_unapproved")
+
+    def test_un_dominio_no_relacionado_no_matchea(self):
+        self.assertIsNone(self.cliente.cached("otraempresa.co"))
 
 
 def sin_sitio(domain):
@@ -237,6 +319,78 @@ class TestBackend(BackendVivo):
             },
         )
         self.assertEqual(estado, 202)
+
+
+class TestReclasificacionPorTTL(BackendVivo):
+    """Un veredicto vencido no deja al agente sin respuesta.
+
+    Se activa por demanda, sin cron: el GET que lo pide de vuelta se lleva el
+    veredicto viejo al instante (mejor una respuesta vieja que ninguna) y
+    dispara la reclasificacion en segundo plano, igual que un dominio nuevo.
+    """
+
+    def test_un_veredicto_vencido_se_devuelve_igual_y_se_reencola(self):
+        viejo = Verdict(
+            domain="viejo-heuristico.co",
+            classification="non_ai",
+            kind="non_ai",
+            confidence=0.3,
+            evidence="El nombre no da senales de un servicio de IA",
+            source="heuristic",
+            classified_at=time.time() - (49 * 3600),  # el TTL fragil es 48h
+        )
+        self.store.put(viejo)
+
+        estado, datos = self._get("/v1/domains/viejo-heuristico.co")
+
+        self.assertEqual(estado, 200)
+        self.assertEqual(datos["classification"], "non_ai")
+
+        listo = wait_until(
+            lambda: self.store.get("viejo-heuristico.co").classified_at
+            > viejo.classified_at
+        )
+        self.assertTrue(listo, "el dominio vencido no se reencolo")
+
+    def test_un_veredicto_vigente_no_se_reclasifica(self):
+        vigente = Verdict(
+            domain="fresco.co",
+            classification="non_ai",
+            kind="non_ai",
+            confidence=0.9,
+            evidence="x",
+            source="llm_classifier",
+            classified_at=time.time(),
+        )
+        self.store.put(vigente)
+
+        self._get("/v1/domains/fresco.co")
+        time.sleep(0.3)
+
+        self.assertEqual(
+            self.store.get("fresco.co").classified_at, vigente.classified_at
+        )
+
+    def test_manual_review_nunca_se_reclasifica(self):
+        revisado = Verdict(
+            domain="revisado-a-mano.co",
+            classification="ai_unapproved",
+            kind="llm_chat",
+            confidence=1.0,
+            evidence="Revisado por el equipo de seguridad",
+            source="manual_review",
+            classified_at=time.time() - (365 * 24 * 3600),
+        )
+        self.store.put(revisado)
+
+        estado, _ = self._get("/v1/domains/revisado-a-mano.co")
+        time.sleep(0.3)
+
+        self.assertEqual(estado, 200)
+        self.assertEqual(
+            self.store.get("revisado-a-mano.co").classified_at,
+            revisado.classified_at,
+        )
 
 
 class TestPolicyRoutes(BackendVivo):
