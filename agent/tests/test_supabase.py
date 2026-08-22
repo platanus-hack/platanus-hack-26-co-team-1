@@ -133,6 +133,10 @@ class TestSinSupabaseTodoSigueIgual(unittest.TestCase):
             "SUPABASE_SERVICE_KEY",
             "SUPABASE_SERVICE_ROLE_KEY",
             "SUPABASE_KEY",
+            # Tambien el interruptor, que lo pone el runner: esta clase prueba
+            # que sin credenciales todo sigue igual, y con el puesto estaria
+            # probando el interruptor -que tiene su propia clase- en vez de eso.
+            supabase.APAGADO,
         ):
             os.environ.pop(nombre, None)
 
@@ -166,6 +170,81 @@ class TestSinSupabaseTodoSigueIgual(unittest.TestCase):
         self.assertTrue(supabase.configurado())
 
 
+class TestLaSuiteNoTocaLaBaseDeVerdad(unittest.TestCase):
+    """El interruptor que evita que correr los tests ensucie produccion.
+
+    Las credenciales viven en `~/.aegis/secretos.env`, que es del HOME de quien
+    corre la suite. Sin apagarlo, el dia que alguien configura Supabase sus
+    tests empiezan a escribir en la base real: los que crean un `DomainStore` y
+    le meten un veredicto suben `ia-magica.co` a la tabla que usa la demo.
+
+    Es el mismo acoplamiento que ya costo veintitres tests rojos cuando la suite
+    escribia `~/.aegis/politica.json` (ESTADO.md, seccion 5), con el agravante
+    de que esta vez el dano sale del equipo.
+    """
+
+    def test_con_el_interruptor_puesto_no_esta_configurado(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SUPABASE_URL": "https://x.supabase.co",
+                "SUPABASE_SERVICE_KEY": "clave",
+                supabase.APAGADO: "1",
+            },
+        ):
+            self.assertFalse(supabase.configurado())
+
+    def test_y_entonces_ninguna_escritura_sale(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SUPABASE_URL": "https://x.supabase.co",
+                "SUPABASE_SERVICE_KEY": "clave",
+                supabase.APAGADO: "1",
+            },
+        ):
+            self.assertFalse(supabase.guardar_evento(EVENTO))
+            self.assertFalse(supabase.guardar_veredicto({"domain": "x.co"}))
+            self.assertFalse(supabase.guardar_politica("acme", {}))
+            self.assertIsNone(supabase.leer_eventos())
+
+    def test_el_runner_lo_pone(self):
+        # Si alguien reescribe run_tests.py y se lo olvida, esto avisa. El
+        # interruptor solo sirve si algo lo enciende.
+        runner = (REPO / "run_tests.py").read_text(encoding="utf-8")
+        self.assertIn(supabase.APAGADO, runner)
+
+    def test_esta_apagado_mientras_corre_esta_suite(self):
+        # La prueba de que lo de arriba funciona de verdad: si esto se pone
+        # rojo, la suite esta hablando con la base de produccion ahora mismo.
+        self.assertTrue(os.environ.get(supabase.APAGADO))
+
+    def test_los_eventos_de_los_tests_no_se_suben_al_panel_real(self):
+        """El otro camino, y el que de verdad ensucio la base.
+
+        El instalador escribe `AEGIS_EVENTS_URL` en el entorno de USUARIO
+        apuntando al panel desplegado. Cada proxy que levantan los e2e la
+        heredaba, asi que sus eventos de mentira -chrome-headless-shell.exe
+        visitando novaai.local- se subian a produccion. Mientras el panel
+        guardaba en memoria se perdian en el siguiente redespliegue y nadie los
+        vio nunca; con la base conectada, quedan.
+        """
+
+        self.assertFalse(
+            os.environ.get("AEGIS_EVENTS_URL"),
+            "la suite subiria sus eventos al panel que diga esta variable",
+        )
+
+    def test_los_dos_caminos_estan_tapados_para_los_procesos_hijos(self):
+        # Los e2e levantan un mitmdump aparte: no alcanza con parchear este
+        # proceso, hay que armarle el entorno al hijo.
+        from tests.aislamiento import variables_aisladas
+
+        armado = variables_aisladas("cualquier-carpeta")
+        self.assertEqual(armado.get("AEGIS_EVENTS_URL"), "")
+        self.assertEqual(armado.get(supabase.APAGADO), "1")
+
+
 class TestUnAlmacenCaidoDegrada(unittest.TestCase):
     """Que Supabase no conteste no puede costar ni el panel ni un evento."""
 
@@ -174,7 +253,7 @@ class TestUnAlmacenCaidoDegrada(unittest.TestCase):
 
         self.servicio = servicio
         servicio._memoria.clear()
-        servicio._cache = None
+        servicio._cache = {}
         self.addCleanup(servicio._memoria.clear)
 
     def test_si_no_contesta_se_cae_al_nivel_de_abajo(self):
@@ -203,7 +282,7 @@ class TestUnAlmacenCaidoDegrada(unittest.TestCase):
             with patch.object(self.servicio.supabase, "leer_eventos", return_value=[]):
                 self.assertTrue(self.servicio.eventos())
             with patch.object(self.servicio.supabase, "leer_eventos", return_value=[EVENTO]):
-                self.servicio._cache = None
+                self.servicio._cache = {}
                 self.assertEqual(self.servicio.eventos(), [EVENTO])
 
     def test_el_almacen_se_nombra_por_lo_que_esta_corriendo(self):

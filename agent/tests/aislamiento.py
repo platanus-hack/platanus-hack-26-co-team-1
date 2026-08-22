@@ -43,6 +43,11 @@ def entorno_aislado(workdir: str | Path):
             "AEGIS_LESSONS_CACHE": str(Path(workdir) / "lecciones.json"),
             "AEGIS_BACKEND_DISABLED": "1",
             "AEGIS_SENSOR": "0",
+            # Ver variables_aisladas: el instalador deja esta variable en el
+            # entorno de usuario apuntando a produccion, y sin vaciarla un test
+            # que construye un Aegis() sube sus eventos al panel de verdad.
+            "AEGIS_EVENTS_URL": "",
+            "AEGIS_SUPABASE_DISABLED": "1",
         },
     ):
         yield
@@ -62,4 +67,18 @@ def variables_aisladas(workdir: str | Path) -> dict[str, str]:
         # hereda, los e2e afirman sobre el texto que escribio un modelo en otra
         # corrida en vez de sobre el que el codigo garantiza.
         "AEGIS_LESSONS_CACHE": str(Path(workdir) / "lecciones.json"),
+        # Y esta es la peor de las tres, porque el dano sale del equipo.
+        #
+        # El instalador escribe AEGIS_EVENTS_URL en el entorno de USUARIO
+        # (HKCU\Environment) apuntando al panel de produccion. Cada proxy que
+        # levantan los e2e la hereda, asi que sus eventos de mentira
+        # -chrome-headless-shell.exe visitando novaai.local- se subian al panel
+        # real. Mientras el panel guardaba en memoria no se notaba: se perdian
+        # en el siguiente redespliegue. Con la base conectada quedan, y el
+        # primer sintoma fue una tabla con 172 eventos que nadie genero.
+        #
+        # Vacia y no ausente: `os.environ` del hijo se construye copiando el del
+        # padre, asi que no alcanza con no ponerla.
+        "AEGIS_EVENTS_URL": "",
+        "AEGIS_SUPABASE_DISABLED": "1",
     }

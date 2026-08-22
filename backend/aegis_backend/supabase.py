@@ -36,12 +36,27 @@ sigue con lo que tenia. Un almacen caido degrada el panel, nunca lo tumba.
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 
 from . import secretos
 
 TIMEOUT = 6
+
+# El interruptor que apaga todo esto, y por que existe.
+#
+# Las credenciales viven en ~/.aegis/secretos.env, que es del HOME de quien
+# corre la suite. Sin este interruptor, el dia que alguien configura Supabase su
+# suite empieza a escribir en la base de VERDAD: los tests que crean un
+# DomainStore y le meten un veredicto suben "ia-magica.co" a la tabla que usa la
+# demo. Es el mismo acoplamiento que ya costo veintitres tests rojos cuando la
+# suite escribia ~/.aegis/politica.json (ver docs/ESTADO.md, seccion 5), con el
+# agravante de que esta vez ensucia produccion.
+#
+# Va aca y no en cada test a proposito: en un test hay que acordarse, y quien
+# escriba el proximo no tiene por que saber que existe este problema.
+APAGADO = "AEGIS_SUPABASE_DISABLED"
 TABLA_EVENTOS = "aegis_eventos"
 TABLA_DOMINIOS = "aegis_dominios"
 TABLA_POLITICAS = "aegis_politicas"
@@ -81,7 +96,8 @@ def configurado() -> bool:
     reiniciar nada.
     """
 
-    return bool(_url() and _clave())
+    apagado = bool(os.environ.get(APAGADO, "").strip())
+    return not apagado and bool(_url() and _clave())
 
 
 def _pedir(metodo: str, camino: str, cuerpo=None, cabeceras: dict | None = None):
@@ -213,9 +229,19 @@ def guardar_evento(evento: dict) -> bool:
     return respuesta is not None
 
 
-def leer_eventos(limite: int = 5000) -> list[dict] | None:
+def leer_eventos(limite: int = 5000, tenant: str | None = None) -> list[dict] | None:
+    """Los eventos, opcionalmente de una sola empresa.
+
+    El filtro se aplica **en la consulta** y no despues de traer todo: si se
+    filtrara en Python, los datos de las demas empresas igual habrian viajado
+    por la red y estarian en la memoria del proceso que atiende a una sola. El
+    aislamiento tiene que empezar donde estan los datos.
+    """
+
+    filtro = f"&tenant_id=eq.{tenant}" if tenant else ""
     filas = _pedir(
-        "GET", f"{TABLA_EVENTOS}?select=*&order=ocurrido_en.desc&limit={limite}"
+        "GET",
+        f"{TABLA_EVENTOS}?select=*{filtro}&order=ocurrido_en.desc&limit={limite}",
     )
     eventos = None
     if filas is not None:
