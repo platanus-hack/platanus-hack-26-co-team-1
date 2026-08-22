@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 from mitmproxy import http
@@ -21,8 +22,48 @@ METHODS_WITH_PAYLOAD = frozenset({"POST", "PUT", "PATCH"})
 PREVIEW_BYTES = 4000
 
 _HTML_HEADERS = {"Content-Type": "text/html; charset=utf-8"}
+_JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 
 _WS_REDACTED = "[Aegis bloqueo este mensaje: contenia informacion sensible]"
+
+
+def _is_navigation(flow: http.HTTPFlow) -> bool:
+    """Distingue abrir una pagina de una llamada interna de la aplicacion.
+
+    Contestarle a un fetch con una pagina HTML deja a la aplicacion girando para
+    siempre: recibe algo que no sabe interpretar y no muestra ningun error. El
+    usuario se queda sin entender que paso, que es exactamente lo que Aegis
+    existe para evitar.
+    """
+
+    destino = flow.request.headers.get("Sec-Fetch-Dest", "")
+    if destino:
+        navegacion = destino == "document"
+    else:
+        acepta = flow.request.headers.get("Accept", "")
+        navegacion = "text/html" in acepta and "application/json" not in acepta
+    return navegacion
+
+
+def _deny(flow: http.HTTPFlow, html: str, mensaje: str, cabeceras: dict) -> None:
+    """Responde con la pagina o con un error que la aplicacion pueda mostrar."""
+
+    if _is_navigation(flow):
+        cuerpo = html.encode("utf-8")
+        tipo = _HTML_HEADERS
+    else:
+        cuerpo = json.dumps(
+            {
+                "error": {
+                    "type": "aegis_blocked",
+                    "message": mensaje,
+                    "code": "blocked_by_aegis",
+                }
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        tipo = _JSON_HEADERS
+    flow.response = http.Response.make(403, cuerpo, {**tipo, **cabeceras})
 
 
 class Aegis:
@@ -93,10 +134,12 @@ class Aegis:
             payload_bytes=len(flow.request.raw_content or b""),
             truncated=False,
         )
-        flow.response = http.Response.make(
-            403,
-            blockpage.destination_blocked(host, approved).encode("utf-8"),
-            {**_HTML_HEADERS, "X-Aegis-Action": "block_destination"},
+        _deny(
+            flow,
+            blockpage.destination_blocked(host, approved),
+            f"Aegis bloqueo la conexion: {host} no es una herramienta de IA "
+            f"aprobada por tu empresa. Usa {', '.join(approved)}.",
+            {"X-Aegis-Action": "block_destination"},
         )
 
     def _inspect(
@@ -134,13 +177,15 @@ class Aegis:
                     payload_bytes=len(body),
                     truncated=result.truncated,
                 )
-                flow.response = http.Response.make(
-                    403,
+                leccion = lesson_for(worst.rule_id)
+                _deny(
+                    flow,
                     blockpage.content_blocked(
-                        host, worst.rule_id, worst.evidence, lesson_for(worst.rule_id)
-                    ).encode("utf-8"),
+                        host, worst.rule_id, worst.evidence, leccion
+                    ),
+                    f"Aegis bloqueo el envio: {leccion['title']}. "
+                    f"{leccion['what_to_do']}",
                     {
-                        **_HTML_HEADERS,
                         "X-Aegis-Action": "block_content",
                         "X-Aegis-Rule": worst.rule_id,
                     },
