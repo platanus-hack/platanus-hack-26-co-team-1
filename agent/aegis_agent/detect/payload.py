@@ -12,6 +12,7 @@ from collections import Counter
 from dataclasses import dataclass
 from urllib.parse import unquote_plus
 
+from . import diccionario
 from .engine import scan
 from .files import scan_files
 from .model import scan_model
@@ -301,7 +302,9 @@ def _cadenas(dato) -> list[str]:
     return encontradas
 
 
-def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
+def scan_payload(
+    body: bytes | None, query: str = "", terminos: dict[str, str] | None = None
+) -> ScanResult:
     """Escanea un request completo, incluidas sus formas ofuscadas.
 
     Devuelve hallazgos deduplicados: el mismo secreto visto en el texto plano y
@@ -359,7 +362,13 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
             scanned += 1
             # El tope de la vista incluye la cola: recortar aca de nuevo dejaria
             # afuera justo el pedazo que se conservo para no perder el final.
-            view_findings = scan(view[: MAX_INSPECT_BYTES + TAIL_BYTES])
+            recorte = view[: MAX_INSPECT_BYTES + TAIL_BYTES]
+            view_findings = scan(recorte)
+            # El diccionario de la empresa se mira sobre las mismas vistas que
+            # las reglas: si comprimir el cuerpo o pasarlo por base64 alcanzara
+            # para esconder el nombre de un cliente, la lista no serviria.
+            if terminos:
+                view_findings = view_findings + diccionario.buscar(recorte, terminos)
             for rule_id, total in Counter(f.rule_id for f in view_findings).items():
                 # Se toma el maximo por vista y no la suma: el mismo export visto
                 # en texto plano y en base64 no son dos fugas distintas.

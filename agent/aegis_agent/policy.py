@@ -128,6 +128,19 @@ class Policy:
     # reves. Y esto NO le llega al detector, que sigue recibiendo texto y destino
     # y nada mas.
     app_actions: dict[str, str] = field(default_factory=dict)
+    # El diccionario de la empresa: termino -> etiqueta. Lo que solo esta
+    # empresa sabe que es suyo, y por lo tanto lo unico que ningun detector
+    # generico puede tener. Ver detect/diccionario.py.
+    #
+    # Vive en la politica y no en el codigo porque es, literalmente, la lista
+    # mas sensible que tiene la empresa: nombres de clientes, proyectos sin
+    # anunciar, dominios internos. Se edita desde el panel y viaja como el resto
+    # de la politica.
+    company_terms: dict[str, str] = field(default_factory=dict)
+    # Igual que con el modelo: la empresa decide cuanta autoridad le da a su
+    # propia lista. Por defecto corta, porque un termino declarado es una
+    # decision explicita y no una probabilidad.
+    company_terms_action: str = "block"
     # Que hacer con un intento de inyeccion de prompt. Por defecto avisa: la
     # deteccion es heuristica, igual que la del modelo, y cortarle a alguien la
     # respuesta a mitad de una conversacion por una probabilidad es la forma mas
@@ -164,6 +177,8 @@ class Policy:
             "model_labels": list(self.model_labels),
             "model_threshold": self.model_threshold,
             "injection_action": self.injection_action,
+            "company_terms": dict(sorted(self.company_terms.items())),
+            "company_terms_action": self.company_terms_action,
             "app_actions": dict(sorted(self.app_actions.items())),
             "blind_spot_action": self.blind_spot_action,
         }
@@ -196,7 +211,7 @@ class Policy:
             "warn_categories",
         )
         campos_tupla = ("model_labels",)
-        campos_dict = ("app_actions",)
+        campos_dict = ("app_actions", "company_terms")
         campos_simples = (
             "tenant_id",
             "unknown_domain_action",
@@ -204,6 +219,7 @@ class Policy:
             "model_action",
             "model_threshold",
             "injection_action",
+            "company_terms_action",
             "blind_spot_action",
         )
 
@@ -403,6 +419,16 @@ def decidir_sobre(
     # se registra igual y la empresa lo ve en el panel. Va antes que la rebaja
     # del modelo porque una vez que quedo en "warn" ya no hay nada que rebajar.
     if action == "block_content" and modo_de_la_app(proceso, policy) == OBSERVAR:
+        action = "warn"
+
+    # El diccionario es de la empresa: si ella misma prefiere solo enterarse, se
+    # le hace caso. Va antes que la rebaja del modelo porque son excluyentes.
+    if (
+        peor is not None
+        and action == "block_content"
+        and peor.rule_id.startswith("empresa_")
+        and policy.company_terms_action == "warn"
+    ):
         action = "warn"
 
     if peor is not None and action == "block_content" and peor.rule_id.startswith("modelo:"):

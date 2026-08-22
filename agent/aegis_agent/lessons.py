@@ -232,6 +232,25 @@ def _guardar(rule_id: str, leccion: dict) -> None:
         pass
 
 
+# El diccionario de la empresa genera un rule_id por etiqueta
+# (empresa_cliente, empresa_proyecto...), asi que no se pueden escribir todas a
+# mano: la empresa inventa las etiquetas. Esta es la leccion de la familia.
+_DICCIONARIO = {
+    "title": "Ese nombre es informacion interna de la empresa",
+    "why": (
+        "Tu empresa marco ese termino como algo que no debe salir. No es una "
+        "regla generica: alguien decidio explicitamente que ese nombre, ese "
+        "cliente o ese proyecto no se comparte afuera, y probablemente sepa por "
+        "que mejor que ninguna herramienta."
+    ),
+    "what_to_do": (
+        "Reemplazalo por algo generico (el cliente, el proyecto) y volve a "
+        "intentar. La IA te ayuda igual: casi nunca necesita el nombre real para "
+        "resolver lo que le estas pidiendo."
+    ),
+}
+
+
 def lesson_for(rule_id: str) -> dict[str, str]:
     """La leccion para una regla: la generada si ya existe, si no la de siempre."""
 
@@ -239,7 +258,12 @@ def lesson_for(rule_id: str) -> dict[str, str]:
     completa = isinstance(generada, dict) and all(
         generada.get(clave) for clave in ("title", "why", "what_to_do")
     )
-    return generada if completa else _BY_RULE.get(rule_id, _DEFAULT)
+    if completa:
+        leccion = generada
+    else:
+        respaldo = _DICCIONARIO if rule_id.startswith("empresa_") else _DEFAULT
+        leccion = _BY_RULE.get(rule_id, respaldo)
+    return leccion
 
 
 def pedir_en_segundo_plano(evento: dict, url_base: str, repeticiones: int = 0) -> None:
