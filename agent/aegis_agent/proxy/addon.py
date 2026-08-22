@@ -7,7 +7,8 @@ import time
 
 from mitmproxy import http
 
-from ..detect.payload import scan_payload
+from ..detect.owners import exento
+from ..detect.payload import ScanResult, scan_payload
 from ..domains import DomainClient
 from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
@@ -201,6 +202,16 @@ class Aegis:
 
         if classification != "non_ai":
             result = scan_payload(body, query)
+            # Una credencial que viaja hacia su propio dueno no es una fuga: es
+            # su uso normal. Claude Code manda su token a api.anthropic.com en
+            # cada peticion, y bloquear eso solo logra que la herramienta no
+            # pueda autenticarse.
+            hallazgos = [
+                f for f in result.findings if not exento(f.rule_id, host, flow.request.path)
+            ]
+            result = ScanResult(
+                findings=hallazgos, truncated=result.truncated, views=result.views
+            )
             categories = {finding.category for finding in result.findings}
             action = decide(classification, categories, self.policy)
             worst = result.findings[0] if result.findings else None

@@ -22,6 +22,13 @@ def shannon_entropy(value: str) -> float:
     return entropy
 
 
+# Un valor que arranca con uno de estos no es una credencial: es marcado, una
+# plantilla o un fragmento de codigo dentro de un texto. Aparecio en vivo, con
+# Claude Code mandando su contexto: un `git ...` en markdown, precedido por la
+# palabra "credencial", bloqueaba una sesion entera.
+_INICIOS_DE_MARCADO = ("`", "<", "{", "$", "(", "[", "%", "*", "#", "|")
+
+
 def looks_random(value: str, threshold: float = DEFAULT_ENTROPY_THRESHOLD) -> bool:
     """Filtro para las reglas genericas del tipo ``password = ...``.
 
@@ -29,7 +36,7 @@ def looks_random(value: str, threshold: float = DEFAULT_ENTROPY_THRESHOLD) -> bo
     critico y el producto se vuelve ruido.
     """
 
-    if len(value) < MIN_SECRET_LEN:
+    if len(value) < MIN_SECRET_LEN or value.startswith(_INICIOS_DE_MARCADO):
         result = False
     else:
         if " " in value.strip():

@@ -30,6 +30,8 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Base colaborativa de dominios + clasificador | Funciona | `backend/aegis_backend/` |
 | Panel de la empresa | Funciona, desplegado | `agent/aegis_agent/panel/`, `api/index.py` |
 | Instalador para Windows (CA + proxy + variables) | Funciona | `agent/aegis_agent/install/windows.py` |
+| Cobertura de **Claude Code** | Verificada con el CLI real | ver §9 |
+| Cobertura de **Codex** | Mecanismo listo, **sin verificar** | ver §9 |
 | Lecciones pedagógicas | Locales, estáticas | `agent/aegis_agent/lessons.py` |
 
 **Panel desplegado:** https://aegis-theta-eight.vercel.app
@@ -89,6 +91,8 @@ Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
 | El prompt viaja dentro de un JSON, así que `password = "..."` llega escapado y ninguna regla lo veía. | `test_proveedores.py` |
 | Responder a un `fetch` con HTML deja la aplicación girando para siempre. Ahora se responde JSON si no es una navegación. | `test_respuesta_bloqueo.py` |
 | Las etiquetas descriptivas le funcionan peor al modelo que las cortas. | `bench/evaluar_modelo.py` |
+| Con Aegis en el medio, **Claude Code no podia ni autenticarse**: su propio token hacia api.anthropic.com se leia como una fuga. Una credencial que va hacia su dueño no es una fuga. | `test_dueno_de_la_credencial.py` |
+| La regla genérica disparaba sobre marcado: un `` `git ... `` en el contexto bloqueaba una sesión limpia. | `test_dueno_de_la_credencial.py` |
 
 ## 6. Trampa de herramientas que te va a morder
 
@@ -122,6 +126,26 @@ En el orden en que más valor agregan:
    El actual son 17 frases escritas a mano en `bench/evaluar_modelo.py`.
 4. **Vercel KV** para que el panel desplegado no pierda los eventos.
 5. **Instalador de macOS**, si hay alguien del equipo en Mac.
+
+## 9. Cobertura de los CLI de IA
+
+**Claude Code: verificado con el binario real**, no con una simulación.
+
+```
+claude -p "Responde solo con la palabra LISTO"          -> LISTO
+claude -p "Revisa: AWS_ACCESS_KEY_ID=AKIAIOSF..."       -> 403, con la lección
+                                                            dentro del propio CLI
+```
+
+Funciona porque Claude Code lee `HTTPS_PROXY` y `NODE_EXTRA_CA_CERTS`, que el
+instalador deja puestas. La lección viaja en el `error.message` del 403, así que
+la persona la ve sin salir de la terminal.
+
+**Codex: sin verificar.** No está instalado en la máquina de desarrollo. El
+mecanismo es el mismo y las variables ya están puestas (`CODEX_CA_CERTIFICATE`,
+`SSL_CERT_FILE`, `HTTPS_PROXY`), y la documentación de OpenAI dice que el CLI las
+honra, pero **eso no es lo mismo que haberlo probado**. Si instalás Codex, la
+prueba es idéntica a la de arriba y toma dos minutos.
 
 ## 8. Documentos
 
