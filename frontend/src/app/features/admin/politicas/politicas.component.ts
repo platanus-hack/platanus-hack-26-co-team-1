@@ -5,6 +5,7 @@ import { TabsComponent, TabItem } from '../../../shared/ui/tabs/tabs.component';
 import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
 import { colorForName } from '../../../shared/utils/color-hash';
 import { PoliticaService } from '../../../shared/data/politica.service';
+import { DirectorioService } from '../../../shared/data/directorio.service';
 
 interface Herramienta {
   nombre: string;
@@ -39,6 +40,7 @@ interface Excepcion {
 export class PoliticasComponent implements OnInit {
   protected readonly colorForName = colorForName;
   private readonly servicio = inject(PoliticaService);
+  private readonly directorio = inject(DirectorioService);
 
   readonly politica = this.servicio.politica;
   readonly guardando = this.servicio.guardando;
@@ -47,6 +49,30 @@ export class PoliticasComponent implements OnInit {
   async ngOnInit(): Promise<void> {
     await this.servicio.cargar();
     this.tomarDeLaPolitica();
+    // Las apps de la lista salen del inventario y no de una constante: son las
+    // que de verdad corren en la empresa, descubiertas por su propio tráfico.
+    void this.directorio.cargarInventario();
+  }
+
+  /** Las aplicaciones que Aegis vio corriendo, para poder tratarlas distinto. */
+  get aplicaciones(): { nombre: string; modo: string }[] {
+    const modos = this.politica().app_actions;
+    return this.directorio
+      .inventario()
+      .filter((f) => f.clase === 'agente')
+      .map((f) => ({ nombre: f.nombre, modo: modos[f.nombre] ?? 'bloquear' }));
+  }
+
+  async cambiarModoDeApp(nombre: string, modo: string): Promise<void> {
+    const app_actions = { ...this.politica().app_actions };
+    // 'bloquear' es el valor por defecto: guardarlo explícitamente llenaría la
+    // política de filas que no dicen nada. Se quita en vez de escribirse.
+    if (modo === 'bloquear') {
+      delete app_actions[nombre];
+    } else {
+      app_actions[nombre] = modo;
+    }
+    await this.servicio.guardar({ app_actions });
   }
 
   /** De la política guardada a los controles de la pantalla. */
@@ -101,6 +127,33 @@ export class PoliticasComponent implements OnInit {
     await this.persistir();
   }
 
+  // --- Lo que el motor ya sabía hacer y nadie podía configurar --------------
+  //
+  // Estos cuatro campos existían en la política desde hace rato y no tenían
+  // ningún control: se decidían por defecto y para cambiarlos había que editar
+  // un JSON a mano. Son las tres detecciones probabilísticas del sistema
+  // -modelo, inyección, punto ciego- más el umbral del modelo, y todas
+  // comparten el mismo dilema: cortar por una probabilidad es la forma más
+  // rápida de que alguien desinstale Aegis, y no cortar es dejar pasar.
+
+  readonly opcionesAccion = [
+    { valor: 'block', etiqueta: 'Bloquear el envío' },
+    { valor: 'warn', etiqueta: 'Sólo avisar' },
+  ];
+
+  async cambiarAvanzado(campo: string, valor: string): Promise<void> {
+    await this.servicio.guardar({ [campo]: valor } as any);
+  }
+
+  async cambiarUmbral(valor: string): Promise<void> {
+    const numero = Number(valor);
+    // Fuera de [0,1] el umbral no significa nada: 0 marca todo y >1 no marca
+    // nada, y las dos cosas parecen "el modelo dejó de funcionar".
+    if (!Number.isNaN(numero) && numero >= 0 && numero <= 1) {
+      await this.servicio.guardar({ model_threshold: numero });
+    }
+  }
+
   // --- El diccionario de la empresa ---------------------------------------
   //
   // Es el detector de mayor precisión que hay, porque ningún detector genérico
@@ -131,6 +184,7 @@ export class PoliticasComponent implements OnInit {
     { id: 'herramientas', label: 'Herramientas y URLs' },
     { id: 'dlp', label: 'Reglas de DLP' },
     { id: 'diccionario', label: 'Diccionario de la empresa' },
+    { id: 'avanzado', label: 'Detección' },
     { id: 'asignacion', label: 'Asignación' },
   ];
   activeTab = 'herramientas';
