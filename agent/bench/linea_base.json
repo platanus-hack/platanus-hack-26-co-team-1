@@ -1,0 +1,24 @@
+{
+  "precision_del_corte": 1.0,
+  "tasa_fp_que_corta": 0.0,
+  "tasa_fp_total": 0.0,
+  "casos": 1375,
+  "recall": {
+    "secretos con formato": {
+      "total": 280,
+      "detectados": 280
+    },
+    "credenciales en espanol": {
+      "total": 256,
+      "detectados": 256
+    },
+    "documentos de identidad": {
+      "total": 77,
+      "detectados": 77
+    },
+    "exports y volcados": {
+      "total": 16,
+      "detectados": 16
+    }
+  }
+}
