@@ -1,4 +1,4 @@
-<div class="min-h-screen bg-aegis-bg lg:flex">
+<div class="min-h-screen bg-aegis-bg">
   <!-- Topbar: solo visible antes de lg, donde el sidebar se oculta como drawer. -->
   <header class="sticky top-0 z-30 flex items-center justify-between border-b border-aegis-border bg-aegis-surface px-4 py-3 lg:hidden">
     <app-logo [small]="true"></app-logo>
@@ -16,19 +16,23 @@
     <div class="fixed inset-0 z-40 bg-black/30 lg:hidden" (click)="sidebarOpen = false"></div>
   }
 
+  <!-- Fixed en todos los tamaños: en mobile queda fuera de pantalla vía translate, en desktop se queda pinneado mientras el contenido de la derecha scrollea. -->
   <aside
-    class="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-aegis-border bg-aegis-surface px-4 py-6 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-64 lg:shrink-0 lg:!translate-x-0"
+    class="fixed inset-y-0 left-0 z-50 flex w-72 flex-col overflow-hidden px-4 py-6 shadow-xl transition-transform duration-200 ease-out lg:w-64 lg:!translate-x-0"
+    style="background: linear-gradient(165deg, #0e5fa8 0%, #0a4879 100%)"
     [class.translate-x-0]="sidebarOpen"
     [class.-translate-x-full]="!sidebarOpen"
   >
-    <div class="mb-8 flex items-center justify-between px-2">
+    <app-gradient-waves></app-gradient-waves>
+
+    <div class="relative z-10 mb-8 flex items-center justify-between px-2">
       <div>
-        <app-logo></app-logo>
-        <p class="mt-1 pl-[30px] font-display text-[10px] uppercase tracking-[0.14em] text-aegis-faint">Consola admin</p>
+        <app-logo [light]="true"></app-logo>
+        <p class="mt-1 pl-[30px] font-display text-[10px] uppercase tracking-[0.14em] text-white/50">Consola admin</p>
       </div>
       <button
         type="button"
-        class="flex h-8 w-8 items-center justify-center rounded-lg text-aegis-dim transition hover:bg-aegis-surface2 hover:text-aegis-text lg:hidden"
+        class="flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition hover:bg-white/10 hover:text-white lg:hidden"
         (click)="sidebarOpen = false"
         aria-label="Cerrar menú"
       >
@@ -36,16 +40,16 @@
       </button>
     </div>
 
-    <nav class="flex flex-1 flex-col gap-1">
+    <nav class="relative z-10 flex flex-1 flex-col gap-1">
       @for (item of nav; track item.path) {
         <a
           [routerLink]="item.path"
-          routerLinkActive="bg-aegis-surface3 text-aegis-text border-aegis-borderlight"
+          routerLinkActive="bg-white/12 text-white border-white/15"
           [routerLinkActiveOptions]="{ exact: false }"
           (click)="sidebarOpen = false"
-          class="flex items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-sm text-aegis-dim transition-colors hover:text-aegis-text"
+          class="flex items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-sm text-white/65 transition-colors hover:text-white"
         >
-          <span class="flex h-5 w-5 items-center justify-center text-aegis-faint">
+          <span class="flex h-5 w-5 items-center justify-center text-aegis-highlight">
             @switch (item.icon) {
               @case ('building') {
                 <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><rect x="4" y="2" width="12" height="16" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M7 6h1M12 6h1M7 9h1M12 9h1M7 12h1M12 12h1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
@@ -69,13 +73,13 @@
       }
     </nav>
 
-    <div class="mt-auto rounded-lg border border-aegis-border bg-aegis-surface2 px-3 py-3">
-      <p class="font-display text-[10px] uppercase tracking-wide text-aegis-faint">Empresa</p>
-      <p class="mt-1 truncate text-sm text-aegis-text">Vertice Consulting</p>
+    <div class="relative z-10 mt-auto rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+      <p class="font-display text-[10px] uppercase tracking-wide text-white/50">Empresa</p>
+      <p class="mt-1 truncate text-sm text-white">Vertice Consulting</p>
     </div>
   </aside>
 
-  <div class="flex min-h-screen flex-1 flex-col overflow-x-hidden">
+  <div class="flex min-h-screen flex-col overflow-x-hidden lg:pl-64">
     <router-outlet></router-outlet>
   </div>
 </div>

@@ -1,11 +1,86 @@
-<header class="border-b border-aegis-border bg-aegis-surface px-4 py-6 sm:px-8">
-  <p class="aegis-label">Configuración inicial</p>
-  <h1 class="mt-1 font-display text-xl font-semibold text-aegis-text">Alta de colaboradores</h1>
-  <p class="mt-1 max-w-2xl text-sm text-aegis-dim">Da acceso a tu equipo de forma individual o mediante carga masiva. Cada colaborador inicia en estado "pendiente" hasta su primer login.</p>
+<header class="relative overflow-hidden border-b border-aegis-border bg-aegis-surface px-4 py-8 sm:px-8">
+  <div class="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-aegis-accent/10 blur-3xl"></div>
+  <div class="pointer-events-none absolute -right-4 top-8 h-40 w-40 rounded-full bg-aegis-highlight/10 blur-3xl"></div>
+  <div class="relative">
+    <p class="aegis-label">Equipo</p>
+    <h1 class="mt-1 font-display text-2xl font-semibold text-aegis-text">Colaboradores</h1>
+    <p class="mt-1.5 max-w-2xl text-sm text-aegis-dim">Busca a cualquiera de tu equipo, o da de acceso a gente nueva de forma individual o por carga masiva.</p>
+  </div>
 </header>
 
 <main class="flex-1 px-4 py-6 sm:px-8">
   <app-tabs [tabs]="tabs" [active]="activeTab" (activeChange)="activeTab = $event"></app-tabs>
+
+  @if (activeTab === 'directorio') {
+    <div class="mt-6 flex flex-col gap-4">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="relative w-full sm:max-w-xs">
+          <svg viewBox="0 0 20 20" fill="none" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-aegis-faint"><circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.6"/><path d="M17 17l-4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <input class="aegis-input pl-9" type="text" placeholder="Buscar por nombre o cargo" [(ngModel)]="busqueda" />
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <select class="aegis-select w-auto py-2 text-sm" [(ngModel)]="filtroArea">
+            <option value="Todas">Todas las áreas</option>
+            @for (a of areas; track a) {
+              <option [value]="a">{{ a }}</option>
+            }
+          </select>
+          <select class="aegis-select w-auto py-2 text-sm" [(ngModel)]="filtroEstado">
+            <option value="Todos">Todos los estados</option>
+            <option value="activo">Activo</option>
+            <option value="pendiente">Pendiente</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="aegis-card overflow-hidden">
+        <div class="flex items-center justify-between border-b border-aegis-border px-6 py-4">
+          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Todo el equipo</h2>
+          <span class="font-display text-xs text-aegis-faint">{{ directorioFiltrado.length }} de {{ directorio.length }}</span>
+        </div>
+        @if (directorioFiltrado.length) {
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr class="aegis-label border-b border-aegis-border">
+                  <th class="px-6 py-3 font-medium">Colaborador</th>
+                  <th class="px-6 py-3 font-medium">Área</th>
+                  <th class="px-6 py-3 font-medium">Usuario</th>
+                  <th class="px-6 py-3 font-medium">Estado</th>
+                  <th class="px-6 py-3 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (c of directorioFiltrado; track c.id) {
+                  <tr class="border-b border-aegis-border/60 transition-colors last:border-0 hover:bg-aegis-surface2/60">
+                    <td class="px-6 py-3.5">
+                      <div class="flex items-center gap-3">
+                        <app-avatar-stack [names]="[c.nombre]"></app-avatar-stack>
+                        <div>
+                          <p class="font-medium text-aegis-text">{{ c.nombre }}</p>
+                          <p class="text-xs text-aegis-faint">{{ c.cargo }}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="px-6 py-3.5 text-aegis-dim">{{ c.area }}</td>
+                    <td class="px-6 py-3.5 font-display text-aegis-dim">{{ c.usuario }}</td>
+                    <td class="px-6 py-3.5">
+                      <app-badge [tone]="c.estado === 'activo' ? 'green' : 'amber'">{{ c.estado }}</app-badge>
+                    </td>
+                    <td class="px-6 py-3.5 text-right">
+                      <a [routerLink]="['/admin/panel', c.id]" class="aegis-btn-ghost inline-flex px-2 py-1">Ver detalle ↗</a>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="px-6 py-10 text-center text-sm text-aegis-faint">Nadie coincide con esa búsqueda o esos filtros.</p>
+        }
+      </div>
+    </div>
+  }
 
   @if (activeTab === 'individual') {
     <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
@@ -33,18 +108,14 @@
             <label class="aegis-label">Usuario</label>
             <input class="aegis-input mt-1.5" type="text" placeholder="usuario.acceso" [(ngModel)]="form.usuario" />
           </div>
-          <div>
-            <label class="aegis-label">Contraseña de primer acceso</label>
-            <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="form.password" />
-          </div>
           <button type="button" class="aegis-btn-primary mt-2" (click)="agregarColaborador()">Agregar colaborador</button>
         </div>
       </div>
 
       <div class="aegis-card overflow-hidden">
         <div class="flex items-center justify-between border-b border-aegis-border px-6 py-4">
-          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Colaboradores agregados</h2>
-          <span class="font-display text-xs text-aegis-faint">{{ colaboradores.length }} en total</span>
+          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Agregados en esta sesión</h2>
+          <span class="font-display text-xs text-aegis-faint">{{ agregadosRecientemente.length }}</span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm">
@@ -57,11 +128,11 @@
               </tr>
             </thead>
             <tbody>
-              @for (c of colaboradores; track c.usuario) {
+              @for (c of agregadosRecientemente; track c.usuario) {
                 <tr class="border-b border-aegis-border/60 last:border-0">
                   <td class="px-6 py-3.5 text-aegis-text">{{ c.nombre }}</td>
-                  <td class="px-6 py-3.5 text-aegis-dim">{{ c.cargo || '—' }}</td>
-                  <td class="px-6 py-3.5 text-aegis-dim">{{ c.area || '—' }}</td>
+                  <td class="px-6 py-3.5 text-aegis-dim">{{ c.cargo || '(sin cargo)' }}</td>
+                  <td class="px-6 py-3.5 text-aegis-dim">{{ c.area || '(sin área)' }}</td>
                   <td class="px-6 py-3.5">
                     <app-badge [tone]="c.estado === 'activo' ? 'green' : 'amber'">{{ c.estado }}</app-badge>
                   </td>
@@ -113,7 +184,7 @@
                 @for (f of filasBulk; track f.fila) {
                   <tr class="border-b border-aegis-border/60 last:border-0" [class.bg-aegis-red/10]="f.error">
                     <td class="px-6 py-3.5 font-display text-aegis-faint">{{ f.fila }}</td>
-                    <td class="px-6 py-3.5 text-aegis-text">{{ f.nombre || '—' }}</td>
+                    <td class="px-6 py-3.5 text-aegis-text">{{ f.nombre || '(sin nombre)' }}</td>
                     <td class="px-6 py-3.5 text-aegis-dim">{{ f.cargo }}</td>
                     <td class="px-6 py-3.5 text-aegis-dim">{{ f.area }}</td>
                     <td class="px-6 py-3.5 text-aegis-dim">{{ f.usuario }}</td>

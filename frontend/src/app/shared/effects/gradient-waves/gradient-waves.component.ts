@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, Input, OnDestroy, ViewChild } from '@angular/core';
+import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, Input, OnDestroy, ViewChild } from '@angular/core';
 import { Mesh, Program, Renderer, Triangle } from 'ogl';
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -156,6 +156,7 @@ void main() {
       height: 100%;
     }
   `],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class GradientWavesComponent implements AfterViewInit, OnDestroy {
   @ViewChild('container', { static: true }) containerRef!: ElementRef<HTMLDivElement>;

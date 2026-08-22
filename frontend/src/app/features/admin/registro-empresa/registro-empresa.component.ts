@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { GradientWavesComponent } from '../../../shared/effects/gradient-waves/gradient-waves.component';
 import { VerticalStepperComponent } from '../../../shared/ui/vertical-stepper/vertical-stepper.component';
 import { LogoComponent } from '../../../shared/ui/logo/logo.component';
@@ -24,7 +24,7 @@ interface AdminForm {
 @Component({
   selector: 'app-registro-empresa',
   standalone: true,
-  imports: [CommonModule, FormsModule, GradientWavesComponent, VerticalStepperComponent, LogoComponent],
+  imports: [CommonModule, FormsModule, RouterLink, GradientWavesComponent, VerticalStepperComponent, LogoComponent],
   templateUrl: './registro-empresa.component.html',
 })
 export class RegistroEmpresaComponent {

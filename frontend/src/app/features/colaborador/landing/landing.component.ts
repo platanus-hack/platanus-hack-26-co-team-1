@@ -1,8 +1,10 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { GradientWavesComponent } from '../../../shared/effects/gradient-waves/gradient-waves.component';
 import { HalftoneShieldComponent } from '../../../shared/effects/halftone-shield/halftone-shield.component';
+import { ParticlesFieldComponent } from '../../../shared/effects/particles-field/particles-field.component';
 import { RadarComponent } from '../../../shared/effects/radar/radar.component';
+import { ScrollGrowComponent } from '../../../shared/effects/scroll-grow/scroll-grow.component';
 import { LogoComponent } from '../../../shared/ui/logo/logo.component';
 import { CountUpComponent } from '../../../shared/ui/count-up/count-up.component';
 
@@ -16,8 +18,24 @@ interface Stat {
 @Component({
   selector: 'app-landing',
   standalone: true,
-  imports: [RouterLink, GradientWavesComponent, HalftoneShieldComponent, RadarComponent, LogoComponent, CountUpComponent],
+  imports: [
+    RouterLink,
+    GradientWavesComponent,
+    HalftoneShieldComponent,
+    ParticlesFieldComponent,
+    RadarComponent,
+    ScrollGrowComponent,
+    LogoComponent,
+    CountUpComponent,
+  ],
   templateUrl: './landing.component.html',
+  // Sin esto, en una app zoneless cualquier signal que cambia en CUALQUIER
+  // parte del árbol agenda un tick que revisa igual TODOS los bindings de
+  // esta plantilla entera (partículas, radar, cada stat con su count-up,
+  // etc). El scroll-grow escribe un signal en cada frame de scroll, así
+  // que sin OnPush eso eran decenas de recorridos completos por segundo,
+  // solo mientras se scrollea esa sección: por eso ahí y no en el resto.
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class LandingComponent {
   readonly pasos = [

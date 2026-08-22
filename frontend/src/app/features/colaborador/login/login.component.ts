@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { GradientWavesComponent } from '../../../shared/effects/gradient-waves/gradient-waves.component';
 import { LogoComponent } from '../../../shared/ui/logo/logo.component';
 import { SesionService } from '../../../shared/data/sesion.service';
@@ -16,7 +16,7 @@ import { SesionService } from '../../../shared/data/sesion.service';
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [FormsModule, GradientWavesComponent, LogoComponent],
+  imports: [FormsModule, RouterLink, GradientWavesComponent, LogoComponent],
   templateUrl: './login.component.html',
 })
 export class LoginComponent {

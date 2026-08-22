@@ -1,13 +1,24 @@
-<header class="flex flex-wrap items-center justify-between gap-4 border-b border-aegis-border bg-aegis-surface px-4 py-6 sm:px-8">
-  <div>
+<header class="relative flex flex-wrap items-center justify-between gap-4 overflow-hidden border-b border-aegis-border bg-aegis-surface px-4 py-8 sm:px-8">
+  <div class="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-aegis-accent/10 blur-3xl"></div>
+  <div class="pointer-events-none absolute -right-4 top-8 h-40 w-40 rounded-full bg-aegis-highlight/10 blur-3xl"></div>
+  <div class="relative">
     <p class="aegis-label">Vista agregada</p>
-    <h1 class="mt-1 font-display text-xl font-semibold text-aegis-text">Panel general</h1>
+    <h1 class="mt-1 font-display text-2xl font-semibold text-aegis-text">Panel general</h1>
   </div>
-  <select class="aegis-select w-48" [(ngModel)]="rango">
+  <div class="relative inline-flex flex-wrap gap-1 rounded-lg border border-aegis-border bg-aegis-surface2 p-1">
     @for (r of rangos; track r) {
-      <option [value]="r">{{ r }}</option>
+      <button
+        type="button"
+        class="rounded-md px-3 py-1.5 font-display text-xs font-medium transition-colors"
+        [class.bg-aegis-surface]="rango === r"
+        [class.text-aegis-text]="rango === r"
+        [class.shadow-panel]="rango === r"
+        [class.text-aegis-dim]="rango !== r"
+        [class.hover:text-aegis-text]="rango !== r"
+        (click)="rango = r"
+      >{{ r }}</button>
     }
-  </select>
+  </div>
 </header>
 
 <main class="flex-1 px-4 py-6 sm:px-8">
@@ -29,7 +40,12 @@
 
   <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
     <div class="aegis-card p-6">
-      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Áreas más vulnerables</h2>
+      <div class="mb-4 flex items-center gap-2.5">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-red/10 text-aegis-red">
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><path d="M10 2l7 12H3L10 2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 8v3.2M10 13.8v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </span>
+        <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Áreas más vulnerables</h2>
+      </div>
       <div class="flex flex-col gap-3.5">
         @for (a of m().areasVulnerables; track a.nombre) {
           <div>
@@ -46,7 +62,12 @@
     </div>
 
     <div class="aegis-card p-6">
-      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Áreas que más usan IA</h2>
+      <div class="mb-4 flex items-center gap-2.5">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><path d="M3 17V9M9 17V3M15 17v-6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </span>
+        <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Áreas que más usan IA</h2>
+      </div>
       <div class="flex flex-col gap-3.5">
         @for (a of areasUsoIa; track a.nombre) {
           <div>
@@ -63,7 +84,12 @@
     </div>
 
     <div class="aegis-card p-6">
-      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Herramienta de IA más usada</h2>
+      <div class="mb-4 flex items-center gap-2.5">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-amber/10 text-aegis-amber">
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><path d="M10 2l1.6 4.6L16 8l-4.4 1.4L10 14l-1.6-4.6L4 8l4.4-1.4L10 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        </span>
+        <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Herramienta de IA más usada</h2>
+      </div>
       <div class="flex flex-col gap-3.5">
         @for (h of herramientas; track h.nombre) {
           <div>
@@ -138,14 +164,22 @@
 
   <div class="mt-6 aegis-card overflow-hidden">
     <div class="flex items-center justify-between border-b border-aegis-border px-6 py-4">
-      <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Colaboradores</h2>
-      <span class="font-display text-xs text-aegis-faint">{{ colaboradores.length }} en total</span>
+      <div class="flex items-center gap-2.5">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><circle cx="7" cy="7" r="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 16c.5-3 2.2-4.5 4.5-4.5s4 1.5 4.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="14" cy="7.5" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M12.5 11.5c1.8.2 3 1.5 3.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </span>
+        <div>
+          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Necesitan atención esta semana</h2>
+          <p class="mt-0.5 text-sm text-aegis-dim">Colaboradores con al menos un intento detectado.</p>
+        </div>
+      </div>
+      <a routerLink="/admin/colaboradores" class="aegis-btn-ghost shrink-0 px-2 py-1">Ver directorio completo ↗</a>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full text-left text-sm">
         <thead>
           <tr class="aegis-label border-b border-aegis-border">
-            <th class="px-6 py-3 font-medium">Nombre</th>
+            <th class="px-6 py-3 font-medium">Colaborador</th>
             <th class="px-6 py-3 font-medium">Área</th>
             <th class="px-6 py-3 font-medium">Estado</th>
             <th class="px-6 py-3 font-medium">Intentos (7d)</th>
@@ -154,15 +188,23 @@
         </thead>
         <tbody>
           @for (c of colaboradores; track c.id) {
-            <tr class="border-b border-aegis-border/60 last:border-0">
-              <td class="px-6 py-3.5 text-aegis-text">{{ c.nombre }}</td>
+            <tr class="border-b border-aegis-border/60 transition-colors last:border-0 hover:bg-aegis-surface2/60">
+              <td class="px-6 py-3.5">
+                <div class="flex items-center gap-3">
+                  <app-avatar-stack [names]="[c.nombre]"></app-avatar-stack>
+                  <div>
+                    <p class="font-medium text-aegis-text">{{ c.nombre }}</p>
+                    <p class="text-xs text-aegis-faint">{{ c.cargo }}</p>
+                  </div>
+                </div>
+              </td>
               <td class="px-6 py-3.5 text-aegis-dim">{{ c.area }}</td>
               <td class="px-6 py-3.5">
                 <app-badge [tone]="c.estado === 'activo' ? 'green' : 'amber'">{{ c.estado }}</app-badge>
               </td>
               <td class="px-6 py-3.5 font-display text-aegis-dim">{{ c.intentos }}</td>
               <td class="px-6 py-3.5 text-right">
-                <a [routerLink]="['/admin/panel', c.id]" class="aegis-btn-ghost inline-flex px-2 py-1">Ver detalle →</a>
+                <a [routerLink]="['/admin/panel', c.id]" class="aegis-btn-ghost inline-flex px-2 py-1">Ver detalle ↗</a>
               </td>
             </tr>
           }
