@@ -16,6 +16,10 @@ from . import blockpage
 # inspecciona: no hay nada que inspeccionar y si el costo de hacerlo.
 METHODS_WITH_PAYLOAD = frozenset({"POST", "PUT", "PATCH"})
 
+# Lo que alcanza para decidir si un request tiene forma de llamada a un modelo.
+# Leer mas es gastar en el 97% del trafico que no va a ninguna IA.
+PREVIEW_BYTES = 4000
+
 _HTML_HEADERS = {"Content-Type": "text/html; charset=utf-8"}
 
 _WS_REDACTED = "[Aegis bloqueo este mensaje: contenia informacion sensible]"
@@ -102,53 +106,55 @@ class Aegis:
         # alcanzaria para pasar cualquier secreto sin que ninguna regla lo vea.
         body = flow.request.get_content(strict=False) or b""
         query = str(flow.request.query) if flow.request.query else ""
-        result = scan_payload(body, query)
 
+        # El destino filtra antes que el contenido. Un equipo genera miles de
+        # peticiones por hora y casi ninguna va a una IA: escanearlas todas
+        # gasta CPU en cada clic y llena el panel de hallazgos que a nadie le
+        # importan, porque el dato nunca estuvo yendo a un modelo.
         if classification == "non_ai":
-            preview = body[:4000].decode("utf-8", errors="replace")
+            preview = body[:PREVIEW_BYTES].decode("utf-8", errors="replace")
             if looks_like_ai_api(flow.request.path, preview):
                 classification = "ai_unknown"
                 # Se manda a clasificar para que la proxima vez el veredicto ya
                 # exista, aca y en todos los demas clientes de la red.
                 self.domains.request_classification(host)
 
-        if classification == "non_ai":
-            action = "allow"
-        else:
+        if classification != "non_ai":
+            result = scan_payload(body, query)
             categories = {finding.category for finding in result.findings}
             action = decide(classification, categories, self.policy)
+            worst = result.findings[0] if result.findings else None
 
-        worst = result.findings[0] if result.findings else None
-        if action == "block_content" and worst is not None:
-            self._record(
-                host=host,
-                classification=classification,
-                finding=worst,
-                action="blocked",
-                payload_bytes=len(body),
-                truncated=result.truncated,
-            )
-            flow.response = http.Response.make(
-                403,
-                blockpage.content_blocked(
-                    host, worst.rule_id, worst.evidence, lesson_for(worst.rule_id)
-                ).encode("utf-8"),
-                {
-                    **_HTML_HEADERS,
-                    "X-Aegis-Action": "block_content",
-                    "X-Aegis-Rule": worst.rule_id,
-                },
-            )
-        else:
-            if worst is not None:
+            if action == "block_content" and worst is not None:
                 self._record(
                     host=host,
                     classification=classification,
                     finding=worst,
-                    action="warned" if action == "warn" else "allowed",
+                    action="blocked",
                     payload_bytes=len(body),
                     truncated=result.truncated,
                 )
+                flow.response = http.Response.make(
+                    403,
+                    blockpage.content_blocked(
+                        host, worst.rule_id, worst.evidence, lesson_for(worst.rule_id)
+                    ).encode("utf-8"),
+                    {
+                        **_HTML_HEADERS,
+                        "X-Aegis-Action": "block_content",
+                        "X-Aegis-Rule": worst.rule_id,
+                    },
+                )
+            else:
+                if worst is not None:
+                    self._record(
+                        host=host,
+                        classification=classification,
+                        finding=worst,
+                        action="warned" if action == "warn" else "allowed",
+                        payload_bytes=len(body),
+                        truncated=result.truncated,
+                    )
 
     def _record(
         self,
