@@ -44,3 +44,8 @@ aegis-lessons-cache.json
 # El build del front: se genera en cada despliegue, no se versiona.
 frontend/node_modules
 frontend/dist
+
+# Windows crea esta carpeta literal cuando algo resuelve %SystemDrive% sin
+# expandir: son sus caches de iconos, aparecen al correr la suite y no son del
+# proyecto. Se colaron en un commit una vez.
+%SystemDrive%/
