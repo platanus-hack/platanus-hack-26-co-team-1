@@ -134,13 +134,66 @@ _SECRETS: tuple[Rule, ...] = (
         description="Cadena de conexion a base de datos con credenciales",
     ),
     Rule(
+        id="sendgrid_api_key",
+        category="secret",
+        severity="critical",
+        confidence=0.99,
+        pattern=_compile(r"\bSG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"),
+        description="API key de SendGrid",
+    ),
+    Rule(
+        id="mailgun_api_key",
+        category="secret",
+        severity="critical",
+        confidence=0.97,
+        pattern=_compile(r"\bkey-[0-9a-f]{32}\b"),
+        description="API key de Mailgun",
+    ),
+    Rule(
+        id="digitalocean_token",
+        category="secret",
+        severity="critical",
+        confidence=0.99,
+        pattern=_compile(r"\bdop_v1_[0-9a-f]{32,}"),
+        description="Token de DigitalOcean",
+    ),
+    Rule(
+        id="huggingface_token",
+        category="secret",
+        severity="critical",
+        confidence=0.97,
+        pattern=_compile(r"\bhf_[A-Za-z0-9]{30,}"),
+        description="Token de Hugging Face",
+    ),
+    Rule(
+        id="twilio_credential",
+        category="secret",
+        severity="high",
+        confidence=0.95,
+        pattern=_compile(r"\b(?:AC|SK)[0-9a-f]{32}\b"),
+        description="Identificador o llave de Twilio",
+    ),
+    Rule(
+        id="azure_storage_key",
+        category="secret",
+        severity="critical",
+        confidence=0.98,
+        pattern=_compile(r"AccountKey=[A-Za-z0-9+/=]{40,}"),
+        description="Llave de cuenta de almacenamiento de Azure",
+    ),
+    Rule(
         id="generic_secret_assignment",
         category="secret",
         severity="high",
         confidence=0.75,
         pattern=_compile(
-            r"(?i)\b(?:api[_-]?key|secret|token|password|passwd|pwd|credential)s?\b"
-            r"\s*[:=]\s*[\"']?([^\s\"']{12,})"
+            # Sin limite de palabra al inicio: en AWS_SECRET_ACCESS_KEY o en
+            # TWILIO_AUTH_TOKEN los guiones bajos son caracteres de palabra y el
+            # limite nunca casa. El ancla [:=] es la que evita falsos positivos.
+            # La barra opcional cubre el JSON, que llega con las comillas
+            # escapadas porque el prompt viaja dentro de otro JSON.
+            r"(?i)(?:api[_-]?key|secret|token|password|passwd|pwd|credential"
+            r"|accountkey|access[_-]?key)s?\s*[:=]\s*\\?[\"']?([^\s\"'\\]{12,})"
         ),
         description="Asignacion de credencial con valor de alta entropia",
         group=1,
