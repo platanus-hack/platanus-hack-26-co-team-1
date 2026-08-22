@@ -47,11 +47,13 @@ agent/
   demo/           Demo manual con navegador
 backend/
   aegis_backend/  Base colaborativa: un dominio se clasifica una vez para todos
-docs/
-  00-propuesta.md   El producto: problema, propuesta y requisitos del MVP
-  adr/              Decisiones de arquitectura y por qué se tomaron
-  spec/             Contrato de datos entre el agente y el backend
+backend/
+  aegis_backend/  Base colaborativa: un dominio se clasifica una vez para todos
+api/              El panel como función serverless
+docs/             Documentación técnica y de relevo (empezar por ESTADO.md)
 ```
+
+**¿Retomando el proyecto?** Empezá por [`docs/ESTADO.md`](docs/ESTADO.md).
 
 Las investigaciones que sustentan estas decisiones viven **fuera del repo**, en
 `../investigacion/`: son notas de trabajo, no parte del producto.
