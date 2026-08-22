@@ -7,7 +7,7 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 416 en verde (`python run_tests.py` desde la raíz).
+**Tests:** 425 en verde (`python run_tests.py` desde la raíz).
 **Entorno:** `agent/requirements.txt` para el proxy y los tests;
 `agent/requirements-modelo.txt` para T2, que va aparte porque es opcional y pesa.
 
@@ -44,7 +44,7 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Sistema de diseño único en las tres superficies | Funciona | `agent/aegis_agent/ui/tokens.py` |
 | Atribución por aplicación y política por app | Funciona | `agent/aegis_agent/procesos.py`, [ADR 0004](adr/0004-la-politica-conoce-la-aplicacion-el-detector-no.md) |
 
-**Desplegado:** front https://aegis-ui-tzz6.onrender.com · panel https://aegis-panel.onrender.com
+**Desplegado:** https://aegis-panel.onrender.com — un solo servicio con el front y el API
 
 ## 3. Qué NO existe todavía
 

@@ -143,61 +143,34 @@ Debe dar **27 de 27**. Si alguna se escapa, es un hueco real.
 
 ## 8. Lo desplegado
 
-| Qué | URL | Qué es |
-|---|---|---|
-| **Front principal** | https://aegis-ui-tzz6.onrender.com | La app Angular (landing, onboarding, admin) |
-| **Panel** | https://aegis-panel.onrender.com | Las métricas y la ingesta de eventos, en Python |
+**https://aegis-panel.onrender.com** — un solo servicio.
 
-Los dos salen de `main` y están declarados en `render.yaml`. Cada push los
-redespliega solos.
-
-El front va como **sitio estático** y no como servicio web porque no necesita
-servidor: `ng build` deja HTML, JS y CSS. Dos detalles que no son obvios y que
-si se pierden rompen el despliegue:
-
-- El publish path es `dist/aegis-ui/browser`, no `dist/aegis-ui`. El builder
-  `application` de Angular deja el sitio en `browser/`.
-- Hay una regla de reescritura `/* → /index.html`. Sin ella, entrar directo a
-  `/admin/politicas` o recargar la página da 404: el enrutado es del lado del
-  cliente y esa ruta no existe como archivo en el servidor.
-
-### El panel
-
-https://aegis-panel.onrender.com
-
-Es un servicio web de Render (`render.yaml`), no una función serverless. Con
-`autoDeploy` encendido cada push a `main` lo redespliega solo; no hay comando que
-correr a mano.
-
-```bash
-# Estado del servicio y del último despliegue
-curl -H "Authorization: Bearer $RENDER_API_KEY" \
-  https://api.render.com/v1/services/srv-da4p6mc9v7es738sehog
-```
-
-| Ruta | Qué devuelve |
+| Ruta | Qué es |
 |---|---|
-| `/` | El panel |
-| `/api/metrics` | Las métricas en JSON |
+| `/` y todo lo demás | El panel: la app Angular de `frontend/` |
+| `/api/metrics` | Las métricas en JSON, que es lo que el panel consume |
 | `/v1/health` | Estado y tipo de almacenamiento |
-| `POST /v1/events` | Ingesta de eventos redactados (rechaza con 422 los que traigan contenido) |
+| `POST /v1/events` | Ingesta de eventos redactados (422 si traen contenido) |
+| `/panel` | El panel en HTML que arma Python, de respaldo |
 
-Para que el agente local suba ahí:
+El front y el API van **juntos en el mismo servicio** a propósito. Separados
+hacen falta dos servicios, una URL para cada uno y CORS en el medio, y todo eso
+para que dos piezas del mismo producto se hablen. Hubo un sitio estático aparte
+durante un rato y quedó obsoleto en cuanto el panel pasó a mostrar datos de
+verdad, porque para eso necesita el API al lado.
 
-```bash
-AEGIS_EVENTS_URL=https://aegis-panel.onrender.com/v1/events
-```
+El build compila las dos cosas (`pip install` y después `npm run build`), y
+`web/app.py` sirve el resultado desde disco. Tres detalles que no son obvios:
 
-**El `.gitignore` excluye los `.jsonl` a propósito**: la cola local tiene la
-navegación real de quien esté probando y no puede terminar en un repositorio ni
-en un despliegue.
-
-El almacenamiento tiene tres niveles y el servicio elige el primero disponible:
-`AEGIS_KV_URL` (externo, sobrevive a todo), `AEGIS_DATA_DIR` (un disco de Render
-montado, sobrevive a los reinicios) y, si no hay ninguno, memoria. **El plan
-gratuito no monta discos**, así que hoy corre en memoria y pierde los eventos
-cuando la instancia se apaga por inactividad. `GET /v1/health` dice cuál está en
-uso.
+- **Si no hay build del front, el servicio no se cae**: `/` cae al panel en HTML.
+  Un checkout sin npm o un build que falló siguen mostrando las métricas.
+- **Hay fallback de SPA**: `/admin/politicas` no existe como archivo, así que
+  cualquier ruta desconocida devuelve el `index.html`. Sin eso, compartir un
+  enlace o recargar la página da 404.
+- **Servir archivos de disco desde un proceso público es la forma más fácil de
+  convertir un panel en una fuga.** Cada ruta se resuelve y se comprueba que
+  siga estando dentro de `dist/`. Hay tests que lo atacan con rutas crudas,
+  porque un cliente normal normaliza el path y el ataque nunca llegaría.
 
 ## 9. Los dos modos
 
