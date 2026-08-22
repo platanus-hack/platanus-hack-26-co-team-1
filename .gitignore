@@ -30,8 +30,12 @@ Thumbs.db
 .vscode/
 *.log
 
-# Capturas de trabajo del panel
+# Cola local de eventos y caches (nunca se commitean: son navegacion real)
 agent/tests/e2e/panel.png
 aegis-events.jsonl
 aegis-domains-cache.json
 aegis-domains.json
+
+
+# Datos del panel desplegado, si se corre local
+eventos.jsonl

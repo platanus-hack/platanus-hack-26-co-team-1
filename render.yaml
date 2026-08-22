@@ -1,0 +1,23 @@
+# Blueprint del panel de Aegis.
+#
+# El servicio no tiene dependencias: el motor de deteccion y el panel corren con
+# la biblioteca estandar, asi que el build es solo instalar un requirements.txt
+# vacio y arrancar. Se deja el paso igual para que agregar una dependencia mas
+# adelante no obligue a tocar la configuracion del servicio.
+services:
+  - type: web
+    name: aegis-panel
+    runtime: python
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python web/app.py
+    # Render reinicia el servicio si esta ruta deja de responder. Es barata: no
+    # toca el almacen mas alla de contar lo que ya esta cargado.
+    healthCheckPath: /v1/health
+    envVars:
+      - key: AEGIS_TENANT
+        value: acme
+      # Con un plan de pago se monta un disco y se apunta AEGIS_DATA_DIR ahi
+      # para que los eventos sobrevivan a los reinicios. En el plan gratuito no
+      # hay discos, y el servicio degrada a memoria a proposito.
