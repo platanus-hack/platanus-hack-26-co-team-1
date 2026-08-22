@@ -7,12 +7,17 @@ todo lo que lo rodea se comporte bien cuando acierta, cuando falla y cuando no
 esta.
 """
 
+import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from aegis_agent.detect import model
 from aegis_agent.detect.payload import scan_payload
+from aegis_agent.detect.types import Finding
+from aegis_agent.policy import Policy
 
 TEXTO = "El cliente Bancolombia esta renegociando el contrato de nomina"
 
@@ -77,7 +82,7 @@ class TestHallazgosDelModelo(unittest.TestCase):
     def test_un_nombre_de_cliente_es_dato_de_la_empresa(self):
         hallazgos = self._correr(
             ModeloSimulado(
-                [{"label": "empresa", "score": 0.91, "start": 11, "end": 23}]
+                [{"label": "nombre de cliente", "score": 0.91, "start": 11, "end": 23}]
             )
         )
         self.assertEqual(len(hallazgos), 1)
@@ -164,6 +169,174 @@ class TestOrdenDeLaCascada(unittest.TestCase):
         resultado = scan_payload(TEXTO.encode())
         self.assertEqual(simulado.llamadas, 1)
         self.assertTrue(any(f.rule_id.startswith("modelo:") for f in resultado.findings))
+
+
+class FakeRequest:
+    def __init__(self, host, body):
+        self.pretty_host = host
+        self.path = "/v1/messages"
+        self.method = "POST"
+        self._body = body
+        self.query = None
+        # Sin Sec-Fetch-Dest ni Accept, _is_navigation lo trata como un fetch
+        # interno y la respuesta de bloqueo sale en JSON, no en HTML.
+        self.headers = {}
+
+    def get_content(self, strict=True):
+        return self._body
+
+    @property
+    def raw_content(self):
+        return self._body
+
+
+class FakeFlow:
+    def __init__(self, request):
+        self.request = request
+        self.response = None
+
+
+def _hallazgo(rule_id, category, severity="high"):
+    return Finding(
+        rule_id=rule_id,
+        category=category,
+        severity=severity,
+        confidence=0.9,
+        evidence="<x>",
+        start=0,
+        end=1,
+    )
+
+
+def _correr_inspeccion(policy, finding):
+    """Corre el addon completo con un unico hallazgo simulado.
+
+    Se mockea scan_payload en vez de armar el escaneo real porque lo que se
+    prueba aca es como el addon decide con lo que el escaneo le devuelve, no el
+    escaneo en si mismo (eso ya lo cubre test_detect.py).
+    """
+
+    from aegis_agent.proxy.addon import Aegis
+
+    with tempfile.TemporaryDirectory() as workdir:
+        cola = Path(workdir) / "eventos.jsonl"
+        addon = Aegis()
+        addon.policy = policy
+        addon.queue = cola
+        addon.domains.enabled = False
+        flow = FakeFlow(FakeRequest("claude.ai", b"hola"))
+        with patch("aegis_agent.proxy.addon.scan_payload") as escaneo:
+            escaneo.return_value = type(
+                "R", (), {"findings": [finding], "truncated": False, "views": 1}
+            )()
+            addon.request(flow)
+        eventos = []
+        if cola.exists():
+            eventos = [
+                json.loads(linea)
+                for linea in cola.read_text(encoding="utf-8").splitlines()
+                if linea.strip()
+            ]
+    return flow, eventos
+
+
+class TestDegradacionPorCategoria(unittest.TestCase):
+    """B3: el modelo bloquea lo grave (secret, internal_data) y advierte lo
+    demas (pii), consultando la categoria del hallazgo en vez de degradar todo
+    a ciegas. model_action="warn" sigue siendo la salida de emergencia que baja
+    absolutamente todo, sin mirar la categoria.
+    """
+
+    def test_un_secreto_del_modelo_bloquea(self):
+        flow, _ = _correr_inspeccion(Policy(), _hallazgo("modelo:contrasena", "secret"))
+        self.assertIsNotNone(flow.response)
+        self.assertEqual(flow.response.status_code, 403)
+        self.assertEqual(flow.response.headers["X-Aegis-Action"], "block_content")
+
+    def test_un_dato_de_empresa_del_modelo_bloquea(self):
+        flow, _ = _correr_inspeccion(Policy(), _hallazgo("modelo:empresa", "internal_data"))
+        self.assertIsNotNone(flow.response)
+        self.assertEqual(flow.response.status_code, 403)
+        self.assertEqual(flow.response.headers["X-Aegis-Action"], "block_content")
+
+    def test_un_dato_personal_del_modelo_solo_advierte(self):
+        flow, eventos = _correr_inspeccion(Policy(), _hallazgo("modelo:persona", "pii"))
+        self.assertIsNone(flow.response)
+        self.assertEqual(eventos[-1]["action"], "warned")
+
+    def test_model_action_warn_baja_todo_sin_mirar_categoria(self):
+        politica = Policy(model_action="warn")
+        flow, eventos = _correr_inspeccion(politica, _hallazgo("modelo:contrasena", "secret"))
+        self.assertIsNone(flow.response)
+        self.assertEqual(eventos[-1]["action"], "warned")
+
+    def test_un_hallazgo_de_t1_no_se_toca(self):
+        # Un rule_id que no empieza con "modelo:" ni siquiera entra al chequeo
+        # de degradacion: T1 detecta con certeza y sigue bloqueando igual.
+        flow, _ = _correr_inspeccion(Policy(), _hallazgo("t1:aws_key", "secret"))
+        self.assertIsNotNone(flow.response)
+        self.assertEqual(flow.response.status_code, 403)
+        self.assertEqual(flow.response.headers["X-Aegis-Action"], "block_content")
+
+
+class TestMetricasDelModelo(unittest.TestCase):
+    """B5: que se note cuando el modelo no opino, en vez de descartarlo en silencio."""
+
+    def setUp(self):
+        model.reiniciar_metricas()
+        self.addCleanup(model.reiniciar_metricas)
+
+    def _con(self, simulado):
+        parches = con_modelo(simulado)
+        for p in parches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_las_invocaciones_y_los_hallazgos_se_cuentan(self):
+        simulado = ModeloSimulado(
+            [{"label": "empresa", "score": 0.9, "start": 0, "end": 5}]
+        )
+        self._con(simulado)
+        model.scan_model(TEXTO)
+        model.scan_model(TEXTO)
+        estado = model.estado()
+        self.assertEqual(estado["invocaciones"], 2)
+        self.assertEqual(estado["hallazgos"], 2)
+        self.assertEqual(estado["descartes_por_latencia"], 0)
+
+    def test_un_descarte_por_latencia_queda_registrado(self):
+        lento = ModeloSimulado(
+            [{"label": "persona", "score": 0.99}],
+            demora=(model.LATENCIA_MAXIMA_MS + 200) / 1000,
+        )
+        self._con(lento)
+        model.scan_model(TEXTO)
+        estado = model.estado()
+        self.assertEqual(estado["invocaciones"], 1)
+        self.assertEqual(estado["descartes_por_latencia"], 1)
+        # El descarte no cuenta como hallazgo: la respuesta se tiro entera.
+        self.assertEqual(estado["hallazgos"], 0)
+
+    def test_el_p95_sale_de_las_latencias_observadas(self):
+        simulado = ModeloSimulado([])
+        self._con(simulado)
+        for _ in range(5):
+            model.scan_model(TEXTO)
+        estado = model.estado()
+        self.assertGreaterEqual(estado["latencia_p95_ms"], 0.0)
+        # Un modelo simulado sin demora esta muy lejos del presupuesto duro.
+        self.assertLess(estado["latencia_p95_ms"], model.LATENCIA_MAXIMA_MS)
+
+    def test_reiniciar_metricas_vuelve_todo_a_cero(self):
+        simulado = ModeloSimulado([{"label": "persona", "score": 0.9}])
+        self._con(simulado)
+        model.scan_model(TEXTO)
+        model.reiniciar_metricas()
+        estado = model.estado()
+        self.assertEqual(estado["invocaciones"], 0)
+        self.assertEqual(estado["hallazgos"], 0)
+        self.assertEqual(estado["descartes_por_latencia"], 0)
+        self.assertEqual(estado["latencia_p95_ms"], 0.0)
 
 
 @unittest.skipUnless(model.disponible(), "gliner no esta instalado")

@@ -73,8 +73,10 @@ Y dos reglas de producto que están sostenidas por medición, no por gusto:
 - **El destino filtra antes que el contenido.** Solo se inspecciona el payload de
   las conexiones que van a una IA. Correr contra tráfico real mostró que sin esto
   el agente escanea cada POST de la navegación y llena el panel de ruido.
-- **Lo que ve el modelo advierte, no bloquea.** T1 detecta con certeza y T2 con
-  probabilidad. Se sube a bloqueo con `AEGIS_T2_ACCION=block`.
+- **Lo que ve el modelo bloquea según la categoría, no a ciegas.** T1 detecta
+  con certeza y T2 con probabilidad: `secret` e `internal_data` cortan igual
+  que si los hubiera visto T1, pero `pii` suelto solo advierte. Se baja todo a
+  advertencia, sin mirar la categoría, con `AEGIS_T2_ACCION=warn`.
 
 ## 5. Bugs reales que ya encontramos (no los reintroduzcas)
 
@@ -88,7 +90,7 @@ Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
 | `AWS_SECRET_ACCESS_KEY=` no matcheaba: los guiones bajos son caracteres de palabra y el `\b` nunca casaba. | `test_proveedores.py` |
 | El prompt viaja dentro de un JSON, así que `password = "..."` llega escapado y ninguna regla lo veía. | `test_proveedores.py` |
 | Responder a un `fetch` con HTML deja la aplicación girando para siempre. Ahora se responde JSON si no es una navegación. | `test_respuesta_bloqueo.py` |
-| Las etiquetas descriptivas le funcionan peor al modelo que las cortas. | `bench/evaluar_modelo.py` |
+| Las etiquetas del modelo se eligen midiendo, no por intuicion: `empresa` encontraba 13/25 pero bloqueaba 6/36 frases de trabajo normal. | `bench/evaluar_modelo.py` |
 
 ## 6. Trampa de herramientas que te va a morder
 
@@ -118,8 +120,9 @@ En el orden en que más valor agregan:
    API key; el código y los tests con modelo simulado ya están.
 2. **Perfil de empresa y de empleado**, con la política en base de datos en vez
    de en `policy.py`.
-3. **Corpus en español propio** para validar T2 y decidir el umbral con datos.
-   El actual son 17 frases escritas a mano en `bench/evaluar_modelo.py`.
+3. **Más casos de negocio en el corpus.** `bench/corpus.py` tiene 61 frases y
+   con eso ya se eligieron etiquetas y umbral. Donde el modelo ve menos es en
+   datos de la empresa (1/14): esas frases son las que más rinde agregar.
 4. **Vercel KV** para que el panel desplegado no pierda los eventos.
 5. **Instalador de macOS**, si hay alguien del equipo en Mac.
 

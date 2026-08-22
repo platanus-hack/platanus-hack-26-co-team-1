@@ -119,7 +119,7 @@ Debe dar **34 de 34**. Si alguna se escapa, es un hueco real.
 | `AEGIS_EVENTS_URL` | — | Panel remoto al que subir los eventos |
 | `AEGIS_T2` | apagado | `1` prende el modelo local |
 | `AEGIS_T2_MODELO` | `urchade/gliner_multi-v2.1` | Qué modelo cargar |
-| `AEGIS_T2_ACCION` | `warn` | `block` para que el modelo bloquee |
+| `AEGIS_T2_ACCION` | `block` | `warn` para que ningún hallazgo del modelo bloquee |
 
 ### El backend
 

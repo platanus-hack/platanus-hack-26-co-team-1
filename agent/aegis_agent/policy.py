@@ -56,16 +56,29 @@ class Policy:
     # antes de frenarle el trabajo a la gente.
     unknown_domain_action: Action = "warn"
     unapproved_ai_action: str = field(default_factory=_accion_para_no_aprobadas)
-    # Que hacer con lo que encuentra el modelo. Advertir por defecto: T1 detecta
-    # con certeza y el modelo con probabilidad, y bloquearle el trabajo a alguien
-    # por una probabilidad es la forma mas rapida de que desinstalen Aegis.
+    # Que hacer con lo que encuentra el modelo. Por defecto manda la categoria:
+    # una contrasena o un dato de empresa cortan igual que si los hubiera visto
+    # T1, pero un dato personal suelto (nombre, direccion) solo advierte, porque
+    # ahi el costo de un falso positivo es mas alto que el de dejarlo pasar.
+    # "warn" es la salida de emergencia completa para la empresa que no confia
+    # en el modelo: con eso, absolutamente ningun hallazgo del modelo bloquea,
+    # sin importar la categoria.
     model_action: str = field(
-        default_factory=lambda: os.environ.get("AEGIS_T2_ACCION", "warn")
+        default_factory=lambda: os.environ.get("AEGIS_T2_ACCION", "block")
     )
     block_categories: frozenset[str] = field(
         default_factory=lambda: frozenset({"secret", "internal_data"})
     )
     warn_categories: frozenset[str] = field(default_factory=lambda: frozenset({"pii"}))
+    # Version del criterio de arriba, pero solo para lo que encuentra el modelo:
+    # con esto una empresa puede confiar mas o menos en T2 que en T1 sin tocar
+    # como se tratan las reglas deterministas.
+    model_block_categories: frozenset[str] = field(
+        default_factory=lambda: frozenset({"secret", "internal_data"})
+    )
+    model_warn_categories: frozenset[str] = field(
+        default_factory=lambda: frozenset({"pii"})
+    )
 
 
 # Un dominio que nadie clasifico todavia igual se delata por la forma del

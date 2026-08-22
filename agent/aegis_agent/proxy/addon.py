@@ -7,6 +7,7 @@ import time
 
 from mitmproxy import http
 
+from ..detect import model
 from ..detect.payload import scan_payload
 from ..domains import DomainClient
 from ..detect.types import Finding
@@ -88,6 +89,12 @@ class Aegis:
         self.signals = SignalCollector()
         self._ultimo_uso: dict[str, float] = {}
         self._lock_uso = threading.Lock()
+        # El modelo tarda unos ocho segundos en cargar. Hacerlo en el primer
+        # envio significa que la primera persona que abre un chat espera todo eso
+        # con el request frenado, y llega a la conclusion correcta: que Aegis
+        # rompe las cosas. Se carga aca, mientras nadie esta esperando.
+        if model.habilitado():
+            threading.Thread(target=model.cargar, daemon=True).start()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
@@ -205,12 +212,20 @@ class Aegis:
             action = decide(classification, categories, self.policy)
             worst = result.findings[0] if result.findings else None
 
-            # Lo que vio el modelo se advierte, no se corta, salvo que la empresa
-            # lo pida. Un hallazgo probabilistico no puede frenar a nadie con la
-            # misma autoridad que una llave de AWS con formato reconocible.
+            # Lo que vio el modelo no bloquea a ciegas: manda la categoria. Una
+            # contrasena o un dato de empresa cortan igual que si los hubiera
+            # visto T1; un dato personal suelto solo advierte, porque un
+            # hallazgo probabilistico no puede frenar a nadie con la misma
+            # autoridad que una llave de AWS con formato reconocido.
             del_modelo = worst is not None and worst.rule_id.startswith("modelo:")
-            if del_modelo and self.policy.model_action == "warn" and action == "block_content":
-                action = "warn"
+            if del_modelo and action == "block_content":
+                if self.policy.model_action == "warn":
+                    # Interruptor general: la empresa no confia en el modelo y
+                    # ningun hallazgo suyo bloquea, sin importar la categoria.
+                    action = "warn"
+                else:
+                    if worst.category not in self.policy.model_block_categories:
+                        action = "warn"
 
             if action == "block_content" and worst is not None:
                 self._record(

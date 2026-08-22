@@ -24,26 +24,46 @@ from .types import Finding
 # Etiquetas en espanol: el modelo las recibe como texto, asi que agregar un tipo
 # de dato es configuracion de la empresa y no un release del producto.
 #
-# Van cortas a proposito. Medido con este mismo modelo: "nombre de cliente o
-# empresa" daba 0.37 sobre la palabra equivocada, y "empresa" da 0.70 sobre
-# "Grupo Exito". Lo mismo con salud: "diagnostico medico" no encontraba nada y
-# "enfermedad" da 0.87 sobre "hipertension". Una etiqueta descriptiva se lee
-# bien en el codigo y le funciona peor al modelo.
+# CUALES, esta medido sobre el corpus de bench/corpus.py (25 frases sensibles y
+# 36 de trabajo normal), etiqueta por etiqueta. El resultado corrigio dos cosas
+# que este archivo daba por sabidas:
+#
+#   1. "empresa" y "organizacion" encuentran mucho (13/25) pero ensucian mucho
+#      mas (6/36): marcan "explicame que hace Bancolombia como negocio" igual
+#      que marcan un contrato. Un extractor de entidades no distingue mencionar
+#      de filtrar. "nombre de cliente" encuentra 9/25 con 1/36, que es la unica
+#      relacion que aguanta una decision.
+#   2. La etiqueta corta NO siempre gana. "nombre de cliente" es mas precisa que
+#      "empresa" y "condicion de salud" mas limpia que "enfermedad". Lo que
+#      importa no es el largo sino que la etiqueta nombre la relacion, no la cosa.
+#
+# Se sacaron las que no encuentran nada: "contrasena", "clave", "clave de acceso"
+# y "diagnostico medico" dieron 0/25. Las credenciales dichas en lenguaje natural
+# las ve T1 con la regla credencial_en_espanol, que es determinista.
 ETIQUETAS_POR_DEFECTO = (
+    "nombre de cliente",
+    "empleado",
     "persona",
-    "empresa",
-    "organizacion",
-    "direccion",
-    "dinero",
-    "enfermedad",
-    "contrasena",
+    "domicilio",
+    "condicion de salud",
+    "credencial",
 )
 
-# Medido con bench/evaluar_modelo sobre 7 frases sensibles y 10 de trabajo normal
-# en espanol: 0.5 detecta 7/7, 0.6 detecta 6/7 y 0.75 detecta 4/7, los tres con
-# CERO falsos positivos. El corpus es chico, asi que se deja 0.6 por margen; con
-# un corpus real de la empresa esto se decide con datos y no con prudencia.
-UMBRAL_POR_DEFECTO = 0.6
+# Medido con el conjunto de arriba sobre el corpus completo, dandole al modelo el
+# prompt ya extraido y no el JSON del request:
+#
+#   umbral   detecta    bloquea trabajo normal
+#     0.5     12/25            1/36
+#     0.6      8/25            1/36
+#     0.7      8/25            0/36
+#
+# Con las etiquetas viejas la misma medicion daba 22/25 detectando pero 9/36
+# bloqueando trabajo legitimo, que es una forma rapida de que desinstalen Aegis.
+#
+# Se deja 0.5: detecta mas y el unico caso que bloquea de mas es el mismo en los
+# tres umbrales. La medicion vieja de este archivo (7/7 con cero falsos) estaba
+# hecha sobre diecisiete frases y sobre el body crudo; no describia nada real.
+UMBRAL_POR_DEFECTO = 0.5
 
 # Presupuesto duro. Si el modelo tarda mas, se descarta su respuesta y queda lo
 # de T1. Medido en CPU sin GPU: p50 108 ms, p95 118 ms.
@@ -56,17 +76,32 @@ MODELO_POR_DEFECTO = "urchade/gliner_multi-v2.1"
 
 # Las etiquetas que, cuando el modelo las ve, valen como dato de la empresa y no
 # como dato personal suelto.
+# A que categoria equivale cada etiqueta, y por lo tanto que puede llegar a
+# cortar un envio. Solo entra en una categoria que bloquea la etiqueta que midio
+# bien: "nombre de cliente" es la unica que separa el contrato del cliente de la
+# mencion casual de una marca. Todo lo demas avisa.
 _CATEGORIA_POR_ETIQUETA = {
-    "contrasena": ("secret", "critical"),
-    "empresa": ("internal_data", "high"),
-    "organizacion": ("internal_data", "high"),
-    "dinero": ("internal_data", "high"),
-    "enfermedad": ("pii", "high"),
+    "nombre de cliente": ("internal_data", "high"),
+    "credencial": ("pii", "high"),
+    "empleado": ("pii", "medium"),
+    "condicion de salud": ("pii", "high"),
+    "domicilio": ("pii", "medium"),
 }
 
 _lock = threading.Lock()
 _modelo = None
 _cargado = False
+
+# Metricas de cuanto opina el modelo. Existen porque un modelo que en
+# produccion empieza a tardar (o que dejo de cargar) se degrada en silencio: T2
+# deja de proteger y nadie lo nota hasta que alguien pregunta por que nunca
+# encuentra nada. Con esto, estado() lo puede mostrar.
+_metricas_lock = threading.Lock()
+MAX_LATENCIAS_GUARDADAS = 200
+_invocaciones = 0
+_hallazgos_totales = 0
+_descartes_por_latencia = 0
+_latencias_ms: list[float] = []
 
 
 def habilitado() -> bool:
@@ -151,11 +186,57 @@ def scan_model(
                             end=int(entidad.get("end", 0)),
                         )
                     )
+            _registrar_invocacion(transcurrido, descartada=False, hallazgos=len(hallazgos))
+        else:
+            _registrar_invocacion(transcurrido, descartada=True, hallazgos=0)
 
     return hallazgos
 
 
+def _registrar_invocacion(latencia_ms: float, *, descartada: bool, hallazgos: int) -> None:
+    """Suma una corrida del modelo a las metricas que expone estado()."""
+
+    global _invocaciones, _hallazgos_totales, _descartes_por_latencia
+    with _metricas_lock:
+        _invocaciones += 1
+        _hallazgos_totales += hallazgos
+        if descartada:
+            _descartes_por_latencia += 1
+        _latencias_ms.append(latencia_ms)
+        exceso = len(_latencias_ms) - MAX_LATENCIAS_GUARDADAS
+        if exceso > 0:
+            del _latencias_ms[:exceso]
+
+
+def _p95(latencias: list[float]) -> float:
+    """Percentil 95 sobre las latencias guardadas. 0.0 si todavia no hay ninguna."""
+
+    resultado = 0.0
+    if latencias:
+        ordenadas = sorted(latencias)
+        indice = min(len(ordenadas) - 1, round(0.95 * (len(ordenadas) - 1)))
+        resultado = ordenadas[indice]
+    return resultado
+
+
+def reiniciar_metricas() -> None:
+    """Vuelve las metricas a cero. Para que los tests no arrastren estado entre si."""
+
+    global _invocaciones, _hallazgos_totales, _descartes_por_latencia
+    with _metricas_lock:
+        _invocaciones = 0
+        _hallazgos_totales = 0
+        _descartes_por_latencia = 0
+        _latencias_ms.clear()
+
+
 def estado() -> dict:
+    with _metricas_lock:
+        latencias = list(_latencias_ms)
+        invocaciones = _invocaciones
+        hallazgos_totales = _hallazgos_totales
+        descartes = _descartes_por_latencia
+
     return {
         "habilitado": habilitado(),
         "instalado": disponible(),
@@ -163,4 +244,8 @@ def estado() -> dict:
         "modelo": os.environ.get("AEGIS_T2_MODELO", MODELO_POR_DEFECTO),
         "umbral": UMBRAL_POR_DEFECTO,
         "presupuesto_ms": LATENCIA_MAXIMA_MS,
+        "invocaciones": invocaciones,
+        "hallazgos": hallazgos_totales,
+        "descartes_por_latencia": descartes,
+        "latencia_p95_ms": round(_p95(latencias), 1),
     }
