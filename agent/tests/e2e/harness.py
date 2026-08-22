@@ -19,6 +19,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from aegis_agent import entorno
 from tests.aislamiento import variables_aisladas
 
 HERE = Path(__file__).resolve().parent
@@ -29,25 +30,13 @@ HOST = "127.0.0.1"
 
 
 def mitmdump_path() -> str:
-    """mitmdump se instala como ejecutable, no como modulo invocable.
+    """El ejecutable de mitmproxy, para los tests que levantan un proxy de verdad.
 
-    Se busca primero al lado del interprete que esta corriendo, que es donde
-    queda dentro de un entorno virtual. El esquema del usuario apunta al site
-    global y ahi no hay nada si el proyecto se instalo en un venv, que es como
-    se trabaja aca.
+    La busqueda vive en aegis_agent.entorno: estaba duplicada aca y en demo/run.py,
+    y el instalador de produccion importaba ESTA copia --un modulo de tests.
     """
 
-    nombre = "mitmdump.exe" if os.name == "nt" else "mitmdump"
-    scheme = "nt_user" if os.name == "nt" else "posix_user"
-    candidatos = (
-        Path(sys.executable).parent / nombre,
-        Path(sysconfig.get_path("scripts")) / nombre,
-        Path(sysconfig.get_path("scripts", scheme=scheme)) / nombre,
-    )
-    for candidato in candidatos:
-        if candidato.exists():
-            return str(candidato)
-    return "mitmdump"
+    return entorno.mitmdump_en_disco() or "mitmdump"
 
 
 def _free_port() -> int:
