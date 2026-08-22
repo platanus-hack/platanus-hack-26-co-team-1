@@ -204,7 +204,6 @@ class TestLaSuiteNoTocaLaBaseDeVerdad(unittest.TestCase):
             },
         ):
             self.assertFalse(supabase.guardar_evento(EVENTO))
-            self.assertFalse(supabase.guardar_veredicto({"domain": "x.co"}))
             self.assertFalse(supabase.guardar_politica("acme", {}))
             self.assertIsNone(supabase.leer_eventos())
 

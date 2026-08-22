@@ -58,7 +58,6 @@ TIMEOUT = 6
 # escriba el proximo no tiene por que saber que existe este problema.
 APAGADO = "AEGIS_SUPABASE_DISABLED"
 TABLA_EVENTOS = "aegis_eventos"
-TABLA_DOMINIOS = "aegis_dominios"
 TABLA_POLITICAS = "aegis_politicas"
 
 
@@ -249,25 +248,17 @@ def leer_eventos(limite: int = 5000, tenant: str | None = None) -> list[dict] | 
     return eventos
 
 
-# -- veredictos de dominio ---------------------------------------------------
-
-
-def guardar_veredicto(datos: dict) -> bool:
-    respuesta = _pedir(
-        "POST",
-        TABLA_DOMINIOS,
-        [datos],
-        {"Prefer": "resolution=merge-duplicates,return=minimal"},
-    )
-    return respuesta is not None
-
-
-def leer_veredictos() -> dict | None:
-    filas = _pedir("GET", f"{TABLA_DOMINIOS}?select=*")
-    veredictos = None
-    if filas is not None:
-        veredictos = {f["domain"]: f for f in filas if f.get("domain")}
-    return veredictos
+# Los veredictos de dominio NO estan aca, y es a proposito.
+#
+# Viven en `SupabaseDomainStore` (store.py), que implementa el mismo contrato
+# que `DomainStore` y se elige al construir. Hubo un rato en que estaban en los
+# dos lados -este modulo escribia una tabla `aegis_dominios` y aquel otra
+# `dominios`- y eso es lo peor de las dos opciones: dos tablas para lo mismo
+# terminan divergiendo, y la unica pregunta util pasa a ser cual manda.
+#
+# Gano la de store.py porque hace mas: TTL por solidez del veredicto,
+# sincronizacion incremental para que el agente baje solo el delta, y contador
+# de visitas.
 
 
 # -- politicas ---------------------------------------------------------------

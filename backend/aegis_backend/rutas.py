@@ -19,10 +19,11 @@ levantar nada.
 from __future__ import annotations
 
 import threading
+import time
 
 from . import lecciones
 from .classifier import classify
-from .store import DomainStore
+from .store import DomainStore, vencido
 
 CAMPOS_PROHIBIDOS = ("payload", "content", "text", "prompt", "body", "raw")
 EVIDENCIA_MAX = 32
@@ -65,16 +66,35 @@ def politica_por_defecto() -> dict:
 
 
 def veredicto(domain: str, store: DomainStore, ask_model=None) -> tuple[int, dict]:
-    """El veredicto de un dominio, o 202 mientras se averigua."""
+    """El veredicto de un dominio, o 202 mientras se averigua.
+
+    Un veredicto vencido igual se manda, y la reclasificacion se encola aparte:
+    el camino critico nunca se queda esperando, y un veredicto viejo siempre es
+    mejor que ninguno.
+    """
 
     domain = domain.split("?")[0].strip("/").lower()
     encontrado = store.get(domain)
     if encontrado is not None:
+        if vencido(encontrado, time.time()):
+            _encolar(domain, store, ask_model)
         respuesta = (200, encontrado.as_response())
     else:
         _encolar(domain, store, ask_model)
         respuesta = (202, {"domain": domain, "classification": "pending"})
     return respuesta
+
+
+def sincronizacion(store: DomainStore, desde: str) -> tuple[int, dict]:
+    """El delta que el agente baja para su cache local.
+
+    La comparacion del camino critico (ver suffixes.py) nunca toca la base: el
+    agente sincroniza de vez en cuando y compara en memoria. Sin `desde` se
+    manda todo, que es lo que pide un agente en su primer arranque.
+    """
+
+    ahora = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return (200, {"dominios": [v.as_response() for v in store.desde(desde)], "hasta": ahora})
 
 
 def _encolar(domain: str, store: DomainStore, ask_model) -> None:

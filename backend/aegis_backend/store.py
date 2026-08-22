@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import calendar
 import json
+import os
 import threading
 import time
-from dataclasses import asdict, dataclass, fields
+import urllib.error
+import urllib.request
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from . import supabase
@@ -12,12 +16,23 @@ from . import supabase
 # Nunca el contenido, nunca quien lo visito: solo "este dominio tiene un modelo
 # detras". Por eso la base puede crecer sola sin comprometer a nadie.
 #
-# Los dos almacenes de este archivo guardan en JSON y, si hay Supabase
-# configurado, tambien alla. El JSON no sobra: es lo que hace que el backend
-# arranque sin credenciales de nada, y la red que atrapa a Supabase cuando no
-# contesta.
+# LOS DOS ALMACENES NO PERSISTEN IGUAL, Y ES A PROPOSITO.
+#
+# `DomainStore` y `SupabaseDomainStore` son dos implementaciones del mismo
+# contrato y se elige una al construir: o JSON local, o la tabla compartida. Un
+# veredicto se investiga una vez en toda la red y se reparte, asi que tener las
+# dos a la vez escribiendo lo mismo no agrega nada y esconde cual mando.
+#
+# `PolicyStore` si escribe en los dos lados, porque responde a otra pregunta.
+# No es un dato que la red comparte: es lo que ESTA empresa configuro a mano, y
+# si se pierde se nota al dia siguiente. El JSON local es ademas lo que permite
+# levantar el backend sin credenciales de nada.
 
-DEFAULT_TTL = 7 * 24 * 3600
+# Cuanto dura un veredicto antes de que convenga volver a mirarlo. No es un
+# numero fijo: depende de que tan solido fue el veredicto (ver ttl_for).
+TTL_ALTA_CONFIANZA = 30 * 24 * 3600
+TTL_FRAGIL = 48 * 3600
+UMBRAL_CONFIANZA_ALTA = 0.8
 
 
 @dataclass(frozen=True)
@@ -30,13 +45,49 @@ class Verdict:
     source: str  # seed_list | llm_classifier | heuristic | manual_review
     classified_at: float
 
-    def as_response(self, ttl: int = DEFAULT_TTL) -> dict:
+    def as_response(self) -> dict:
         payload = asdict(self)
         payload["classified_at"] = time.strftime(
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.classified_at)
         )
-        payload["ttl_seconds"] = ttl
+        payload["ttl_seconds"] = ttl_for(self)
         return payload
+
+
+def ttl_for(verdict: Verdict) -> int | None:
+    """Cuanto puede durar `verdict` antes de que convenga volver a mirarlo.
+
+    Un veredicto que el modelo vio con confianza alta es solido: 30 dias. Uno
+    que se decidio casi por el nombre -- el sitio no respondio, o la
+    confianza quedo pegada al umbral -- es el mas fragil que produce el
+    sistema, y no deberia sobrevivir mas de un par de dias. Uno que un humano
+    reviso en el panel no lo pisa nada automatico: None significa que nunca
+    vence.
+    """
+
+    if verdict.source == "manual_review":
+        ttl: int | None = None
+    else:
+        if verdict.source == "llm_classifier" and verdict.confidence >= UMBRAL_CONFIANZA_ALTA:
+            ttl = TTL_ALTA_CONFIANZA
+        else:
+            ttl = TTL_FRAGIL
+    return ttl
+
+
+def vencido(verdict: Verdict, ahora: float) -> bool:
+    """Si `verdict` ya paso su TTL y conviene volver a investigarlo."""
+
+    ttl = ttl_for(verdict)
+    return ttl is not None and (ahora - verdict.classified_at) > ttl
+
+
+def _iso(epoch: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
+
+def _epoch(marca: str) -> float:
+    return calendar.timegm(time.strptime(marca[:19], "%Y-%m-%dT%H:%M:%S"))
 
 
 class DomainStore:
@@ -60,21 +111,6 @@ class DomainStore:
                 domain: Verdict(**data) for domain, data in raw.items()
             }
 
-        remotos = supabase.leer_veredictos()
-        if remotos:
-            # Los remotos ganan: son los que vieron todos los clientes de la red,
-            # y el JSON local es el cache de uno solo. Se filtra por los campos
-            # de Verdict para que una columna nueva en la base no reviente el
-            # arranque de un agente viejo.
-            validos = {f.name for f in fields(Verdict)}
-            for domain, datos in remotos.items():
-                recortado = {k: v for k, v in datos.items() if k in validos}
-                try:
-                    self._verdicts[domain] = Verdict(**recortado)
-                except TypeError:
-                    # Una fila incompleta no puede dejar sin veredictos al resto.
-                    pass
-
     def _flush(self) -> None:
         payload = {domain: asdict(v) for domain, v in self._verdicts.items()}
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,9 +126,6 @@ class DomainStore:
         with self._lock:
             self._verdicts[verdict.domain] = verdict
             self._flush()
-        # Fuera del lock: subir es una llamada de red y ningun otro cliente
-        # tiene por que esperarla para leer un veredicto que ya esta en memoria.
-        supabase.guardar_veredicto(asdict(verdict))
         return verdict
 
     def count(self) -> int:
@@ -102,6 +135,21 @@ class DomainStore:
     def all_domains(self) -> list[str]:
         with self._lock:
             return sorted(self._verdicts)
+
+    def desde(self, marca: str) -> list[Verdict]:
+        """Veredictos vistos u actualizados desde `marca` (ISO 8601).
+
+        Sirve GET /v1/domains/sync tanto con este store como con
+        SupabaseDomainStore, sin que el endpoint tenga que saber cual de los
+        dos esta atras.
+        """
+
+        umbral = _epoch(marca)
+        with self._lock:
+            return sorted(
+                (v for v in self._verdicts.values() if v.classified_at >= umbral),
+                key=lambda v: v.classified_at,
+            )
 
 
 class PolicyStore:
@@ -147,3 +195,137 @@ class PolicyStore:
         # siguiente: es lo que la empresa escribio a mano en el panel.
         supabase.guardar_politica(tenant, datos)
         return datos
+
+
+REQUEST_TIMEOUT = 8
+
+
+def _fila_a_verdict(fila: dict) -> Verdict:
+    return Verdict(
+        domain=fila["dominio"],
+        classification=fila.get("clasificacion", ""),
+        kind=fila.get("tipo", ""),
+        confidence=float(fila.get("confianza") or 0),
+        evidence=fila.get("evidencia", ""),
+        source=fila.get("fuente", ""),
+        classified_at=_epoch(fila["clasificado_en"]),
+    )
+
+
+def _verdict_a_fila(verdict: Verdict) -> dict:
+    ttl = ttl_for(verdict)
+    return {
+        "dominio": verdict.domain,
+        "clasificacion": verdict.classification,
+        "tipo": verdict.kind,
+        "confianza": verdict.confidence,
+        "evidencia": verdict.evidence,
+        "fuente": verdict.source,
+        "clasificado_en": _iso(verdict.classified_at),
+        "vence_en": _iso(verdict.classified_at + ttl) if ttl is not None else None,
+    }
+
+
+class SupabaseDomainStore:
+    """El mismo contrato que DomainStore, pero via PostgREST sobre Supabase.
+
+    Es la fuente de verdad compartida entre todos los clientes de la red, no
+    el camino critico: la comparacion de cada request sigue siendo local (ver
+    suffixes.py). Esto solo tiene que ser rapido para sincronizar, no para
+    decidir. Sin dependencias nuevas: PostgREST se habla con urllib, igual que
+    el resto del backend.
+
+    Cualquier falla de red degrada, nunca lanza: un dominio que no se puede
+    consultar queda para la heuristica local, y un dominio que no se pudo
+    guardar se reintenta en la proxima clasificacion. La base compartida
+    nunca puede tumbar a un cliente.
+    """
+
+    def __init__(self, url: str, service_key: str) -> None:
+        self._url = f"{url.rstrip('/')}/rest/v1/dominios"
+        self._headers = {
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _request(self, method: str, query: str = "", *, headers=None, body=None):
+        peticion = urllib.request.Request(
+            self._url + query,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={**self._headers, **(headers or {})},
+            method=method,
+        )
+        with urllib.request.urlopen(peticion, timeout=REQUEST_TIMEOUT) as respuesta:
+            crudo = respuesta.read()
+            filas = json.loads(crudo) if crudo else []
+            cabeceras = respuesta.headers
+        return filas, cabeceras
+
+    def get(self, domain: str) -> Verdict | None:
+        domain = domain.lower().strip(".")
+        try:
+            filas, _ = self._request("GET", f"?dominio=eq.{domain}&select=*")
+        except (urllib.error.URLError, OSError, ValueError):
+            filas = []
+        return _fila_a_verdict(filas[0]) if filas else None
+
+    def put(self, verdict: Verdict) -> Verdict:
+        try:
+            self._request(
+                "POST",
+                headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+                body=[_verdict_a_fila(verdict)],
+            )
+        except (urllib.error.URLError, OSError, ValueError):
+            # La proxima vez que se investigue este dominio se vuelve a
+            # intentar guardar. Un fallo de red aca no puede tumbar al
+            # backend que esta protegiendo al resto de la red.
+            pass
+        return verdict
+
+    def count(self) -> int:
+        try:
+            _, cabeceras = self._request(
+                "GET", "?select=dominio", headers={"Prefer": "count=exact"}
+            )
+        except (urllib.error.URLError, OSError, ValueError):
+            resultado = 0
+        else:
+            rango = cabeceras.get("Content-Range", "")
+            resultado = int(rango.split("/")[-1]) if "/" in rango else 0
+        return resultado
+
+    def all_domains(self) -> list[str]:
+        try:
+            filas, _ = self._request("GET", "?select=dominio&order=dominio")
+        except (urllib.error.URLError, OSError, ValueError):
+            filas = []
+        return sorted(fila["dominio"] for fila in filas)
+
+    def desde(self, marca: str) -> list[Verdict]:
+        """Veredictos actualizados desde `marca` (ISO 8601), para GET /v1/domains/sync."""
+
+        try:
+            filas, _ = self._request(
+                "GET", f"?actualizado_en=gte.{marca}&select=*&order=actualizado_en"
+            )
+        except (urllib.error.URLError, OSError, ValueError):
+            filas = []
+        return [_fila_a_verdict(fila) for fila in filas]
+
+
+def store_from_env(ruta_json: Path) -> DomainStore | SupabaseDomainStore:
+    """Supabase si esta configurado; si no, el store de JSON de siempre.
+
+    Nada del resto del backend necesita saber cual de los dos esta atras: los
+    dos cumplen el mismo contrato (get/put/count/all_domains/desde).
+    """
+
+    url = os.environ.get("SUPABASE_URL")
+    clave = os.environ.get("SUPABASE_SERVICE_KEY")
+    if url and clave:
+        resultado: DomainStore | SupabaseDomainStore = SupabaseDomainStore(url, clave)
+    else:
+        resultado = DomainStore(ruta_json)
+    return resultado

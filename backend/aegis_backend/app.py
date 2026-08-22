@@ -5,10 +5,11 @@ import os
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from . import rutas
 from .classifier import anthropic_model
-from .store import DomainStore, PolicyStore
+from .store import DomainStore, PolicyStore, store_from_env
 
 DEFAULT_PORT = 8686
 
@@ -17,7 +18,7 @@ class BackendHandler(BaseHTTPRequestHandler):
     def __init__(
         self,
         *args,
-        store: DomainStore,
+        store: DomainStore | SupabaseDomainStore,
         ask_model=None,
         policy_store: PolicyStore | None = None,
         **kwargs,
@@ -51,19 +52,24 @@ class BackendHandler(BaseHTTPRequestHandler):
     # -- rutas --------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path.startswith("/v1/domains/"):
-            self._domain(self.path[len("/v1/domains/") :])
+        if self.path.startswith("/v1/domains/sync"):
+            # Ruta especifica antes que el prefijo generico: "sync" no puede
+            # caer en _domain() como si fuera el nombre de un dominio.
+            self._domains_sync()
         else:
-            if self.path.startswith("/v1/policy/"):
-                self._policy_tenant(self.path[len("/v1/policy/") :])
+            if self.path.startswith("/v1/domains/"):
+                self._domain(self.path[len("/v1/domains/") :])
             else:
-                if self.path.startswith("/v1/policy"):
-                    self._send(200, rutas.politica_por_defecto())
+                if self.path.startswith("/v1/policy/"):
+                    self._policy_tenant(self.path[len("/v1/policy/") :])
                 else:
-                    if self.path.startswith("/v1/stats"):
-                        self._send(200, {"domains": self.store.count()})
+                    if self.path.startswith("/v1/policy"):
+                        self._send(200, rutas.politica_por_defecto())
                     else:
-                        self._send(404, {"error": "ruta desconocida"})
+                        if self.path.startswith("/v1/stats"):
+                            self._send(200, {"domains": self.store.count()})
+                        else:
+                            self._send(404, {"error": "ruta desconocida"})
 
     def do_PUT(self) -> None:  # noqa: N802
         if self.path.startswith("/v1/policy/"):
@@ -99,6 +105,12 @@ class BackendHandler(BaseHTTPRequestHandler):
     def _domain(self, domain: str) -> None:
         self._send(*rutas.veredicto(domain, self.store, self.ask_model))
 
+    def _domains_sync(self) -> None:
+        marca = parse_qs(urlsplit(self.path).query).get(
+            "desde", ["1970-01-01T00:00:00Z"]
+        )[0]
+        self._send(*rutas.sincronizacion(self.store, marca))
+
 
 # La cache vive en el modulo y no en la peticion: dos empleados a los que se les
 # corta la misma regla hacia el mismo tipo de destino merecen la misma leccion, y
@@ -125,12 +137,13 @@ def main() -> None:
     ruta = Path(os.environ.get("AEGIS_DB", "aegis-domains.json"))
     ruta_politicas = Path(os.environ.get("AEGIS_POLICY_DB", "aegis-policies.json"))
     puerto = int(os.environ.get("AEGIS_BACKEND_PORT", DEFAULT_PORT))
-    store = DomainStore(ruta)
+    store = store_from_env(ruta)
     policy_store = PolicyStore(ruta_politicas)
     modelo = anthropic_model()
     servidor = serve(store, puerto, modelo, policy_store)
     origen = "con clasificador de modelo" if modelo else "solo con heuristica"
-    print(f"Backend de Aegis en http://127.0.0.1:{puerto} ({origen}, base: {ruta})")
+    base = ruta if isinstance(store, DomainStore) else "Supabase"
+    print(f"Backend de Aegis en http://127.0.0.1:{puerto} ({origen}, base: {base})")
     servidor.serve_forever()
 
 

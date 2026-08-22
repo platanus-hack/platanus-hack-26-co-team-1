@@ -7,11 +7,13 @@ import time
 
 from mitmproxy import http
 
+from .. import cert_siblings
 from ..detect import inyeccion, model
 from ..detect.owners import exento
 from ..detect.payload import (
     ScanResult,
     scan_payload,
+    scan_preview,
     texto_de_respuesta,
     texto_para_inyeccion,
 )
@@ -130,6 +132,10 @@ class Aegis:
         # unos 3 ms, que es barato una vez y caro mil veces. Con keep-alive,
         # una sesion entera de un CLI paga una sola lectura.
         self._procesos: dict[str, Proceso] = {}
+        # Un dominio de IA confirmado se mira una sola vez por certificado: no
+        # hace falta re-leer los SAN en cada request a la misma IA.
+        self._hermanos_investigados: set[str] = set()
+        self._lock_hermanos = threading.Lock()
         # El modelo tarda unos ocho segundos en cargar. Hacerlo en el primer
         # envio significa que la primera persona que abre un chat espera todo eso
         # con el request frenado, y llega a la conclusion correcta: que Aegis
@@ -142,6 +148,12 @@ class Aegis:
                 os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686"),
                 self.policy.tenant_id,
             )
+            # La lista negra se sincroniza sola al arrancar y despues cada
+            # tanto: nunca en el camino de una decision, que sigue siendo
+            # 100% local (suffixes.py).
+            threading.Thread(
+                target=self.domains.sincronizar_en_segundo_plano, daemon=True
+            ).start()
 
         # Capa D: lo que Aegis no puede ver. Una aplicacion con su propio stack
         # de red no consulta el proxy y su trafico no pasa por aca nunca. El
@@ -323,6 +335,42 @@ class Aegis:
         if self.signals.should_classify(host):
             self.domains.request_classification(host)
 
+    def _descubrir_hermanos(self, flow: http.HTTPFlow, host: str) -> None:
+        """Encola para investigar a los hermanos que el certificado revela.
+
+        No los condena: los pone en la misma cola que cualquier otro dominio
+        nuevo, para que Haiku decida. Se paga una sola vez por dominio de IA
+        confirmado, no en cada request a la misma herramienta.
+        """
+
+        with self._lock_hermanos:
+            ya_visto = host in self._hermanos_investigados
+            if not ya_visto:
+                self._hermanos_investigados.add(host)
+        if not ya_visto:
+            for hermano in self._hermanos_del_certificado(flow, host):
+                self.domains.request_classification(hermano)
+
+    def _hermanos_del_certificado(self, flow: http.HTTPFlow, host: str) -> list[str]:
+        """Lee el CN y los SAN del certificado TLS de la conexion, sin lanzar.
+
+        Un flow sin conexion TLS (HTTP plano, o un test que no simula el
+        certificado) no tiene nada que leer aca, y eso no puede tumbar el
+        request que si se esta protegiendo.
+        """
+
+        try:
+            certificado = flow.server_conn.certificate_list[0]
+        except (AttributeError, IndexError, TypeError):
+            cn, altnames = None, []
+        else:
+            cn = getattr(certificado, "cn", None)
+            try:
+                altnames = [str(nombre.value) for nombre in certificado.altnames]
+            except Exception:
+                altnames = []
+        return cert_siblings.hermanos(cn=cn, host=host, altnames=altnames)
+
     def _handle(self, flow: http.HTTPFlow) -> None:
         host = flow.request.pretty_host
         classification = classify(host, self.policy)
@@ -331,6 +379,12 @@ class Aegis:
             compartido = self.domains.cached(host)
             if compartido == "ai_unapproved":
                 classification = "ai_unapproved"
+
+        if classification in ("ai_approved", "ai_unapproved"):
+            # El proxy ya termino el handshake TLS para llegar hasta aca: el
+            # certificado esta en la mano y sus SAN casi siempre delatan a la
+            # familia entera del servicio, sin una consulta de red mas.
+            self._descubrir_hermanos(flow, host)
 
         corta_destino = (
             classification == "ai_unapproved"
@@ -431,6 +485,12 @@ class Aegis:
         # peticiones por hora y casi ninguna va a una IA: escanearlas todas
         # gasta CPU en cada clic y llena el panel de hallazgos que a nadie le
         # importan, porque el dato nunca estuvo yendo a un modelo.
+        # Un destino sin clasificar al que le salio algo sensible NO pasa a ser
+        # una IA: solo se vuelve digno de mirar. La diferencia importa, porque
+        # que hacer con ese envio lo decide unknown_domain_action y no las
+        # reglas de una IA confirmada.
+        sospechoso = False
+
         if classification == "non_ai":
             preview = body[:PREVIEW_BYTES].decode("utf-8", errors="replace")
             tiene_forma = looks_like_ai_api(flow.request.path, preview)
@@ -439,11 +499,12 @@ class Aegis:
             if tiene_forma:
                 classification = "ai_unknown"
             else:
-                # looks_like_ai_api busca la forma de una CONVERSACION: las claves
-                # messages, prompt, model. Una subida de archivo no tiene ninguna,
-                # asi que hasta aca el adjunto se iba sin abrirse: los bytes de un
-                # archivo arrastrado a ChatGPT van a files.oaiusercontent.com, que
-                # no es chatgpt.com. El embudo tenia que aprender la otra pregunta.
+                # El adjunto se pregunta ANTES que el barrido barato, y el orden
+                # no es casual: es una pregunta sobre el DESTINO, no sobre el
+                # contenido. Los bytes de un archivo arrastrado a ChatGPT van a
+                # files.oaiusercontent.com y no tienen forma de conversacion ni
+                # texto donde una regex encuentre nada; con el barrido primero,
+                # el adjunto se iba entero por el `return` de mas abajo.
                 origen = subida_hacia_una_ia(
                     flow.request.headers.get("Content-Type", ""),
                     body,
@@ -454,8 +515,26 @@ class Aegis:
                 )
                 if origen is not None:
                     classification = "ai_unknown"
+                else:
+                    # "allow" es la salida de emergencia: reproduce el embudo de
+                    # siempre sin gastar ni el barrido barato. Es lo que le queda
+                    # a una empresa que decide que un destino sin clasificar
+                    # nunca merece la pena, ni para investigarlo.
+                    if self.policy.unknown_domain_action == "allow":
+                        return
+                    # El request no tiene forma de llamada a un modelo, pero eso
+                    # no dice nada de lo que lleva adentro: un shadow AI interno
+                    # puede responder JSON plano sin streaming. Un barrido barato
+                    # (regex puro, sin contenedores) decide si vale la pena pagar
+                    # el escaneo completo; si no encuentra nada, el embudo
+                    # termina aca, igual que siempre.
+                    if not scan_preview(preview):
+                        return
+                    self.signals.observe_sensitive_egress(host)
+                    self._maybe_classify(host)
+                    sospechoso = True
 
-        if classification != "non_ai":
+        if classification != "non_ai" or sospechoso:
             # Antes que el escaneo de fugas, y por separado: lo que se busca aca
             # no es un dato sensible sino una ORDEN para ir a buscarlo. En este
             # momento del ataque todavia no hay ningun secreto en el texto, asi
