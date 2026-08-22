@@ -73,6 +73,31 @@ _BY_RULE: dict[str, dict[str, str]] = {
             "o el mensaje de error, sin el bloque de la llave."
         ),
     },
+    "archivo_critico": {
+        "title": "Ese archivo no esta hecho para salir del equipo",
+        "why": (
+            "Un .env, una llave, un volcado de base de datos o un respaldo "
+            "contienen la configuracion y los datos con los que funciona la "
+            "empresa. No importa que lo que se vea adentro parezca inofensivo: "
+            "el archivo completo es el problema."
+        ),
+        "what_to_do": (
+            "Si necesitas ayuda con ese archivo, pega solo la parte concreta que "
+            "no funciona, con los valores reemplazados por ejemplos."
+        ),
+    },
+    "archivo_critico_por_firma": {
+        "title": "Ese archivo es una base de datos, aunque no lo parezca",
+        "why": (
+            "El nombre decia otra cosa, pero por dentro es un volcado o una base "
+            "de datos completa. Ahi viven los datos de todos los clientes, no una "
+            "muestra."
+        ),
+        "what_to_do": (
+            "Trabaja sobre el esquema o sobre unas pocas filas de ejemplo "
+            "inventadas, nunca sobre el archivo real."
+        ),
+    },
     "credit_card": {
         "title": "Los datos de tarjetas tienen reglas propias",
         "why": (

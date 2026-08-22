@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from urllib.parse import unquote_plus
 
 from .engine import scan
+from .files import scan_files
 from .types import Finding
 
 # Un secreto casi nunca viaja en texto plano y derecho: viaja dentro de un JSON
@@ -50,6 +51,13 @@ BASE64_MAX_DEPTH = 2
 # senal esta en el volumen, no en el dato.
 BULK_PII_THRESHOLD = 15
 _BULK_PII_RULES = ("email_address", "credit_card", "latam_national_id", "iban")
+
+
+_ORDEN_SEVERIDAD = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+def _rank(finding: Finding) -> tuple[int, float, str]:
+    return (_ORDEN_SEVERIDAD[finding.severity], -finding.confidence, finding.rule_id)
 
 
 @dataclass(frozen=True)
@@ -145,9 +153,10 @@ def _derived_views(text: str) -> list[str]:
     if "%" in text:
         views.append(unquote_plus(text))
 
-    # JSON escapa los saltos y a veces los caracteres ASCII completos; sin
-    # deshacerlo, "sk-ant-..." no lo ve ninguna regla.
-    if "\\u" in text or "\\n" in text:
+    # JSON escapa los saltos, las comillas y a veces los caracteres ASCII
+    # completos. Sin deshacerlo, ni "sk-ant-..." ni password = "..." los ve
+    # ninguna regla, porque el prompt viaja dentro de otro JSON.
+    if "\\u" in text or "\\n" in text or '\\"' in text:
         views.append(text.replace("\\n", "\n").replace("\\/", "/").encode().decode("unicode_escape", "replace"))
 
     views.extend(_base64_views(text))
@@ -174,6 +183,7 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
         truncated = True
 
     views: list[str] = []
+    principal = ""
     if query:
         views.append(query)
         views.append(unquote_plus(query))
@@ -183,9 +193,9 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
             payload = _gunzip(payload) or payload
         if payload.startswith(_ZIP_MAGIC):
             views.extend(_zip_views(payload))
-        primary = _decode(payload)
-        views.append(primary)
-        views.extend(_derived_views(primary))
+        principal = _decode(payload)
+        views.append(principal)
+        views.extend(_derived_views(principal))
 
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
@@ -209,8 +219,21 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
                     seen.add(key)
                     findings.append(finding)
 
+    # El archivo puede ser critico por lo que es, no por lo que dice: un
+    # volcado binario no tiene ni una palabra que una regla de texto encuentre.
+    for hallazgo in scan_files(payload, principal):
+        clave = (hallazgo.rule_id, hallazgo.evidence)
+        if clave not in seen:
+            seen.add(clave)
+            findings.append(hallazgo)
+
     bulk = _bulk_pii(counts)
     if bulk is not None:
-        findings.insert(0, bulk)
+        findings.append(bulk)
+
+    # Se reordena al final para que el primero sea el hallazgo mas especifico, no
+    # el ultimo que se agrego. De ese primero sale la leccion que ve la persona,
+    # y "es una llave de AWS" ensena mucho mas que "es un archivo critico".
+    findings.sort(key=_rank)
 
     return ScanResult(findings=findings, truncated=truncated, views=scanned)
