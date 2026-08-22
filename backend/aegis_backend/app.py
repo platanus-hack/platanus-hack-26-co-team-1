@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .classifier import anthropic_model, classify
-from .store import DomainStore, Verdict
+from .store import DomainStore, PolicyStore, Verdict
 
 DEFAULT_PORT = 8686
 
@@ -20,9 +20,17 @@ _pending_lock = threading.Lock()
 
 
 class BackendHandler(BaseHTTPRequestHandler):
-    def __init__(self, *args, store: DomainStore, ask_model=None, **kwargs) -> None:
+    def __init__(
+        self,
+        *args,
+        store: DomainStore,
+        ask_model=None,
+        policy_store: PolicyStore | None = None,
+        **kwargs,
+    ) -> None:
         self.store = store
         self.ask_model = ask_model
+        self.policy_store = policy_store
         super().__init__(*args, **kwargs)
 
     # -- utilidades ---------------------------------------------------------
@@ -52,13 +60,23 @@ class BackendHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/v1/domains/"):
             self._domain(self.path[len("/v1/domains/") :])
         else:
-            if self.path.startswith("/v1/policy"):
-                self._send(200, _policy())
+            if self.path.startswith("/v1/policy/"):
+                self._policy_tenant(self.path[len("/v1/policy/") :])
             else:
-                if self.path.startswith("/v1/stats"):
-                    self._send(200, {"domains": self.store.count()})
+                if self.path.startswith("/v1/policy"):
+                    self._send(200, _policy())
                 else:
-                    self._send(404, {"error": "ruta desconocida"})
+                    if self.path.startswith("/v1/stats"):
+                        self._send(200, {"domains": self.store.count()})
+                    else:
+                        self._send(404, {"error": "ruta desconocida"})
+
+    def do_PUT(self) -> None:  # noqa: N802
+        if self.path.startswith("/v1/policy/"):
+            tenant = self.path[len("/v1/policy/") :].split("?")[0].strip("/")
+            self._send(200, self.policy_store.put(tenant, self._body()))
+        else:
+            self._send(404, {"error": "ruta desconocida"})
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path.startswith("/v1/events"):
@@ -74,6 +92,10 @@ class BackendHandler(BaseHTTPRequestHandler):
                 self._send(200, _lesson(self._body()))
             else:
                 self._send(404, {"error": "ruta desconocida"})
+
+    def _policy_tenant(self, tenant: str) -> None:
+        tenant = tenant.split("?")[0].strip("/")
+        self._send(200, self.policy_store.get(tenant))
 
     def _domain(self, domain: str) -> None:
         domain = domain.split("?")[0].strip("/").lower()
@@ -130,17 +152,29 @@ def _lesson(peticion: dict) -> dict:
     }
 
 
-def serve(store: DomainStore, port: int = DEFAULT_PORT, ask_model=None) -> ThreadingHTTPServer:
-    handler = partial(BackendHandler, store=store, ask_model=ask_model)
+def serve(
+    store: DomainStore,
+    port: int = DEFAULT_PORT,
+    ask_model=None,
+    policy_store: PolicyStore | None = None,
+) -> ThreadingHTTPServer:
+    handler = partial(
+        BackendHandler,
+        store=store,
+        ask_model=ask_model,
+        policy_store=policy_store or PolicyStore(Path("aegis-policies.json")),
+    )
     return ThreadingHTTPServer(("127.0.0.1", port), handler)
 
 
 def main() -> None:
     ruta = Path(os.environ.get("AEGIS_DB", "aegis-domains.json"))
+    ruta_politicas = Path(os.environ.get("AEGIS_POLICY_DB", "aegis-policies.json"))
     puerto = int(os.environ.get("AEGIS_BACKEND_PORT", DEFAULT_PORT))
     store = DomainStore(ruta)
+    policy_store = PolicyStore(ruta_politicas)
     modelo = anthropic_model()
-    servidor = serve(store, puerto, modelo)
+    servidor = serve(store, puerto, modelo, policy_store)
     origen = "con clasificador de modelo" if modelo else "solo con heuristica"
     print(f"Backend de Aegis en http://127.0.0.1:{puerto} ({origen}, base: {ruta})")
     servidor.serve_forever()

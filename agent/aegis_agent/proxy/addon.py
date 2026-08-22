@@ -14,6 +14,9 @@ from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for
 from ..policy import Classification, Policy, classify, decide, looks_like_ai_api
+from ..policy_store import cargar as cargar_politica
+from ..policy_store import refrescar_en_segundo_plano
+from ..sensor import SensorDePuntosCiegos
 from ..signals import SignalCollector
 from . import blockpage
 
@@ -32,6 +35,20 @@ _WS_REDACTED = "[Aegis bloqueo este mensaje: contenia informacion sensible]"
 
 # Cada cuanto se vuelve a registrar el uso de una misma herramienta no aprobada.
 PAUSA_USO = 600
+
+# Cada cuanto mira el sensor la tabla de conexiones. Va lento a proposito: no
+# esta en el camino de ninguna decision y no tiene por que competir por CPU.
+INTERVALO_DEL_SENSOR = 10
+
+
+def _ruta_del_proceso(pid: int) -> str:
+    try:
+        import psutil
+
+        ruta = psutil.Process(pid).exe()
+    except Exception:
+        ruta = ""
+    return ruta
 
 
 def _is_navigation(flow: http.HTTPFlow) -> bool:
@@ -75,7 +92,11 @@ def _deny(flow: http.HTTPFlow, html: str, mensaje: str, cabeceras: dict) -> None
 
 class Aegis:
     def __init__(self) -> None:
-        self.policy = Policy()
+        # La politica llega del archivo local, no de constantes en el codigo: es
+        # lo que permite que la empresa la edite desde el panel. Se lee de disco
+        # y nunca de la red, asi que sin conexion se aplica la ultima conocida
+        # (ADR 0003). El refresco deja el archivo listo para el proximo arranque.
+        self.policy = cargar_politica()
         self.user_id = os.environ.get("AEGIS_USER", "u_demo")
         self.area = os.environ.get("AEGIS_AREA", "marketing")
         self.queue = DEFAULT_QUEUE
@@ -95,6 +116,83 @@ class Aegis:
         # rompe las cosas. Se carga aca, mientras nadie esta esperando.
         if model.habilitado():
             threading.Thread(target=model.cargar, daemon=True).start()
+
+        if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
+            refrescar_en_segundo_plano(
+                os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686"),
+                self.policy.tenant_id,
+            )
+
+        # Capa D: lo que Aegis no puede ver. Una aplicacion con su propio stack
+        # de red no consulta el proxy y su trafico no pasa por aca nunca. El
+        # sensor no lo intercepta, lo hace visible.
+        self.sensor = SensorDePuntosCiegos(
+            pid_del_proxy=os.getpid(),
+            es_ia=lambda host: classify(host, self.policy) != "non_ai",
+        )
+        self._puntos_ciegos_cortados: set[str] = set()
+        if os.environ.get("AEGIS_SENSOR") != "0":
+            threading.Thread(target=self._vigilar, daemon=True).start()
+
+    def _vigilar(self) -> None:
+        """Mira la tabla de conexiones cada tanto, lejos del camino critico.
+
+        Primero resuelve el catalogo, que tarda unos segundos y se hace una sola
+        vez. Despues cada pasada cuesta milisegundos porque ya no consulta nada.
+        """
+
+        from ..catalog import AI_DOMAINS
+
+        self.sensor.cargar_catalogo(sorted(AI_DOMAINS))
+        while True:
+            try:
+                for punto in self.sensor.revisar():
+                    self._reportar_punto_ciego(punto)
+            except Exception:
+                # El sensor es visibilidad, no proteccion: que falle no puede
+                # llevarse puesto al proxy, que es lo que si esta protegiendo.
+                pass
+            time.sleep(INTERVALO_DEL_SENSOR)
+
+    def _reportar_punto_ciego(self, punto) -> None:
+        """Lo registra y, si la empresa lo pidio, le saca la ruta directa.
+
+        Aca no se puede mirar el contenido: si la aplicacion esquivo el proxy, su
+        trafico va cifrado y directo. La decision del administrador no es sobre
+        el dato sino sobre el punto ciego en si.
+        """
+
+        cortar = self.policy.blind_spot_action == "block"
+        if cortar and punto.proceso not in self._puntos_ciegos_cortados:
+            self._puntos_ciegos_cortados.add(punto.proceso)
+            threading.Thread(
+                target=self._cortar_ruta_directa, args=(punto,), daemon=True
+            ).start()
+
+        hallazgo = Finding(
+            rule_id="punto_ciego",
+            category="policy",
+            severity="high",
+            confidence=1.0,
+            evidence=f"<{punto.proceso}>"[:32],
+            start=0,
+            end=0,
+        )
+        self._record(
+            host=punto.host,
+            classification="ai_unapproved",
+            finding=hallazgo,
+            action="blocked" if cortar else "warned",
+            payload_bytes=0,
+            truncated=False,
+        )
+
+    def _cortar_ruta_directa(self, punto) -> None:
+        from ..install import firewall
+
+        ruta = _ruta_del_proceso(punto.pid)
+        if ruta:
+            firewall.bloquear_programa(ruta, self.sensor.ips_conocidas())
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.

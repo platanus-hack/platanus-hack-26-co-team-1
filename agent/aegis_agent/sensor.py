@@ -160,6 +160,18 @@ class SensorDePuntosCiegos:
                 self._cache_de_ips[ip] = nombre
         return nombre
 
+    def ips_conocidas(self) -> list[str]:
+        """Las IPs que se sabe que son de un servicio de IA.
+
+        Es lo que necesita el firewall para cortarle la ruta directa a un
+        programa sin tocar el resto de su trafico.
+        """
+
+        with self._lock:
+            return sorted(
+                ip for ip, host in self._cache_de_ips.items() if host and self.es_ia(host)
+            )
+
     def aprender(self, ip: str, host: str) -> None:
         """Le ensena al sensor una IP que el proxy ya resolvio.
 

@@ -77,3 +77,41 @@ class DomainStore:
     def all_domains(self) -> list[str]:
         with self._lock:
             return sorted(self._verdicts)
+
+
+class PolicyStore:
+    """Politicas por tenant, persistidas en disco.
+
+    Va separada de DomainStore porque no comparten forma ni ciclo de vida: un
+    veredicto de dominio se acumula uno a uno y con un esquema fijo (Verdict);
+    una politica la escribe el panel entera de una vez, como el JSON que le
+    mande el cliente, y su forma la define agent/aegis_agent/policy.py, no
+    este archivo. Guardar un dict crudo por tenant evita que el backend tenga
+    que conocer los campos de Policy para poder persistirla.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._lock = threading.Lock()
+        self._policies: dict[str, dict] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if self.path.exists():
+            self._policies = json.loads(self.path.read_text(encoding="utf-8") or "{}")
+
+    def _flush(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(
+            json.dumps(self._policies, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def get(self, tenant: str) -> dict:
+        with self._lock:
+            return self._policies.get(tenant, {})
+
+    def put(self, tenant: str, datos: dict) -> dict:
+        with self._lock:
+            self._policies[tenant] = datos
+            self._flush()
+        return datos

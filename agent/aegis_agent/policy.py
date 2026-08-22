@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 Classification = Literal[
     "ai_approved", "ai_unapproved", "ai_unknown", "non_ai", "passthrough"
@@ -10,7 +10,11 @@ Classification = Literal[
 Action = Literal["allow", "warn", "block_destination", "block_content"]
 
 from .catalog import AI_DOMAINS  # noqa: E402  (catalogo semilla)
-from .detect.model import ETIQUETAS_PRECISAS  # noqa: E402
+from .detect.model import (  # noqa: E402
+    ETIQUETAS_POR_DEFECTO,
+    ETIQUETAS_PRECISAS,
+    UMBRAL_POR_DEFECTO,
+)
 
 # Dominios que no se descifran nunca, ni para inspeccionar. Ver ADR 0003.
 PASSTHROUGH_DOMAINS: frozenset[str] = frozenset(
@@ -88,6 +92,82 @@ class Policy:
     model_warn_categories: frozenset[str] = field(
         default_factory=lambda: frozenset({"pii"})
     )
+    # Que etiquetas le pide la empresa al modelo y con que umbral de confianza.
+    # Hoy son las medidas en detect/model.py, pero una empresa con sus propios
+    # datos internos puede agregar o sacar etiquetas sin tocar codigo.
+    model_labels: tuple[str, ...] = ETIQUETAS_POR_DEFECTO
+    model_threshold: float = UMBRAL_POR_DEFECTO
+    # Que hacer cuando la capa D detecta un punto ciego (una app que no pasa
+    # por el proxy). "warn" solo lo reporta; "block" corta la conexion. El
+    # mecanismo que lee este campo lo construye otra tarea: aca solo se
+    # declara y se serializa.
+    blind_spot_action: str = "warn"
+
+    def a_dict(self) -> dict[str, Any]:
+        """Serializa la politica a tipos JSON, estable y diffeable.
+
+        Los frozenset se ordenan al convertirlos a lista para que el archivo
+        no cambie de una corrida a otra solo por el orden de iteracion.
+        """
+
+        return {
+            "tenant_id": self.tenant_id,
+            "approved_ai": sorted(self.approved_ai),
+            "unknown_domain_action": self.unknown_domain_action,
+            "unapproved_ai_action": self.unapproved_ai_action,
+            "model_action": self.model_action,
+            "model_block_categories": sorted(self.model_block_categories),
+            "model_warn_categories": sorted(self.model_warn_categories),
+            "model_block_labels": sorted(self.model_block_labels),
+            "block_categories": sorted(self.block_categories),
+            "warn_categories": sorted(self.warn_categories),
+            "model_labels": list(self.model_labels),
+            "model_threshold": self.model_threshold,
+            "blind_spot_action": self.blind_spot_action,
+        }
+
+    @classmethod
+    def desde_dict(cls, datos: dict[str, Any]) -> "Policy":
+        """Reconstruye la politica desde un dict, tolerante en ambas puntas.
+
+        Una clave ausente cae al default de la dataclass (no al default_factory
+        de esta funcion, para no duplicar el criterio en dos lugares). Una
+        clave desconocida se ignora: una politica escrita por un backend mas
+        nuevo no puede romper un agente viejo.
+        """
+
+        base = cls()
+        campos_frozenset = (
+            "approved_ai",
+            "model_block_categories",
+            "model_warn_categories",
+            "model_block_labels",
+            "block_categories",
+            "warn_categories",
+        )
+        campos_tupla = ("model_labels",)
+        campos_simples = (
+            "tenant_id",
+            "unknown_domain_action",
+            "unapproved_ai_action",
+            "model_action",
+            "model_threshold",
+            "blind_spot_action",
+        )
+
+        valores: dict[str, Any] = {}
+        for campo in campos_simples:
+            valores[campo] = datos.get(campo, getattr(base, campo))
+        for campo in campos_frozenset:
+            valores[campo] = (
+                frozenset(datos[campo]) if campo in datos else getattr(base, campo)
+            )
+        for campo in campos_tupla:
+            valores[campo] = (
+                tuple(datos[campo]) if campo in datos else getattr(base, campo)
+            )
+
+        return cls(**valores)
 
 
 # Un dominio que nadie clasifico todavia igual se delata por la forma del
