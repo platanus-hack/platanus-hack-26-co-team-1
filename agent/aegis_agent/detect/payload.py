@@ -4,12 +4,14 @@ import base64
 import binascii
 import io
 import json
+import os
 import re
+import time
 import unicodedata
 import zipfile
 import zlib
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import unquote_plus
 
 from . import diccionario
@@ -118,6 +120,35 @@ _PDF_STREAM = re.compile(
 )
 
 
+# --- Presupuesto de latencia de T1 -------------------------------------------
+#
+# T2 tenia un presupuesto duro de 700 ms y T1 no tenia ninguno, y resulta que el
+# que se pasaba era T1. Medido: 28 reglas sobre un cuerpo grande dan ~1 ms por
+# KB, o sea ~100 ms en 256 KB y del orden de un SEGUNDO en 1 MB. La documentacion
+# decia "~0.2 ms", y es cierto --sobre un prompt corto. El caso que importa no es
+# el prompt corto: es el pegado de un documento, que son cientos de KB.
+#
+# Antes de poner un presupuesto se intento OPTIMIZAR, y no funciono: unir los 28
+# patrones en una sola expresion para usarla de prefiltro --con la garantia de que
+# si la union no matchea, ninguna regla individual puede matchear-- dio el mismo
+# costo o peor (0.9x). El motor de expresiones regulares de Python no arma un
+# automata eficiente con una alternancia de patrones complejos, hace backtracking.
+# Queda anotado para que nadie vuelva a intentarlo esperando otra cosa.
+#
+# Asi que el mecanismo es acotar, no acelerar. Y la medicion tambien mostro por
+# que tiene que ser un presupuesto de TIEMPO y no de tamano: la misma medicion
+# repetida dio 400 ms y 2.700 ms segun lo ocupada que estuviera la maquina. El
+# tamano no predice el costo.
+PRESUPUESTO_MS = int(os.environ.get("AEGIS_T1_PRESUPUESTO_MS", "500"))
+
+# Tamano del segmento con el que se recorre una vista grande, y cuanto se solapan
+# dos segmentos consecutivos. El solape existe para que un hallazgo que cruza el
+# corte no se pierda: la regla de patron mas largo abarca 400 caracteres
+# (sql_schema_sensitive), asi que 1024 sobra con margen.
+SEGMENTO = 64_000
+SOLAPE = 1_024
+
+
 # Un correo suelto en un prompt es una mencion. Quince en el mismo envio son una
 # base de clientes, y ninguna regla individual puede notar la diferencia: la
 # senal esta en el volumen, no en el dato.
@@ -154,6 +185,70 @@ def _bulk_pii(counts: Counter[str]) -> Finding | None:
     else:
         finding = None
     return finding
+
+
+def _segmentos(texto: str):
+    """La vista partida en pedazos, y el ORDEN es la decision de este modulo.
+
+    Primero la cabeza, despues la COLA, y el medio al final. Importa porque el
+    presupuesto puede cortar el recorrido a la mitad, y entonces lo que quede sin
+    mirar tiene que ser la parte menos peligrosa. Este proyecto ya aprendio cual
+    es la mas peligrosa: meter el secreto al final de un archivo grande es la
+    evasion mas barata que existe, y hay un test viejo que lo fija. Recorrer de
+    principio a fin y cortar por tiempo habria dejado justo el final afuera.
+
+    Cada pedazo viene con su desplazamiento, para que las posiciones de los
+    hallazgos sigan siendo absolutas: la deduplicacion de mas abajo compara por
+    posicion, y con posiciones relativas al segmento el mismo secreto encontrado
+    en la zona de solape se reportaria dos veces.
+    """
+
+    if len(texto) <= SEGMENTO:
+        yield texto, 0
+        return
+
+    yield texto[:SEGMENTO], 0
+
+    inicio_cola = max(SEGMENTO - SOLAPE, len(texto) - SEGMENTO)
+    yield texto[inicio_cola:], inicio_cola
+
+    posicion = SEGMENTO - SOLAPE
+    while posicion < inicio_cola:
+        yield texto[posicion : posicion + SEGMENTO], posicion
+        posicion += SEGMENTO - SOLAPE
+
+
+def _scan_con_presupuesto(texto: str, restante_ms: float) -> tuple[list[Finding], bool]:
+    """Escanea la vista mientras alcance el presupuesto. Devuelve (hallazgos, completo)."""
+
+    hallazgos: list[Finding] = []
+    completo = True
+    inicio = time.perf_counter()
+    for indice, (pedazo, desplazamiento) in enumerate(_segmentos(texto)):
+        # La cabeza y la cola NO son negociables: se miran siempre, sin importar
+        # el presupuesto. El presupuesto gobierna el medio.
+        #
+        # Esto no estaba en la primera version y lo encontro un test: con el
+        # presupuesto casi agotado se miraba solo la cabeza, o sea que la cola se
+        # moria de hambre --justo la parte que el orden de los segmentos existe
+        # para proteger. Una garantia que depende de que sobre tiempo no es una
+        # garantia. Y el costo de volverla incondicional esta acotado: son dos
+        # segmentos, 128 KB, del orden de 50 a 80 ms.
+        obligatorio = indice < 2
+        if not obligatorio and (time.perf_counter() - inicio) * 1000 > restante_ms:
+            completo = False
+            break
+        for hallazgo in scan(pedazo):
+            hallazgos.append(
+                hallazgo
+                if desplazamiento == 0
+                else replace(
+                    hallazgo,
+                    start=hallazgo.start + desplazamiento,
+                    end=hallazgo.end + desplazamiento,
+                )
+            )
+    return hallazgos, completo
 
 
 def _decode(payload: bytes) -> str:
@@ -539,17 +634,33 @@ def scan_payload(
     counts: Counter[str] = Counter()
     budget = MAX_TOTAL_EXPANDED_CHARS
     scanned = 0
+    arranque = time.perf_counter()
     for view in views:
+        gastado = (time.perf_counter() - arranque) * 1000
+        if gastado > PRESUPUESTO_MS:
+            # Se agoto el tiempo y quedan vistas sin mirar. Se dice en el evento:
+            # un escaneo incompleto reportado es informacion, y uno incompleto en
+            # silencio es una promesa que el producto no esta cumpliendo.
+            truncated = True
+            break
         if budget > 0:
             budget -= len(view)
             scanned += 1
             # El tope de la vista incluye la cola: recortar aca de nuevo dejaria
             # afuera justo el pedazo que se conservo para no perder el final.
             recorte = view[: MAX_INSPECT_BYTES + TAIL_BYTES]
-            view_findings = scan(recorte)
+            view_findings, completo = _scan_con_presupuesto(
+                recorte, PRESUPUESTO_MS - gastado
+            )
+            if not completo:
+                truncated = True
             # El diccionario de la empresa se mira sobre las mismas vistas que
             # las reglas: si comprimir el cuerpo o pasarlo por base64 alcanzara
             # para esconder el nombre de un cliente, la lista no serviria.
+            #
+            # Va fuera del recorrido por segmentos a proposito: buscar terminos
+            # literales es barato --no son 28 expresiones regulares-- asi que no
+            # necesita presupuesto y conviene que no dependa de si sobro tiempo.
             if terminos:
                 view_findings = view_findings + diccionario.buscar(recorte, terminos)
             for rule_id, total in Counter(f.rule_id for f in view_findings).items():

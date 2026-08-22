@@ -7,7 +7,7 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 425 en verde (`python run_tests.py` desde la raíz).
+**Tests:** PENDIENTE en verde (`python run_tests.py` desde la raíz).
 **Entorno:** `agent/requirements.txt` para el proxy y los tests;
 `agent/requirements-modelo.txt` para T2, que va aparte porque es opcional y pesa.
 
@@ -46,6 +46,9 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Subida de archivos hacia una IA | Funciona (navegador). Falta la app de escritorio | `agent/aegis_agent/subidas.py` |
 | Filtro de placeholder + validadores de contexto | Funciona | `agent/aegis_agent/detect/placeholders.py`, `contexto.py` |
 | Banco de precisión + trinquete en la suite | Funciona, 1.375 casos | `agent/bench/precision.py` |
+| OCR de imágenes (el pantallazo) | Funciona, **apagado por defecto**: cuesta ~2 s | `agent/aegis_agent/detect/ocr.py`, `imagenes.py` |
+| PDF con FlateDecode, hex, invisibles y homoglifos | Funciona | `agent/aegis_agent/detect/payload.py` |
+| Presupuesto de latencia de T1 (500 ms, cabeza y cola siempre) | Funciona | `agent/aegis_agent/detect/payload.py` |
 
 **Desplegado:** https://aegis-panel.onrender.com — un solo servicio con el front y el API
 
@@ -71,6 +74,22 @@ Por orden de lo que más falta para el pitch:
    que no existe es *ver* qué mandaron: para eso haría falta un driver WFP.
 6. **El almacenamiento del panel desplegado es efímero.** Sin `AEGIS_KV_URL` los
    eventos viven mientras la función esté caliente.
+
+7. **El OCR es sincrónico y eso lo deja apagado.** Cuesta ~2 s, así que hoy la
+   empresa tiene que decidir prenderlo. Lo que lo volvería gratis es el **modo
+   asincrónico**: la subida del archivo y el turno que le pide al modelo leerlo
+   son dos requests distintos, y entre los dos hay una ventana real —la persona
+   tiene que apretar enviar. Haciendo el OCR fuera del camino crítico al subir y
+   frenando el turno siguiente si encontró algo, la latencia no se paga nunca y
+   la fuga igual no se completa: el archivo en el blob todavía no es una fuga, la
+   fuga es pedirle al modelo que lo lea. Requiere estado por sesión.
+8. **Los hallazgos que salen de una imagen no tienen la rebaja de autoridad de
+   T2**, y deberían: el texto del OCR es aproximado (medido: `Verano2026Bogota`
+   salió `Verano2o26Bogota`). Hoy entran por la cascada normal. Es una deuda
+   anotada, no una decisión.
+9. **La app de escritorio que no manda `Origin` sigue subiendo archivos a
+   ciegas.** Le falta la correlación por proceso; el punto de enganche está
+   marcado en `subidas.py`.
 
 ## 4. Las decisiones que no hay que deshacer sin leer
 
@@ -120,6 +139,9 @@ Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
 | **`sk-proj-XXXXXXXX` y `postgres://user:password@localhost` cortaban el envío.** Un placeholder tiene forma de credencial y no es ninguna, y las reglas de *formato* no tenían validador porque el formato les alcanzaba. Un desarrollador preguntando por su propio `.env.example` se comía un 403. El filtro va en el motor, no en cada regla, para que ninguna regla nueva se olvide de pasarlo. Y **no** filtra por la palabra "example": la llave canónica de AWS es `AKIAIOSFODNN7EXAMPLE`, así que eso sería el bypass más fácil del producto. | `test_placeholders.py` |
 | **El adjunto se iba sin abrirse.** Los bytes de un archivo arrastrado a ChatGPT van a `files.oaiusercontent.com`, no a `chatgpt.com`, y `looks_like_ai_api` busca la forma de una *conversación*: una subida no la tiene. No era una regla que faltaba, era un agujero en el embudo. | `test_subida_de_archivos.py` |
 | **`c.c. 43.115.902` no se veía nunca** — la forma más común de escribir una cédula en Colombia. El `` iba después de toda la alternancia y `c.c.` termina en punto: un límite de palabra pegado a un punto necesita un carácter de palabra al lado. A ojo la alternancia se ve perfecta; lo encontró el banco de precisión. La CURP tenía el mismo error, tres líneas más arriba, ya arreglado para la cédula. | `test_trinquete_precision.py` |
+| **Una excepción del OCR se llevaba puesto el escaneo de T1 entero.** El OCR es una *vista*, no el motor: misma doctrina que el sensor de puntos ciegos —es visibilidad, y que falle no puede tumbar lo que sí está protegiendo. | `test_ocr_de_imagenes.py` |
+| **El presupuesto de T1 mataba de hambre a la cola.** Con el tiempo agotado se miraba sólo la cabeza, o sea justo la parte que el orden de los segmentos existe para proteger. Una garantía que depende de que sobre tiempo no es una garantía: la cabeza y la cola se miran siempre. | `test_presupuesto_de_t1.py` |
+| **El valor de una credencial se tragaba el delimitador de cierre.** El texto de un PDF va entre paréntesis, así que se capturaba `Verano2026Bogota)` y el validador lo descartaba por parecer una llamada a función. Lo encontró una sonda externa, no el trinquete: **un trinquete protege lo que el corpus contiene, y nada más.** | `test_normalizacion_y_pdf.py` |
 | **`la password del servidor de producción es X` se iba entera.** Las dos reglas de credencial en español tenían listas de anclas **distintas** y se habían ido separando. Y `Sup3rS3cret1` da 3,08 bits de entropía —por debajo del umbral— siendo exactamente la clave que una política de empresa obliga a poner: la condición de mezcla de clases vivía dentro de una sola regex y ahora es una función que las dos comparten. | `test_trinquete_precision.py` |
 
 ## 6. Trampa de herramientas que te va a morder

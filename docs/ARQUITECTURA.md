@@ -68,11 +68,13 @@ paso existe para no pagar el siguiente.
    ningún dato sensible en el texto**.
 
 6. Se escanea el payload:
-   a. se decodifica (gzip, zip, UTF-16, base64, JSON escapado…)
-   b. T1: 28 reglas + firmas de archivo        ~0.2 ms
+   a. se decodifica (gzip, zip, PDF, UTF-16, base64, hex, JSON escapado…)
+      y se normaliza (invisibles, homoglifos, NFKC)
+   b. T1: 28 reglas + firmas de archivo   ~1 ms por KB, techo de 500 ms
    c. señal de volumen (15 datos personales = un export)
-   d. T2: modelo local, SOLO si T1 no vio nada  ~110 ms
-   e. se ordenan por especificidad
+   d. OCR de las imágenes, si está prendido      ~2 s  (apagado por defecto)
+   e. T2: modelo local, SOLO si T1 no vio nada  ~110 ms
+   f. se ordenan por especificidad
 
 7. Se cruza el hallazgo con la política:
    secret o internal_data       → bloquear
@@ -120,13 +122,35 @@ construye la atribución por proceso: el punto de enganche está marcado en
 
 | Nivel | Qué es | Dónde corre | Costo | Qué atrapa |
 |---|---|---|---|---|
-| **T1** | 28 reglas + entropía + Luhn + firmas binarias | Local | ~0.2 ms | Credenciales, volcados, exports, documentos de identidad, archivos críticos |
+| **T1** | 28 reglas + entropía + Luhn + firmas binarias | Local | **~1 ms/KB**, techo 500 ms | Credenciales, volcados, exports, documentos de identidad, archivos críticos |
 | **Volumen** | Agregación sobre los hallazgos de T1 | Local | 0 | Un export de clientes que línea a línea parece inocente |
+| **OCR** | Lectura del texto de una imagen | Local | **~2 s** | El pantallazo, que era el canal invisible. Apagado por defecto: ver abajo |
 | **T2** | Modelo de entidades (289M parámetros) | Local | ~110 ms | Lo que no tiene formato: nombres de clientes, cifras de contratos, datos de salud |
 | **Inyección** | 3 reglas, en las dos direcciones | Local | ~0.1 ms | Órdenes escritas para el modelo dentro del contenido: el ataque que convierte a la herramienta en el que filtra |
 
 T2 corre **solo si T1 no encontró nada**. Si ya hay una credencial detectada,
 gastar 110 ms más no cambia la decisión ni la lección.
+
+**Y el nivel más caro de la cascada no es el modelo: es el OCR.** Medido en CPU
+sobre una captura de 900×260, la inferencia da p50 1,7 s con la máquina
+descansada y entre 5 y 9 s con la máquina ocupada — entre dos y trece veces el
+presupuesto *completo* de T2. Por eso está apagado por defecto (`AEGIS_OCR=1`) y
+por eso su presupuesto se mide en segundos y no en milisegundos: cuando está
+prendido, se paga sólo en un envío **con imagen**, que es una acción puntual que
+la persona acaba de iniciar y donde ya espera una demora. No es un tecleo.
+
+**T1 también tiene presupuesto ahora, y hacía falta.** No costaba 0,2 ms sino
+del orden de 1 ms por KB: cierto sobre un prompt corto, falso sobre el pegado de
+un documento, que es el caso que importa. Un cuerpo de 1 MB tardaba cerca de un
+segundo. Ahora una vista grande se recorre por segmentos con un techo de 500 ms,
+y **el orden de los segmentos es cabeza → cola → medio**, porque si el
+presupuesto corta el recorrido lo que tiene que quedar sin mirar es la parte
+menos peligrosa: este proyecto ya documentó que el secreto al final de un archivo
+grande es la evasión más barata que existe. La cabeza y la cola se miran
+**siempre**, sin importar el presupuesto — una garantía que depende de que sobre
+tiempo no es una garantía. Y cuando algo queda sin mirar, el evento lo dice
+(`truncated`): un escaneo incompleto en silencio es una promesa que el producto
+no está cumpliendo.
 
 ## 4. Anti-evasión
 
@@ -134,6 +158,11 @@ gastar 110 ms más no cambia la decisión ni la lección.
 
 | Vector | Cómo se cubre |
 |---|---|
+| **captura de pantalla** | OCR local, si está prendido. Era el canal invisible |
+| **PDF** (`FlateDecode`) | se descomprimen los streams. El de Word, Docs y LaTeX |
+| **carácter de ancho cero** dentro del secreto | normalización. Y aparece **solo** al copiar de una web |
+| **homoglifo** (А cirílica por A latina) | tabla de confusables; NFKC no los toca |
+| hexdump | se decodifican las corridas largas si salen como texto |
 | gzip / brotli en el transporte | `get_content()` en vez de `raw_content` |
 | `.gz` como adjunto | firma `1f 8b` y descompresión |
 | `.docx`, `.xlsx` (son zips) | se leen los miembros de texto |
