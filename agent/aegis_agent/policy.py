@@ -112,6 +112,22 @@ class Policy:
     # datos internos puede agregar o sacar etiquetas sin tocar codigo.
     model_labels: tuple[str, ...] = ETIQUETAS_POR_DEFECTO
     model_threshold: float = UMBRAL_POR_DEFECTO
+    # Que puede hacer Aegis con cada aplicacion, por nombre de proceso. Solo
+    # dos valores: "bloquear" (lo normal) y "observar" (registra todo y no corta
+    # nada).
+    #
+    # Existe porque un agente de codigo leyendo un repositorio no es lo mismo que
+    # una persona pegando en un chat, y merece un trato distinto. El caso que lo
+    # motivo es real y le pasa a cualquiera: un desarrollador cuyo repositorio
+    # tiene credenciales de prueba en los fixtures queda bloqueado por su propio
+    # codigo, todo el dia.
+    #
+    # Lo que NO puede hacer esto es reducir la cobertura, que es lo que prohibe
+    # el ADR 0002. Por eso la aplicacion desconocida no cae en ninguna regla y se
+    # queda con la politica estricta: hay que nombrarla para aflojarla, nunca al
+    # reves. Y esto NO le llega al detector, que sigue recibiendo texto y destino
+    # y nada mas.
+    app_actions: dict[str, str] = field(default_factory=dict)
     # Que hacer cuando la capa D detecta un punto ciego (una app que no pasa
     # por el proxy). "warn" solo lo reporta; "block" corta la conexion. El
     # mecanismo que lee este campo lo construye otra tarea: aca solo se
@@ -138,20 +154,29 @@ class Policy:
             "warn_categories": sorted(self.warn_categories),
             "model_labels": list(self.model_labels),
             "model_threshold": self.model_threshold,
+            "app_actions": dict(sorted(self.app_actions.items())),
             "blind_spot_action": self.blind_spot_action,
         }
 
     @classmethod
-    def desde_dict(cls, datos: dict[str, Any]) -> "Policy":
+    def desde_dict(cls, datos: dict[str, Any], base: "Policy | None" = None) -> "Policy":
         """Reconstruye la politica desde un dict, tolerante en ambas puntas.
 
-        Una clave ausente cae al default de la dataclass (no al default_factory
-        de esta funcion, para no duplicar el criterio en dos lugares). Una
-        clave desconocida se ignora: una politica escrita por un backend mas
+        Una clave desconocida se ignora: una politica escrita por un backend mas
         nuevo no puede romper un agente viejo.
+
+        Y `base` cubre el caso inverso, que es el peligroso. Sin ella, una clave
+        AUSENTE cae al default del codigo, asi que un backend viejo (o un
+        formulario que manda solo el campo que se toco) resetea en silencio todo
+        lo que no nombro. En un producto de seguridad eso significa que la
+        politica de la empresa cambia sin que nadie lo haya decidido: paso en
+        vivo, un backend con codigo anterior devolvio una politica parcial y le
+        devolvio el bloqueo a un equipo que estaba en modo observacion.
+
+        Con `base`, lo que el dict no dice se conserva.
         """
 
-        base = cls()
+        base = base if base is not None else cls()
         campos_frozenset = (
             "approved_ai",
             "model_block_categories",
@@ -161,6 +186,7 @@ class Policy:
             "warn_categories",
         )
         campos_tupla = ("model_labels",)
+        campos_dict = ("app_actions",)
         campos_simples = (
             "tenant_id",
             "unknown_domain_action",
@@ -180,6 +206,10 @@ class Policy:
         for campo in campos_tupla:
             valores[campo] = (
                 tuple(datos[campo]) if campo in datos else getattr(base, campo)
+            )
+        for campo in campos_dict:
+            valores[campo] = (
+                dict(datos[campo]) if campo in datos else dict(getattr(base, campo))
             )
 
         return cls(**valores)
@@ -316,7 +346,29 @@ def decide(classification: Classification, categories: set[str], policy: Policy)
     return action
 
 
-def decidir_sobre(classification: Classification, findings: list, policy: Policy) -> Action:
+# Los dos unicos modos por aplicacion. "observar" registra todo y no corta nada.
+OBSERVAR = "observar"
+BLOQUEAR = "bloquear"
+
+
+def modo_de_la_app(proceso: str, policy: Policy) -> str:
+    """Que puede hacer Aegis con esta aplicacion.
+
+    Una aplicacion que nadie nombro se queda con lo estricto. Es la unica forma
+    de que esto no reduzca la cobertura: hay que nombrar una app para aflojarla,
+    nunca al reves, asi que la herramienta de IA que el equipo de seguridad no
+    sabe que existe sigue tratada como lo que es.
+    """
+
+    return policy.app_actions.get((proceso or "").lower(), BLOQUEAR)
+
+
+def decidir_sobre(
+    classification: Classification,
+    findings: list,
+    policy: Policy,
+    proceso: str = "",
+) -> Action:
     """La decision completa, incluida la rebaja de autoridad del modelo.
 
     Vive aca y no en el addon porque el banco de pruebas tiene que medir lo
@@ -335,6 +387,12 @@ def decidir_sobre(classification: Classification, findings: list, policy: Policy
     categorias = {hallazgo.category for hallazgo in findings}
     action = decide(classification, categorias, policy)
     peor = findings[0] if findings else None
+
+    # La aplicacion puede rebajar un corte a un aviso, nunca al reves: el evento
+    # se registra igual y la empresa lo ve en el panel. Va antes que la rebaja
+    # del modelo porque una vez que quedo en "warn" ya no hay nada que rebajar.
+    if action == "block_content" and modo_de_la_app(proceso, policy) == OBSERVAR:
+        action = "warn"
 
     if peor is not None and action == "block_content" and peor.rule_id.startswith("modelo:"):
         if policy.model_action == "warn":

@@ -22,6 +22,7 @@ from ..policy import (
     decidir_sobre,
     looks_like_ai_api,
 )
+from ..procesos import DESCONOCIDO, Proceso, del_puerto
 from ..policy_store import cargar as cargar_politica
 from ..policy_store import refrescar_en_segundo_plano
 from ..sensor import SensorDePuntosCiegos
@@ -118,6 +119,11 @@ class Aegis:
         self.signals = SignalCollector()
         self._ultimo_uso: dict[str, float] = {}
         self._lock_uso = threading.Lock()
+        # Que aplicacion abrio cada conexion. Se resuelve una vez por
+        # conexion TCP y no por request: leer la tabla del sistema cuesta
+        # unos 3 ms, que es barato una vez y caro mil veces. Con keep-alive,
+        # una sesion entera de un CLI paga una sola lectura.
+        self._procesos: dict[str, Proceso] = {}
         # El modelo tarda unos ocho segundos en cargar. Hacerlo en el primer
         # envio significa que la primera persona que abre un chat espera todo eso
         # con el request frenado, y llega a la conclusion correcta: que Aegis
@@ -193,6 +199,7 @@ class Aegis:
             action="blocked" if cortar else "warned",
             payload_bytes=0,
             truncated=False,
+            proceso=punto.proceso,
         )
 
     def _cortar_ruta_directa(self, punto) -> None:
@@ -201,6 +208,30 @@ class Aegis:
         ruta = _ruta_del_proceso(punto.pid)
         if ruta:
             firewall.bloquear_programa(ruta, self.sensor.ips_conocidas())
+
+    def client_connected(self, client) -> None:
+        """Resuelve la aplicacion al abrir la conexion, fuera del camino critico.
+
+        Hacerlo aca y no en request() es lo que mantiene la atribucion gratis:
+        el request no espera por una lectura de la tabla de conexiones.
+        """
+
+        try:
+            puerto = client.peername[1]
+        except (AttributeError, IndexError, TypeError):
+            puerto = 0
+        if puerto:
+            self._procesos[client.id] = del_puerto(puerto)
+
+    def client_disconnected(self, client) -> None:
+        self._procesos.pop(client.id, None)
+
+    def _proceso_de(self, flow: http.HTTPFlow) -> Proceso:
+        try:
+            conocido = self._procesos.get(flow.client_conn.id)
+        except AttributeError:
+            conocido = None
+        return conocido or Proceso()
 
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
@@ -229,6 +260,7 @@ class Aegis:
                         action="blocked",
                         payload_bytes=len(message.content),
                         truncated=result.truncated,
+                        proceso=self._proceso_de(flow).nombre,
                     )
 
     def response(self, flow: http.HTTPFlow) -> None:
@@ -267,8 +299,9 @@ class Aegis:
         else:
             if classification == "ai_unapproved":
                 # Aunque se deje pasar, el uso de una herramienta no aprobada es
-                # justamente lo que la empresa necesita ver en el panel.
-                self._registrar_uso(host, classification)
+                # justamente lo que la empresa necesita ver en el panel: con que
+                # aplicacion la usan es la otra mitad del dato.
+                self._registrar_uso(host, classification, self._proceso_de(flow).nombre)
             if flow.request.method in METHODS_WITH_PAYLOAD and classification != "passthrough":
                 self._inspect(flow, host, classification)
 
@@ -283,6 +316,7 @@ class Aegis:
             action="blocked",
             payload_bytes=len(flow.request.raw_content or b""),
             truncated=False,
+            proceso=self._proceso_de(flow).nombre,
         )
         _deny(
             flow,
@@ -299,6 +333,7 @@ class Aegis:
         # alcanzaria para pasar cualquier secreto sin que ninguna regla lo vea.
         body = flow.request.get_content(strict=False) or b""
         query = str(flow.request.query) if flow.request.query else ""
+        proceso = self._proceso_de(flow)
 
         # El destino filtra antes que el contenido. Un equipo genera miles de
         # peticiones por hora y casi ninguna va a una IA: escanearlas todas
@@ -327,7 +362,9 @@ class Aegis:
             # La decision vive en policy.decidir_sobre y no aca: es la misma que
             # tiene que medir el banco de pruebas. Cuando eran dos copias, el
             # banco reportaba ocho bloqueos falsos que el proxy nunca hacia.
-            action = decidir_sobre(classification, result.findings, self.policy)
+            action = decidir_sobre(
+                classification, result.findings, self.policy, proceso.nombre
+            )
             worst = result.findings[0] if result.findings else None
 
             if action == "block_content" and worst is not None:
@@ -338,6 +375,7 @@ class Aegis:
                     action="blocked",
                     payload_bytes=len(body),
                     truncated=result.truncated,
+                    proceso=proceso.nombre,
                 )
                 # La leccion sale del cache en disco, siempre. Esto solo le pide
                 # al backend la version generada para la PROXIMA vez: nadie la
@@ -372,9 +410,12 @@ class Aegis:
                         action="warned" if action == "warn" else "allowed",
                         payload_bytes=len(body),
                         truncated=result.truncated,
+                        proceso=proceso.nombre,
                     )
 
-    def _registrar_uso(self, host: str, classification: Classification) -> None:
+    def _registrar_uso(
+        self, host: str, classification: Classification, proceso: str = ""
+    ) -> None:
         """Un evento por dominio cada tanto, no uno por peticion.
 
         Una sola pestana de chat dispara decenas de peticiones por minuto: sin
@@ -394,6 +435,7 @@ class Aegis:
                 action="allowed",
                 payload_bytes=0,
                 truncated=False,
+                proceso=proceso,
             )
 
     def _record(
@@ -405,6 +447,7 @@ class Aegis:
         action: str,
         payload_bytes: int,
         truncated: bool,
+        proceso: str = "",
     ) -> dict:
         event = build_event(
             tenant_id=self.policy.tenant_id,
@@ -412,7 +455,7 @@ class Aegis:
             area=self.area,
             host=host,
             classification=classification,
-            process="browser",
+            process=proceso or DESCONOCIDO,
             finding=finding,
             action=action,
             payload_bytes=payload_bytes,

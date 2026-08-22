@@ -7,7 +7,7 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 331 en verde (`python run_tests.py` desde la raíz).
+**Tests:** 367 en verde (`python run_tests.py` desde la raíz).
 **Entorno:** `agent/requirements.txt` para el proxy y los tests;
 `agent/requirements-modelo.txt` para T2, que va aparte porque es opcional y pesa.
 
@@ -105,6 +105,9 @@ Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
 | El escape del JSON fabrica credenciales: "explícitamente" viaja como `explícitamente`, y esos dígitos vuelven una palabra corriente indistinguible de una contraseña. Cerca de "usuario" bloqueó una sesión entera de Claude Code por su propio archivo de memoria. | `test_credenciales_en_lenguaje_natural.py` |
 | Importar `proxy/addon.py` levantaba un agente de verdad (`addons = [Aegis()]` al final del módulo): la suite le escribía `~/.aegis/politica.json` al desarrollador. | `test_politica.py` |
 | `AEGIS_MODO` dejó de existir cuando la política pasó a vivir en disco: el archivo mandaba siempre. | `test_politica.py` |
+| Todos los eventos decían `process: "browser"`, incluso los de un CLI. El contrato pedía ese campo desde el primer día. | `test_atribucion_por_proceso.py` |
+| Una política **parcial** reseteaba en silencio todo lo que no nombraba: un backend con código anterior le devolvió el bloqueo a un equipo que estaba en modo observación. Ahora se mezcla sobre la que había. | `test_atribucion_por_proceso.py` |
+| El proxy escuchaba en todas las interfaces: un proxy que descifra TLS abierto al wifi de al lado. Ahora va atado a loopback. | — |
 | Con Aegis en el medio, **Claude Code no podia ni autenticarse**: su propio token hacia api.anthropic.com se leia como una fuga. Una credencial que va hacia su dueño no es una fuga. | `test_dueno_de_la_credencial.py` |
 | La regla genérica disparaba sobre marcado: un `` `git ... `` en el contexto bloqueaba una sesión limpia. | `test_dueno_de_la_credencial.py` |
 

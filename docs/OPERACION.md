@@ -76,7 +76,8 @@ navegador está activo y el proceso muere, no hay navegación.
 
 ```bash
 # El proxy (el agente propiamente dicho)
-mitmdump --listen-port 8899 --set connection_strategy=lazy -s agent/aegis_mitm.py
+mitmdump --listen-host 127.0.0.1 --listen-port 8899 \
+  --set connection_strategy=lazy -s agent/aegis_mitm.py
 
 # El backend: base colaborativa de dominios
 cd backend && python -m aegis_backend.app        # :8686
@@ -88,7 +89,7 @@ cd agent && python -m aegis_agent.panel.server   # :8787
 En Windows, para dejarlos corriendo desacoplados de la terminal:
 
 ```powershell
-Start-Process -FilePath mitmdump.exe -ArgumentList "--listen-port","8899",`
+Start-Process -FilePath mitmdump.exe -ArgumentList "--listen-host","127.0.0.1","--listen-port","8899",`
   "--set","connection_strategy=lazy","-s","$agent\aegis_mitm.py" -WindowStyle Hidden
 ```
 
@@ -183,6 +184,22 @@ uso.
 |---|---|
 | `equilibrado` (por defecto) | Abre normal. Cada envío se analiza: el trabajo pasa, el dato sensible no. El uso queda registrado igual. |
 | `estricto` | Corta el destino. |
+
+## 9b. Política por aplicación
+
+Cada evento dice ahora **qué aplicación** lo originó (`claude-code`, `chrome.exe`, `codex`…), y la
+política puede poner una aplicación nombrada en modo observación: registra todo y no corta nada.
+
+```python
+Policy(app_actions={"claude-code": "observar", "codex": "observar"})
+```
+
+Sirve para el caso que aparece siempre en cuanto alguien programa: un repositorio cuyos *fixtures*
+tienen credenciales de prueba bloquea a su propio desarrollador todo el día.
+
+**Nombrar una aplicación solo puede aflojarla.** Lo que nadie nombró —incluida la herramienta de IA
+que el equipo de seguridad no sabe que está instalada— se queda con la política estricta. El detalle
+y lo que esto cuesta está en el [ADR 0004](adr/0004-la-politica-conoce-la-aplicacion-el-detector-no.md).
 
 ## 10. Diagnóstico rápido
 

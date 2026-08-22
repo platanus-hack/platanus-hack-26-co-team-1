@@ -95,7 +95,9 @@ def refrescar_en_segundo_plano(
                 if respuesta.status == 200:
                     datos = json.loads(respuesta.read())
                     if datos:
-                        guardar(Policy.desde_dict(datos), ruta)
+                        # Se mezcla sobre la politica que ya hay, no sobre los
+                        # defaults: lo que el backend no nombra se conserva.
+                        guardar(Policy.desde_dict(datos, cargar(ruta)), ruta)
         except (urllib.error.URLError, OSError, ValueError, TypeError):
             # Sin red, backend caido o respuesta invalida: la politica en
             # disco (la ultima conocida) queda tal cual estaba.
