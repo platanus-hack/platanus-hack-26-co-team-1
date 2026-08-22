@@ -242,7 +242,14 @@ _SECRETS: tuple[Rule, ...] = (
             r"|password|passwd|pwd"
             r"|usuario y clave|acceso|clave" + _CLAVE_NO_SECRETA + r"s?)"
             r"\b[^.\n]{0,40}?\s(?:es|son|:)\s+"
-            r"\\?[\"']?([^\s\"'\\]{12,})"
+            # El valor no puede tragarse los delimitadores que lo rodean. Sin
+            # esto, un PDF con el texto entre parentesis --que es como los
+            # escribe cualquier generador-- capturaba "Verano2026Bogota)" con el
+            # cierre pegado, y el validador lo descartaba por parecer una llamada
+            # a funcion. La credencial estaba ahi y no se veia. Ningun secreto
+            # real lleva parentesis, llaves, corchetes, coma ni punto y coma;
+            # base64 usa +, / y =, que quedan permitidos.
+            r"\\?[\"']?([^\s\"'\\(){}\[\]<>,;]{12,})"
         ),
         description="Credencial dicha en lenguaje natural, no como asignacion",
         group=1,
