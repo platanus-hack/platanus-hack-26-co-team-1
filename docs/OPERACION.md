@@ -26,7 +26,7 @@ cd agent && python -m unittest discover -s tests -t .
 cd agent && python -m unittest tests.test_evasion # una sola suite
 ```
 
-212 tests. Los que necesitan el modelo se saltan solos si no está instalado.
+225 tests. Los que necesitan el modelo se saltan solos si no está instalado.
 
 ## 3. La demo sin instalar nada
 
@@ -135,14 +135,22 @@ Debe dar **34 de 34**. Si alguna se escapa, es un hueco real.
 |---|---|---|
 | `AEGIS_PANEL_PORT` | `8787` | Puerto del panel local |
 | `AEGIS_TENANT` | `acme` | Nombre de la organización que muestra |
+| `PORT` | `10000` | Puerto del servicio desplegado; lo inyecta Render |
+| `AEGIS_DATA_DIR` | — | Disco donde persistir los eventos del panel desplegado |
 | `AEGIS_KV_URL` / `AEGIS_KV_TOKEN` | — | Almacén compatible con Upstash para el panel desplegado |
 
 ## 8. El panel desplegado
 
-https://aegis-theta-eight.vercel.app
+https://aegis-panel.onrender.com
+
+Es un servicio web de Render (`render.yaml`), no una función serverless. Con
+`autoDeploy` encendido cada push a `main` lo redespliega solo; no hay comando que
+correr a mano.
 
 ```bash
-vercel deploy --prod        # desde la raíz del repo
+# Estado del servicio y del último despliegue
+curl -H "Authorization: Bearer $RENDER_API_KEY" \
+  https://api.render.com/v1/services/srv-da4p6mc9v7es738sehog
 ```
 
 | Ruta | Qué devuelve |
@@ -155,12 +163,19 @@ vercel deploy --prod        # desde la raíz del repo
 Para que el agente local suba ahí:
 
 ```bash
-AEGIS_EVENTS_URL=https://aegis-theta-eight.vercel.app/v1/events
+AEGIS_EVENTS_URL=https://aegis-panel.onrender.com/v1/events
 ```
 
-**El `.vercelignore` excluye los `.jsonl` a propósito**: la cola local tiene la
-navegación real de quien esté probando y no puede terminar en un despliegue
-público.
+**El `.gitignore` excluye los `.jsonl` a propósito**: la cola local tiene la
+navegación real de quien esté probando y no puede terminar en un repositorio ni
+en un despliegue.
+
+El almacenamiento tiene tres niveles y el servicio elige el primero disponible:
+`AEGIS_KV_URL` (externo, sobrevive a todo), `AEGIS_DATA_DIR` (un disco de Render
+montado, sobrevive a los reinicios) y, si no hay ninguno, memoria. **El plan
+gratuito no monta discos**, así que hoy corre en memoria y pierde los eventos
+cuando la instancia se apaga por inactividad. `GET /v1/health` dice cuál está en
+uso.
 
 ## 9. Los dos modos
 

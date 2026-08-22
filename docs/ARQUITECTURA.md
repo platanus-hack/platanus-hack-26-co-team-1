@@ -34,7 +34,7 @@ navegador hasta que se bloquea o se deja ir.
 | `agent/aegis_agent/panel/` | Métricas y render del panel |
 | `agent/aegis_agent/install/` | Instalador de Windows |
 | `backend/aegis_backend/` | Base colaborativa de dominios y clasificador |
-| `api/index.py` | El panel y la base, como función en Vercel |
+| `web/app.py` | El panel y la base, como servicio web en Render |
 
 ## 2. El camino de un request
 

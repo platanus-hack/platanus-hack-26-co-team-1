@@ -127,7 +127,7 @@ Medido en un portátil, sin GPU: un prompt típico se inspecciona en **0.16 ms**
 
 ## Panel desplegado
 
-https://aegis-theta-eight.vercel.app — el mismo código de métricas y render que
+https://aegis-panel.onrender.com — el mismo código de métricas y render que
 corre local. Con `AEGIS_EVENTS_URL` apuntando ahí, el agente sube sus eventos
 redactados en segundo plano y el panel los muestra en vivo.
 

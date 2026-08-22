@@ -28,13 +28,13 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Catálogo de 112 dominios de IA | Funciona | `agent/aegis_agent/catalog.py` |
 | Detección de shadow AI por comportamiento | Funciona | `agent/aegis_agent/signals.py` |
 | Base colaborativa de dominios + clasificador | Funciona | `backend/aegis_backend/` |
-| Panel de la empresa | Funciona, desplegado | `agent/aegis_agent/panel/`, `api/index.py` |
+| Panel de la empresa | Funciona, desplegado | `agent/aegis_agent/panel/`, `web/app.py` |
 | Instalador para Windows (CA + proxy + variables) | Funciona | `agent/aegis_agent/install/windows.py` |
 | Cobertura de **Claude Code** | Verificada con el CLI real | ver §8 |
 | Cobertura de **Codex** | Mecanismo listo, **sin verificar** | ver §8 |
 | Lecciones pedagógicas | Locales, estáticas | `agent/aegis_agent/lessons.py` |
 
-**Panel desplegado:** https://aegis-theta-eight.vercel.app
+**Panel desplegado:** https://aegis-panel.onrender.com
 
 ## 3. Qué NO existe todavía
 
@@ -124,7 +124,9 @@ En el orden en que más valor agregan:
    de en `policy.py`.
 3. **Corpus en español propio** para validar T2 y decidir el umbral con datos.
    El actual son 17 frases escritas a mano en `bench/evaluar_modelo.py`.
-4. **Vercel KV** para que el panel desplegado no pierda los eventos.
+4. **Un disco en Render** (o un KV) para que el panel desplegado no pierda los
+   eventos: el código ya persiste en disco si `AEGIS_DATA_DIR` apunta a uno, pero
+   el plan gratuito no monta discos y hoy degrada a memoria.
 5. **Instalador de macOS**, si hay alguien del equipo en Mac.
 
 ## 8. Cobertura de los CLI de IA
