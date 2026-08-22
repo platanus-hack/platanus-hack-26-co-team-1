@@ -24,6 +24,12 @@ PESO_FORMA = 2
 # modelo y casi nunca a un formulario.
 PESO_TEXTO_LARGO = 1
 
+# Salio un dato sensible (T1: llave, token, tarjeta) hacia un dominio que
+# todavia no se sabe si es una IA. Es la senal mas fuerte que existe para
+# pedir la clasificacion: si algo asi salio, el destino merece que lo
+# investiguen sin importar como se comporte el resto del trafico.
+PESO_DATO_SENSIBLE = 3
+
 # Con esto alcanza para pedir la clasificacion. Un solo streaming basta; dos
 # senales debiles tambien.
 UMBRAL = 3
@@ -64,6 +70,9 @@ class SignalCollector:
         normalizado = content_type.lower()
         if any(tipo in normalizado for tipo in TIPOS_STREAMING):
             self._sumar(domain, PESO_STREAMING, "responde con streaming, como un modelo")
+
+    def observe_sensitive_egress(self, domain: str) -> None:
+        self._sumar(domain, PESO_DATO_SENSIBLE, "salio un dato sensible hacia aca")
 
     def score(self, domain: str) -> int:
         with self._lock:

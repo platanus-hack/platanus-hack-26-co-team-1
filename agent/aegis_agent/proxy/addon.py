@@ -7,8 +7,9 @@ import time
 
 from mitmproxy import http
 
+from .. import cert_siblings
 from ..detect import model
-from ..detect.payload import scan_payload
+from ..detect.payload import scan_payload, scan_preview
 from ..domains import DomainClient
 from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
@@ -110,6 +111,10 @@ class Aegis:
         self.signals = SignalCollector()
         self._ultimo_uso: dict[str, float] = {}
         self._lock_uso = threading.Lock()
+        # Un dominio de IA confirmado se mira una sola vez por certificado: no
+        # hace falta re-leer los SAN en cada request a la misma IA.
+        self._hermanos_investigados: set[str] = set()
+        self._lock_hermanos = threading.Lock()
         # El modelo tarda unos ocho segundos en cargar. Hacerlo en el primer
         # envio significa que la primera persona que abre un chat espera todo eso
         # con el request frenado, y llega a la conclusion correcta: que Aegis
@@ -241,6 +246,42 @@ class Aegis:
         if self.signals.should_classify(host):
             self.domains.request_classification(host)
 
+    def _descubrir_hermanos(self, flow: http.HTTPFlow, host: str) -> None:
+        """Encola para investigar a los hermanos que el certificado revela.
+
+        No los condena: los pone en la misma cola que cualquier otro dominio
+        nuevo, para que Haiku decida. Se paga una sola vez por dominio de IA
+        confirmado, no en cada request a la misma herramienta.
+        """
+
+        with self._lock_hermanos:
+            ya_visto = host in self._hermanos_investigados
+            if not ya_visto:
+                self._hermanos_investigados.add(host)
+        if not ya_visto:
+            for hermano in self._hermanos_del_certificado(flow, host):
+                self.domains.request_classification(hermano)
+
+    def _hermanos_del_certificado(self, flow: http.HTTPFlow, host: str) -> list[str]:
+        """Lee el CN y los SAN del certificado TLS de la conexion, sin lanzar.
+
+        Un flow sin conexion TLS (HTTP plano, o un test que no simula el
+        certificado) no tiene nada que leer aca, y eso no puede tumbar el
+        request que si se esta protegiendo.
+        """
+
+        try:
+            certificado = flow.server_conn.certificate_list[0]
+        except (AttributeError, IndexError, TypeError):
+            cn, altnames = None, []
+        else:
+            cn = getattr(certificado, "cn", None)
+            try:
+                altnames = [str(nombre.value) for nombre in certificado.altnames]
+            except Exception:
+                altnames = []
+        return cert_siblings.hermanos(cn=cn, host=host, altnames=altnames)
+
     def _handle(self, flow: http.HTTPFlow) -> None:
         host = flow.request.pretty_host
         classification = classify(host, self.policy)
@@ -249,6 +290,12 @@ class Aegis:
             compartido = self.domains.cached(host)
             if compartido == "ai_unapproved":
                 classification = "ai_unapproved"
+
+        if classification in ("ai_approved", "ai_unapproved"):
+            # El proxy ya termino el handshake TLS para llegar hasta aca: el
+            # certificado esta en la mano y sus SAN casi siempre delatan a la
+            # familia entera del servicio, sin una consulta de red mas.
+            self._descubrir_hermanos(flow, host)
 
         corta_destino = (
             classification == "ai_unapproved"
@@ -303,69 +350,90 @@ class Aegis:
             self._maybe_classify(host)
             if tiene_forma:
                 classification = "ai_unknown"
+            else:
+                # "allow" es la salida de emergencia: reproduce el embudo de
+                # siempre sin gastar ni el barrido barato. Es lo que le queda
+                # a una empresa que decide que un destino sin clasificar nunca
+                # merece la pena, ni para investigarlo.
+                if self.policy.unknown_domain_action == "allow":
+                    return
+                # El request no tiene forma de llamada a un modelo, pero eso
+                # no dice nada de lo que lleva adentro: un shadow AI interno
+                # puede responder JSON plano sin streaming. Un barrido barato
+                # (regex puro, sin contenedores) decide si vale la pena pagar
+                # el escaneo completo; si no encuentra nada, el embudo termina
+                # aca, igual que siempre.
+                if not scan_preview(preview):
+                    return
+                # Salio un dato sensible hacia un destino que todavia no se
+                # sabe si es una IA. Eso solo alcanza para investigar el
+                # destino, no para tratarlo como una IA confirmada: la
+                # decision de que hacer con el envio queda en manos de
+                # unknown_domain_action, no de las reglas de siempre.
+                self.signals.observe_sensitive_egress(host)
+                self._maybe_classify(host)
 
-        if classification != "non_ai":
-            result = scan_payload(body, query)
-            categories = {finding.category for finding in result.findings}
-            action = decide(classification, categories, self.policy)
-            worst = result.findings[0] if result.findings else None
+        result = scan_payload(body, query)
+        categories = {finding.category for finding in result.findings}
+        action = decide(classification, categories, self.policy)
+        worst = result.findings[0] if result.findings else None
 
-            # Lo que vio el modelo no bloquea a ciegas: manda la categoria. Una
-            # contrasena o un dato de empresa cortan igual que si los hubiera
-            # visto T1; un dato personal suelto solo advierte, porque un
-            # hallazgo probabilistico no puede frenar a nadie con la misma
-            # autoridad que una llave de AWS con formato reconocido.
-            del_modelo = worst is not None and worst.rule_id.startswith("modelo:")
-            if del_modelo and action == "block_content":
-                if self.policy.model_action == "warn":
-                    # Interruptor general: la empresa no confia en el modelo y
-                    # ningun hallazgo suyo bloquea, sin importar la categoria.
+        # Lo que vio el modelo no bloquea a ciegas: manda la categoria. Una
+        # contrasena o un dato de empresa cortan igual que si los hubiera
+        # visto T1; un dato personal suelto solo advierte, porque un
+        # hallazgo probabilistico no puede frenar a nadie con la misma
+        # autoridad que una llave de AWS con formato reconocido.
+        del_modelo = worst is not None and worst.rule_id.startswith("modelo:")
+        if del_modelo and action == "block_content":
+            if self.policy.model_action == "warn":
+                # Interruptor general: la empresa no confia en el modelo y
+                # ningun hallazgo suyo bloquea, sin importar la categoria.
+                action = "warn"
+            else:
+                etiqueta = model.etiqueta_de(worst.rule_id)
+                autorizada = (
+                    worst.category in self.policy.model_block_categories
+                    and etiqueta in self.policy.model_block_labels
+                )
+                if not autorizada:
                     action = "warn"
-                else:
-                    etiqueta = model.etiqueta_de(worst.rule_id)
-                    autorizada = (
-                        worst.category in self.policy.model_block_categories
-                        and etiqueta in self.policy.model_block_labels
-                    )
-                    if not autorizada:
-                        action = "warn"
 
-            if action == "block_content" and worst is not None:
+        if action == "block_content" and worst is not None:
+            self._record(
+                host=host,
+                classification=classification,
+                finding=worst,
+                action="blocked",
+                payload_bytes=len(body),
+                truncated=result.truncated,
+            )
+            leccion = lesson_for(worst.rule_id)
+            _deny(
+                flow,
+                blockpage.content_blocked(
+                    host,
+                    worst.rule_id,
+                    worst.evidence,
+                    leccion,
+                    aprobada=classification == "ai_approved",
+                ),
+                f"Aegis bloqueo el envio: {leccion['title']}. "
+                f"{leccion['what_to_do']}",
+                {
+                    "X-Aegis-Action": "block_content",
+                    "X-Aegis-Rule": worst.rule_id,
+                },
+            )
+        else:
+            if worst is not None:
                 self._record(
                     host=host,
                     classification=classification,
                     finding=worst,
-                    action="blocked",
+                    action="warned" if action == "warn" else "allowed",
                     payload_bytes=len(body),
                     truncated=result.truncated,
                 )
-                leccion = lesson_for(worst.rule_id)
-                _deny(
-                    flow,
-                    blockpage.content_blocked(
-                        host,
-                        worst.rule_id,
-                        worst.evidence,
-                        leccion,
-                        aprobada=classification == "ai_approved",
-                    ),
-                    f"Aegis bloqueo el envio: {leccion['title']}. "
-                    f"{leccion['what_to_do']}",
-                    {
-                        "X-Aegis-Action": "block_content",
-                        "X-Aegis-Rule": worst.rule_id,
-                    },
-                )
-            else:
-                if worst is not None:
-                    self._record(
-                        host=host,
-                        classification=classification,
-                        finding=worst,
-                        action="warned" if action == "warn" else "allowed",
-                        payload_bytes=len(body),
-                        truncated=result.truncated,
-                    )
 
     def _registrar_uso(self, host: str, classification: Classification) -> None:
         """Un evento por dominio cada tanto, no uno por peticion.

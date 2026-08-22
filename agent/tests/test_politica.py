@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 from aegis_agent import policy_store
-from aegis_agent.policy import Policy
+from aegis_agent.policy import Policy, decide
 
 
 class TestIdaYVuelta(unittest.TestCase):
@@ -110,6 +110,39 @@ class TestAlmacen(unittest.TestCase):
         # Si no fuera indentado, todo el JSON entraria en una sola linea.
         self.assertIn("\n", contenido)
         json.loads(contenido)  # no lanza
+
+
+class TestDestinoDesconocido(unittest.TestCase):
+    """decide() para lo que sale hacia un dominio non_ai, segun unknown_domain_action.
+
+    unknown_domain_action existia en la politica y se serializaba, pero decide()
+    nunca la leia: un dominio sin clasificar siempre daba "allow" sin importar
+    lo que hubiera en el body. Estos tests conectan esa perilla.
+    """
+
+    def test_sin_hallazgos_siempre_deja_pasar_sin_importar_el_modo(self):
+        for modo in ("warn", "block_content", "allow"):
+            with self.subTest(modo=modo):
+                politica = Policy(unknown_domain_action=modo)
+                self.assertEqual(decide("non_ai", set(), politica), "allow")
+
+    def test_modo_warn_no_bloquea_ni_siquiera_un_secreto(self):
+        # "warn" es el default: la lista negra crece por la visibilidad, no
+        # porque el primer envio se corte.
+        politica = Policy(unknown_domain_action="warn")
+        self.assertEqual(decide("non_ai", {"secret"}, politica), "warn")
+
+    def test_modo_block_content_corta_un_secreto(self):
+        politica = Policy(unknown_domain_action="block_content")
+        self.assertEqual(decide("non_ai", {"secret"}, politica), "block_content")
+
+    def test_modo_block_content_solo_avisa_de_un_dato_personal(self):
+        politica = Policy(unknown_domain_action="block_content")
+        self.assertEqual(decide("non_ai", {"pii"}, politica), "warn")
+
+    def test_modo_allow_es_la_salida_de_emergencia_aunque_haya_un_secreto(self):
+        politica = Policy(unknown_domain_action="allow")
+        self.assertEqual(decide("non_ai", {"secret"}, politica), "allow")
 
 
 if __name__ == "__main__":

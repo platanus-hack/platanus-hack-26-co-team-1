@@ -15,6 +15,7 @@ from .detect.model import (  # noqa: E402
     ETIQUETAS_PRECISAS,
     UMBRAL_POR_DEFECTO,
 )
+from .suffixes import most_specific_match  # noqa: E402
 
 # Dominios que no se descifran nunca, ni para inspeccionar. Ver ADR 0003.
 PASSTHROUGH_DOMAINS: frozenset[str] = frozenset(
@@ -56,9 +57,13 @@ class Policy:
 
     tenant_id: str = "acme"
     approved_ai: frozenset[str] = field(default_factory=lambda: frozenset({"claude.ai", "api.anthropic.com"}))
-    # Que hacer con un dominio que todavia no esta clasificado. Bloquear es mas
-    # seguro; para la demo se advierte, que es lo que pediria una empresa real
-    # antes de frenarle el trabajo a la gente.
+    # Que hacer cuando sale un dato sensible hacia un dominio que todavia no
+    # esta clasificado (ver decide._decide_destino_desconocido). "warn" es el
+    # default: registra y deja pasar, porque el valor de esta rama es
+    # descubrir el destino para que Haiku lo investigue, no frenar el primer
+    # envio. "block_content" lo trata con la misma autoridad que una IA
+    # conocida. "allow" es la salida de emergencia: ni siquiera se paga el
+    # barrido barato.
     unknown_domain_action: Action = "warn"
     unapproved_ai_action: str = field(default_factory=_accion_para_no_aprobadas)
     # Que hacer con lo que encuentra el modelo. Por defecto manda la categoria:
@@ -247,15 +252,15 @@ def _match_length(host: str, domains: frozenset[str]) -> int:
     Se compara por especificidad y no por orden de lista porque las listas se
     solapan: microsoft.com esta en passthrough y copilot.microsoft.com es una IA.
     Con un simple "primero passthrough", Copilot pasaba libre.
+
+    La comparacion camina el host de mas especifico a menos (ver
+    suffixes.py): unos pocos lookups de hash, no un barrido de todo el
+    conjunto. Es lo que permite que la lista negra crezca a miles de
+    dominios sin que el costo por peticion se mueva.
     """
 
-    normalized = host.lower().strip(".")
-    lengths = [
-        len(domain)
-        for domain in domains
-        if normalized == domain or normalized.endswith("." + domain)
-    ]
-    return max(lengths) if lengths else 0
+    match = most_specific_match(host, domains)
+    return len(match) if match else 0
 
 
 def classify(host: str, policy: Policy) -> Classification:
@@ -276,6 +281,34 @@ def classify(host: str, policy: Policy) -> Classification:
     return classification
 
 
+def _decide_destino_desconocido(categories: set[str], policy: Policy) -> Action:
+    """Que hacer con lo que sale hacia un dominio que todavia no se sabe si es IA.
+
+    Sin hallazgos no hay nada que decidir: pasa igual que hoy, sin importar el
+    modo. Con hallazgos, la autoridad la da unknown_domain_action: "warn"
+    (el default) registra y deja pasar porque el valor de esta rama es
+    descubrir el destino, no cortar el primer envio; "block_content" lo trata
+    igual que a una IA conocida, con las mismas categorias; "allow" es la
+    salida de emergencia que reproduce el embudo de siempre.
+    """
+
+    modo = policy.unknown_domain_action
+    if not categories or modo == "allow":
+        action: Action = "allow"
+    else:
+        if modo == "block_content":
+            if categories & policy.block_categories:
+                action = "block_content"
+            else:
+                if categories & policy.warn_categories:
+                    action = "warn"
+                else:
+                    action = "allow"
+        else:
+            action = "warn"
+    return action
+
+
 def decide(classification: Classification, categories: set[str], policy: Policy) -> Action:
     """Cruza el destino con lo que se encontro en el contenido.
 
@@ -285,17 +318,20 @@ def decide(classification: Classification, categories: set[str], policy: Policy)
     que es lo que permite que la gente siga trabajando con la herramienta.
     """
 
-    if classification in ("passthrough", "non_ai"):
+    if classification == "passthrough":
         action: Action = "allow"
     else:
-        if classification == "ai_unapproved" and policy.unapproved_ai_action == "block_destination":
-            action = "block_destination"
+        if classification == "non_ai":
+            action = _decide_destino_desconocido(categories, policy)
         else:
-            if categories & policy.block_categories:
-                action = "block_content"
+            if classification == "ai_unapproved" and policy.unapproved_ai_action == "block_destination":
+                action = "block_destination"
             else:
-                if categories & policy.warn_categories:
-                    action = "warn"
+                if categories & policy.block_categories:
+                    action = "block_content"
                 else:
-                    action = "allow"
+                    if categories & policy.warn_categories:
+                        action = "warn"
+                    else:
+                        action = "allow"
     return action

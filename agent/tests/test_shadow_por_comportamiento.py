@@ -63,6 +63,19 @@ class TestSenales(unittest.TestCase):
         self.senales.observe_response("raro.co", "text/event-stream")
         self.assertIn("streaming", " ".join(self.senales.reasons("raro.co")))
 
+    def test_un_dato_sensible_hacia_un_destino_desconocido_alcanza_solo(self):
+        # Una llave de AWS saliendo hacia un dominio nunca visto es la senal
+        # mas fuerte que hay: no necesita nada mas para pedir la clasificacion.
+        self.senales.observe_sensitive_egress("desconocido.co")
+        self.assertGreaterEqual(self.senales.score("desconocido.co"), UMBRAL)
+        self.assertTrue(self.senales.should_classify("desconocido.co"))
+
+    def test_el_motivo_del_dato_sensible_queda_registrado(self):
+        self.senales.observe_sensitive_egress("desconocido.co")
+        self.assertIn(
+            "sali", " ".join(self.senales.reasons("desconocido.co")).lower()
+        )
+
     def test_los_dominios_no_se_mezclan(self):
         self.senales.observe_response("uno.co", "text/event-stream")
         self.assertEqual(self.senales.score("dos.co"), 0)

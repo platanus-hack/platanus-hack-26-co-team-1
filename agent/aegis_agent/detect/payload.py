@@ -218,6 +218,28 @@ def _derived_views(text: str) -> list[str]:
     return views
 
 
+def scan_preview(preview: str) -> list[Finding]:
+    """Barrido barato sobre un preview de texto: solo regex, nada de archivos.
+
+    Sirve para decidir si un destino sin clasificar merece el escaneo completo
+    (scan_payload): corre T1 sobre el texto y sus vistas derivadas mas baratas
+    (base64, JSON escapado, texto compactado). No abre zip/gzip, no mira
+    archivos criticos y no corre el modelo -- ese costo solo se paga una vez
+    que esto ya encontro algo, no en cada POST de la navegacion normal.
+    """
+
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for view in (preview, *_derived_views(preview)):
+        for finding in scan(view):
+            key = (finding.rule_id, finding.evidence)
+            if key not in seen:
+                seen.add(key)
+                findings.append(finding)
+    findings.sort(key=_rank)
+    return findings
+
+
 def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
     """Escanea un request completo, incluidas sus formas ofuscadas.
 
