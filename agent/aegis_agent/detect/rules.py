@@ -4,10 +4,12 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
+from .contexto import es_marca_de_documento, es_tarjeta_de_verdad
 from .entropy import (
     looks_random,
     luhn_valid,
     parece_contrasena,
+    parece_credencial_dicha,
     parece_documento_de_identidad,
     parece_secreto_asignado,
 )
@@ -28,6 +30,11 @@ class Rule:
     # Devolver False descarta el match. Es lo que separa un numero de tarjeta de
     # cualquier secuencia de 16 digitos.
     validator: Callable[[str], bool] | None = None
+    # Igual que validator, pero recibe (texto, inicio, fin) en vez del valor.
+    # Existe para las reglas cuyo falso positivo no se ve en lo que casaron sino
+    # en de que se estaba hablando: un numero que pasa Luhn puede ser una
+    # factura, y "confidencial" puede estar dentro de una pregunta sobre Word.
+    context_validator: Callable[[str, int, int], bool] | None = None
     redact_as: str = "mask"
     kind: str = ""
 
@@ -227,14 +234,26 @@ _SECRETS: tuple[Rule, ...] = (
             #
             # Lo que sostiene la precision es looks_random sobre el valor: sin
             # eso, "la clave es la de siempre" entraria como incidente critico.
+            # "password" y "passwd" NO estaban, y son como escribe medio
+            # equipo tecnico en espanol. La otra regla si las tenia: las dos
+            # listas de anclas se habian ido separando, y por ese hueco se iba
+            # "la password del servidor de produccion es X" entera.
             r"(?i)(?:contrasena|contrasenas|credencial|credenciales"
+            r"|password|passwd|pwd"
             r"|usuario y clave|acceso|clave" + _CLAVE_NO_SECRETA + r"s?)"
             r"\b[^.\n]{0,40}?\s(?:es|son|:)\s+"
-            r"\\?[\"']?([^\s\"'\\]{12,})"
+            # El valor no puede tragarse los delimitadores que lo rodean. Sin
+            # esto, un PDF con el texto entre parentesis --que es como los
+            # escribe cualquier generador-- capturaba "Verano2026Bogota)" con el
+            # cierre pegado, y el validador lo descartaba por parecer una llamada
+            # a funcion. La credencial estaba ahi y no se veia. Ningun secreto
+            # real lleva parentesis, llaves, corchetes, coma ni punto y coma;
+            # base64 usa +, / y =, que quedan permitidos.
+            r"\\?[\"']?([^\s\"'\\(){}\[\]<>,;]{12,})"
         ),
         description="Credencial dicha en lenguaje natural, no como asignacion",
         group=1,
-        validator=looks_random,
+        validator=parece_credencial_dicha,
     ),
     Rule(
         id="credencial_en_espanol_sin_verbo",
@@ -358,6 +377,7 @@ _INTERNAL_DATA: tuple[Rule, ...] = (
             r"|internal use only|company confidential)\b"
         ),
         description="Documento marcado como interno o confidencial",
+        context_validator=es_marca_de_documento,
         redact_as="type",
         kind="internal_doc",
     ),
@@ -374,6 +394,7 @@ _PII: tuple[Rule, ...] = (
         pattern=_compile(r"\b(?:\d[ -]?){13,19}\b"),
         description="Numero de tarjeta que pasa la validacion de Luhn",
         validator=luhn_valid,
+        context_validator=es_tarjeta_de_verdad,
         redact_as="type",
         kind="credit_card",
     ),
@@ -398,11 +419,22 @@ _PII: tuple[Rule, ...] = (
         # 9001-2015") y se queda pegada al numero, como estaba.
         pattern=_compile(
             r"(?i)(?:"
-            r"\b(?:c\.?c\.?|c[eé]dulas?|nit|rut|cpf|dni|documento\s+de\s+identidad)\b"
+            # El \b iba DESPUES de toda la alternancia, y "c.c." termina en
+            # punto: un limite de palabra pegado a un punto necesita un caracter
+            # de palabra al lado, y nunca casaba. O sea que la forma mas comun de
+            # escribir una cedula en Colombia --"c.c. 43.115.902"-- no se veia.
+            # Lo encontro el banco de precision, no una revision del patron: a
+            # ojo la alternancia se ve perfecta.
+            r"(?:\bc\.?c\.?"
+            r"|\b(?:c[eé]dulas?|nit|rut|cpf|dni|documento\s+de\s+identidad)\b)"
             r"[^.\n\d]{0,24}?[:#\-]?\s*\d[\d.\- ]{5,14}\d"
             r"|\bdocumento\b\s*[:#\-]?\s*\d[\d.\- ]{5,14}\d"
             # La CURP mexicana mezcla letras y digitos, no sirve el patron de arriba.
-            r"|\bcurp\b\s*[:#\-]?\s*[A-Z0-9]{16,18}"
+            # La CURP exigia que el valor estuviera PEGADO a la palabra, y en
+            # espanol se dice "mi CURP es GODE...". Es el mismo error que ya se
+            # habia arreglado para la cedula tres lineas mas arriba, y que
+            # sobrevivio aca porque nadie lo volvio a medir.
+            r"|\bcurp\b[^.\n\d]{0,24}?[:#\-]?\s*[A-Z0-9]{16,18}"
             r")"
         ),
         description="Documento de identidad latinoamericano",

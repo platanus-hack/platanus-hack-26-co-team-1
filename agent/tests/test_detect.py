@@ -8,7 +8,11 @@ from aegis_agent.detect.types import EVIDENCE_MAX_LEN, EVIDENCE_VISIBLE_PREFIX
 # Credenciales sinteticas con el formato correcto pero sin valor real.
 AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
 ANTHROPIC_KEY = "sk-ant-api03-" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6"
-GITHUB_TOKEN = "ghp_" + "a" * 36
+# Los valores de prueba tienen que parecerse a un token de verdad, y no ser
+# "a" * 36. Desde que existe el filtro de placeholder, una corrida de
+# caracteres identicos ES la senal de que algo es una plantilla: un fixture
+# perezoso deja de probar la regla y empieza a probar el filtro.
+GITHUB_TOKEN = "ghp_" + "16kQ2vB9xTdLm4WpRc7YsZaE0hNjUf3G8oIt"
 VISA_TEST = "4111111111111111"
 
 

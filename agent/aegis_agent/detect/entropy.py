@@ -122,3 +122,47 @@ def luhn_valid(digits: str) -> bool:
             total += digit
         valid = total % 10 == 0
     return valid
+
+
+def tiene_mezcla_de_clases(value: str) -> bool:
+    """Minuscula + digito + (mayuscula o simbolo).
+
+    Es lo que exige cualquier politica de contrasenas de empresa y lo que ninguna
+    palabra comun tiene. Hasta ahora esta condicion vivia SOLO dentro de la
+    expresion regular de una de las dos reglas de credencial en espanol, y esa
+    asimetria es la que dejaba escapar credenciales: la otra regla, la que tiene
+    la ventana larga, no podia usar el mismo criterio porque no estaba escrito en
+    ningun lado reutilizable.
+    """
+
+    return (
+        any(c.islower() for c in value)
+        and any(c.isdigit() for c in value)
+        and any(c.isupper() or not c.isalnum() for c in value)
+    )
+
+
+def parece_credencial_dicha(value: str) -> bool:
+    """El validador de la regla de credencial con verbo ("la clave ES X").
+
+    Acepta dos cosas distintas, y hacen falta las dos:
+
+      - un valor de alta entropia, que es una llave generada por una maquina;
+      - un valor con mezcla de clases, que es una contrasena elegida por una
+        persona.
+
+    La segunda mitad no estaba, y ahi se iba la fuga. Medido sobre el corpus
+    generado: "la clave del servidor de produccion es Sup3rS3cret1" escapaba
+    entera. `Sup3rS3cret1` da 3.08 bits --por debajo del umbral de 3.2-- y es
+    exactamente la clave que una politica de empresa obliga a poner. La otra
+    regla, la que si sabe de mezcla, tiene una ventana de 24 caracteres y "del
+    servidor de produccion es" son 29: no llegaba.
+
+    Y la mezcla es obligatoria en esa segunda mitad, no opcional. Sin ella, "la
+    clave es infraestructura" entra como incidente critico: son 15 caracteres sin
+    espacios y pasan cualquier filtro de largo.
+    """
+
+    return not parece_expresion_de_codigo(value) and (
+        looks_random(value) or (parece_contrasena(value) and tiene_mezcla_de_clases(value))
+    )

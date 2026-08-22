@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .placeholders import es_placeholder
 from .redaction import redact, redact_fully
 from .rules import RULES, Rule
 from .types import Finding, Severity
@@ -20,11 +21,38 @@ def _evidence_for(rule: Rule, value: str) -> str:
     return evidence
 
 
+def _aceptado(rule: Rule, value: str, text: str, start: int, end: int) -> bool:
+    """Los tres filtros que puede tener que pasar un match, del mas barato al mas caro.
+
+    El de placeholder se aplica aca y no como validador de cada regla porque las
+    reglas de FORMATO no tienen validador --a una llave de OpenAI le alcanzaba su
+    prefijo-- y es exactamente ahi donde entro el falso positivo medido:
+    ``sk-proj-XXXXXXXXXXXXXXXXXXXX`` cortaba el envio. Poniendolo en el motor,
+    ninguna regla de ``secret`` que se agregue manana se olvida de pasarlo.
+    """
+
+    if not value:
+        aceptado = False
+    elif rule.validator is not None and not rule.validator(value):
+        aceptado = False
+    elif rule.category == "secret" and es_placeholder(value):
+        aceptado = False
+    elif rule.context_validator is not None and not rule.context_validator(
+        text, start, end
+    ):
+        aceptado = False
+    else:
+        aceptado = True
+    return aceptado
+
+
 def _findings_for_rule(rule: Rule, text: str) -> list[Finding]:
     findings: list[Finding] = []
     for match in rule.pattern.finditer(text):
         value = match.group(rule.group)
-        accepted = bool(value) and (rule.validator is None or rule.validator(value))
+        accepted = _aceptado(
+            rule, value, text, match.start(rule.group), match.end(rule.group)
+        )
         if accepted:
             findings.append(
                 Finding(

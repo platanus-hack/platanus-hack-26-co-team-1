@@ -119,6 +119,9 @@ Debe dar **27 de 27**. Si alguna se escapa, es un hueco real.
 | `AEGIS_DOMAIN_CACHE` | `aegis-domains-cache.json` | Caché local de veredictos |
 | `AEGIS_EVENTS_URL` | — | Panel remoto al que subir los eventos |
 | `AEGIS_T2` | apagado | `1` prende el modelo local |
+| `AEGIS_OCR` | apagado | `1` prende la lectura del texto de las imagenes. Cuesta ~2 s por envio CON imagen: ver `detect/ocr.py` |
+| `AEGIS_OCR_PRESUPUESTO_MS` | `4000` | Techo del OCR. Si se pasa, se descarta el resultado y queda lo que vio el resto |
+| `AEGIS_T1_PRESUPUESTO_MS` | `500` | Techo de T1 sobre un cuerpo grande. La cabeza y la cola se miran siempre, aunque se agote |
 | `AEGIS_T2_MODELO` | `urchade/gliner_multi-v2.1` | Qué modelo cargar |
 | `AEGIS_T2_ACCION` | `block` | `warn` para que ningún hallazgo del modelo bloquee |
 | `AEGIS_LESSONS_CACHE` | `aegis-lessons-cache.json` | Dónde se guardan las lecciones que generó el backend |
