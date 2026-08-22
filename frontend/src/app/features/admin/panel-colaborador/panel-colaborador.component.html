@@ -1,0 +1,104 @@
+<header class="border-b border-aegis-border bg-aegis-surface px-8 py-6">
+  <a routerLink="/admin/panel" class="aegis-btn-ghost mb-3 -ml-2 inline-flex px-2 py-1">← Volver al panel general</a>
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h1 class="font-display text-xl font-semibold text-aegis-text">{{ colaborador.nombre }}</h1>
+      <p class="mt-1 text-sm text-aegis-dim">{{ colaborador.cargo }} · {{ colaborador.area }}</p>
+    </div>
+    <div class="rounded-lg border border-aegis-border bg-aegis-surface2 px-3.5 py-2 text-right">
+      <p class="aegis-label">Instalado desde</p>
+      <p class="mt-0.5 text-sm text-aegis-text">{{ colaborador.instaladoDesde }}</p>
+    </div>
+  </div>
+</header>
+
+<main class="flex-1 px-8 py-6">
+  @if (colaborador.estrategiaSugerida) {
+    <div class="mb-6 aegis-card border-aegis-accent/25 bg-aegis-accent/[0.04] p-5">
+      <div class="flex items-start gap-3">
+        <svg viewBox="0 0 20 20" fill="none" class="mt-0.5 h-5 w-5 shrink-0 text-aegis-accent"><path d="M10 2l1.6 4.6L16 8l-4.4 1.4L10 14l-1.6-4.6L4 8l4.4-1.4L10 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <div>
+          <p class="aegis-label text-aegis-accent">Estrategia sugerida</p>
+          <p class="mt-1.5 text-sm text-aegis-text">{{ colaborador.estrategiaSugerida }}</p>
+        </div>
+      </div>
+    </div>
+  }
+
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
+    <div class="aegis-card p-6">
+      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Herramientas más usadas</h2>
+      @if (colaborador.herramientas.length) {
+        <div class="flex flex-col gap-3.5">
+          @for (h of colaborador.herramientas; track h.nombre) {
+            <div>
+              <div class="mb-1.5 flex items-center justify-between text-sm">
+                <span class="text-aegis-text">{{ h.nombre }}</span>
+                <span class="font-display text-xs text-aegis-faint">{{ h.porcentaje }}%</span>
+              </div>
+              <div class="h-1.5 w-full rounded-full bg-aegis-surface3">
+                <div class="h-1.5 rounded-full bg-aegis-accent" [style.width.%]="h.porcentaje"></div>
+              </div>
+            </div>
+          }
+        </div>
+      } @else {
+        <p class="text-sm text-aegis-faint">Sin actividad registrada todavía.</p>
+      }
+    </div>
+
+    <div class="aegis-card p-6">
+      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Temas de consulta</h2>
+      @if (colaborador.temas.length) {
+        <div class="flex flex-wrap gap-2">
+          @for (t of colaborador.temas; track t) {
+            <span class="rounded-full border border-aegis-border bg-aegis-surface2 px-3 py-1.5 text-sm text-aegis-dim">{{ t }}</span>
+          }
+        </div>
+        <p class="mt-4 text-xs text-aegis-faint">Categorías agregadas (no se muestra el contenido literal de las consultas).</p>
+      } @else {
+        <p class="text-sm text-aegis-faint">Sin actividad registrada todavía.</p>
+      }
+    </div>
+
+    <div class="aegis-card p-6">
+      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Resumen</h2>
+      <dl class="flex flex-col gap-3 text-sm">
+        <div class="flex justify-between"><dt class="text-aegis-dim">Intentos totales</dt><dd class="font-display text-aegis-text">{{ colaborador.intentos.length }}</dd></div>
+        <div class="flex justify-between"><dt class="text-aegis-dim">Bloqueados</dt><dd class="font-display text-aegis-red">{{ bloqueados }}</dd></div>
+      </dl>
+    </div>
+  </div>
+
+  <div class="mt-6 aegis-card overflow-hidden">
+    <div class="border-b border-aegis-border px-6 py-4">
+      <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Historial de intentos</h2>
+    </div>
+    @if (colaborador.intentos.length) {
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead>
+            <tr class="aegis-label border-b border-aegis-border">
+              <th class="px-6 py-3 font-medium">Fecha</th>
+              <th class="px-6 py-3 font-medium">Herramienta</th>
+              <th class="px-6 py-3 font-medium">Regla disparada</th>
+              <th class="px-6 py-3 font-medium">Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (i of colaborador.intentos; track i.fecha + i.regla) {
+              <tr class="border-b border-aegis-border/60 last:border-0">
+                <td class="px-6 py-3.5 font-display text-aegis-dim">{{ i.fecha }}</td>
+                <td class="px-6 py-3.5 text-aegis-text">{{ i.herramienta }}</td>
+                <td class="px-6 py-3.5 text-aegis-dim">{{ i.regla }}</td>
+                <td class="px-6 py-3.5"><app-badge [tone]="tone(i.accion)">{{ i.accion }}</app-badge></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="px-6 py-8 text-center text-sm text-aegis-faint">Sin intentos registrados todavía.</p>
+    }
+  </div>
+</main>

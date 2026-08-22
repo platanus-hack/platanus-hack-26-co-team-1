@@ -1,0 +1,140 @@
+<header class="border-b border-aegis-border bg-aegis-surface px-8 py-6">
+  <p class="aegis-label">Configuración inicial</p>
+  <h1 class="mt-1 font-display text-xl font-semibold text-aegis-text">Alta de colaboradores</h1>
+  <p class="mt-1 max-w-2xl text-sm text-aegis-dim">Da acceso a tu equipo de forma individual o mediante carga masiva. Cada colaborador inicia en estado "pendiente" hasta su primer login.</p>
+</header>
+
+<main class="flex-1 px-8 py-6">
+  <app-tabs [tabs]="tabs" [active]="activeTab" (activeChange)="activeTab = $event"></app-tabs>
+
+  @if (activeTab === 'individual') {
+    <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
+      <div class="aegis-card p-6">
+        <h2 class="mb-5 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Nuevo colaborador</h2>
+        <div class="flex flex-col gap-4">
+          <div>
+            <label class="aegis-label">Nombre</label>
+            <input class="aegis-input mt-1.5" type="text" placeholder="Nombre completo" [(ngModel)]="form.nombre" />
+          </div>
+          <div>
+            <label class="aegis-label">Cargo</label>
+            <input class="aegis-input mt-1.5" type="text" placeholder="Ej. Analista financiero" [(ngModel)]="form.cargo" />
+          </div>
+          <div>
+            <label class="aegis-label">Área</label>
+            <select class="aegis-select mt-1.5" [(ngModel)]="form.area">
+              <option value="" disabled selected>Selecciona un área</option>
+              @for (a of areas; track a) {
+                <option [value]="a">{{ a }}</option>
+              }
+            </select>
+          </div>
+          <div>
+            <label class="aegis-label">Usuario</label>
+            <input class="aegis-input mt-1.5" type="text" placeholder="usuario.acceso" [(ngModel)]="form.usuario" />
+          </div>
+          <div>
+            <label class="aegis-label">Contraseña de primer acceso</label>
+            <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="form.password" />
+          </div>
+          <button type="button" class="aegis-btn-primary mt-2" (click)="agregarColaborador()">Agregar colaborador</button>
+        </div>
+      </div>
+
+      <div class="aegis-card overflow-hidden">
+        <div class="flex items-center justify-between border-b border-aegis-border px-6 py-4">
+          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Colaboradores agregados</h2>
+          <span class="font-display text-xs text-aegis-faint">{{ colaboradores.length }} en total</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="aegis-label border-b border-aegis-border">
+                <th class="px-6 py-3 font-medium">Nombre</th>
+                <th class="px-6 py-3 font-medium">Cargo</th>
+                <th class="px-6 py-3 font-medium">Área</th>
+                <th class="px-6 py-3 font-medium">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (c of colaboradores; track c.usuario) {
+                <tr class="border-b border-aegis-border/60 last:border-0">
+                  <td class="px-6 py-3.5 text-aegis-text">{{ c.nombre }}</td>
+                  <td class="px-6 py-3.5 text-aegis-dim">{{ c.cargo || '—' }}</td>
+                  <td class="px-6 py-3.5 text-aegis-dim">{{ c.area || '—' }}</td>
+                  <td class="px-6 py-3.5">
+                    <app-badge [tone]="c.estado === 'activo' ? 'green' : 'amber'">{{ c.estado }}</app-badge>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (activeTab === 'bulk') {
+    <div class="mt-6 flex flex-col gap-6">
+      @if (!archivoNombre) {
+        <button
+          type="button"
+          class="aegis-card flex flex-col items-center justify-center gap-3 border-dashed py-14 text-center transition hover:border-aegis-accent/50"
+          (click)="simularCarga()"
+        >
+          <svg viewBox="0 0 24 24" fill="none" class="h-8 w-8 text-aegis-faint"><path d="M12 15V4M12 4l-4 4M12 4l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <div>
+            <p class="text-sm font-medium text-aegis-text">Arrastra tu planilla o haz clic para cargar</p>
+            <p class="mt-1 font-display text-xs text-aegis-faint">CSV (columnas: nombre, cargo, área, usuario, contraseña)</p>
+          </div>
+        </button>
+      } @else {
+        <div class="aegis-card overflow-hidden">
+          <div class="flex items-center justify-between border-b border-aegis-border px-6 py-4">
+            <div>
+              <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Previsualización</h2>
+              <p class="mt-1 font-display text-xs text-aegis-faint">{{ archivoNombre }} · {{ filasValidas }}/{{ filasBulk.length }} filas válidas</p>
+            </div>
+            <button type="button" class="aegis-btn-ghost" (click)="quitarArchivo()">Quitar archivo</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr class="aegis-label border-b border-aegis-border">
+                  <th class="px-6 py-3 font-medium">Fila</th>
+                  <th class="px-6 py-3 font-medium">Nombre</th>
+                  <th class="px-6 py-3 font-medium">Cargo</th>
+                  <th class="px-6 py-3 font-medium">Área</th>
+                  <th class="px-6 py-3 font-medium">Usuario</th>
+                  <th class="px-6 py-3 font-medium">Validación</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (f of filasBulk; track f.fila) {
+                  <tr class="border-b border-aegis-border/60 last:border-0" [class.bg-aegis-red/10]="f.error">
+                    <td class="px-6 py-3.5 font-display text-aegis-faint">{{ f.fila }}</td>
+                    <td class="px-6 py-3.5 text-aegis-text">{{ f.nombre || '—' }}</td>
+                    <td class="px-6 py-3.5 text-aegis-dim">{{ f.cargo }}</td>
+                    <td class="px-6 py-3.5 text-aegis-dim">{{ f.area }}</td>
+                    <td class="px-6 py-3.5 text-aegis-dim">{{ f.usuario }}</td>
+                    <td class="px-6 py-3.5">
+                      @if (f.error) {
+                        <app-badge tone="red">{{ f.error }}</app-badge>
+                      } @else {
+                        <app-badge tone="green">Lista para importar</app-badge>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <div class="flex items-center justify-between border-t border-aegis-border px-6 py-4">
+            <p class="text-xs text-aegis-dim">Las filas con error no se importarán. Corrige el archivo y vuelve a cargarlo si es necesario.</p>
+            <button type="button" class="aegis-btn-primary" [disabled]="filasValidas === 0">Confirmar importación ({{ filasValidas }})</button>
+          </div>
+        </div>
+      }
+    </div>
+  }
+</main>

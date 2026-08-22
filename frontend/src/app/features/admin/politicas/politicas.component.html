@@ -1,0 +1,162 @@
+<header class="border-b border-aegis-border bg-aegis-surface px-8 py-6">
+  <p class="aegis-label">Configuración inicial</p>
+  <h1 class="mt-1 font-display text-xl font-semibold text-aegis-text">Políticas</h1>
+  <p class="mt-1 max-w-2xl text-sm text-aegis-dim">Define qué herramientas de IA pueden usarse, qué información no debe compartirse, y a quién aplica cada regla.</p>
+</header>
+
+<main class="flex-1 px-8 py-6">
+  <app-tabs [tabs]="tabs" [active]="activeTab" (activeChange)="activeTab = $event"></app-tabs>
+
+  @if (activeTab === 'herramientas') {
+    <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1fr_360px]">
+      <div class="aegis-card p-6">
+        <h2 class="mb-1 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Whitelist de herramientas</h2>
+        <p class="mb-5 text-sm text-aegis-dim">Regla global de la empresa. Puede sobreescribirse por área o colaborador.</p>
+        <div class="flex flex-col divide-y divide-aegis-border/70">
+          @for (h of herramientas; track h.nombre) {
+            <div class="flex items-center justify-between py-3.5">
+              <span class="text-sm text-aegis-text">{{ h.nombre }}</span>
+              <button
+                type="button"
+                class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+                [class.bg-aegis-accent]="h.permitida"
+                [class.bg-aegis-surface3]="!h.permitida"
+                (click)="h.permitida = !h.permitida"
+              >
+                <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all" [style.left.px]="h.permitida ? 22 : 2"></span>
+              </button>
+            </div>
+          }
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-6">
+        <div class="aegis-card p-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Modo flexible</h2>
+              <p class="mt-1 text-sm text-aegis-dim">No bloquea el acceso a ninguna herramienta; solo evalúa y bloquea el envío de información sensible.</p>
+            </div>
+            <button
+              type="button"
+              class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+              [class.bg-aegis-accent]="modoFlexible"
+              [class.bg-aegis-surface3]="!modoFlexible"
+              (click)="modoFlexible = !modoFlexible"
+            >
+              <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all" [style.left.px]="modoFlexible ? 22 : 2"></span>
+            </button>
+          </div>
+          <div class="mt-4 rounded-lg border border-aegis-border bg-aegis-surface2 px-3.5 py-3 text-xs text-aegis-dim">
+            Regla global vigente: <span class="text-aegis-text">{{ modoFlexible ? 'Modo flexible activo para toda la empresa' : 'Whitelist estricta para toda la empresa' }}</span>
+          </div>
+        </div>
+
+        <div class="aegis-card p-6">
+          <h2 class="mb-1 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Excepciones</h2>
+          <p class="mb-4 text-sm text-aegis-dim">Colaboradores o perfiles con una regla distinta a la global.</p>
+          <div class="flex flex-col gap-2.5">
+            @for (e of excepciones; track e.detalle) {
+              <div class="flex items-center justify-between rounded-lg border border-aegis-amber/25 bg-aegis-amber/[0.06] px-3.5 py-2.5">
+                <div>
+                  <p class="text-sm text-aegis-text">{{ e.detalle }}</p>
+                  <p class="font-display text-[11px] uppercase tracking-wide text-aegis-faint">{{ e.tipo }}</p>
+                </div>
+                <app-badge tone="amber">{{ e.alcance }}</app-badge>
+              </div>
+            }
+            <button type="button" class="aegis-btn-secondary mt-1 justify-center">+ Añadir excepción</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (activeTab === 'dlp') {
+    <div class="mt-6 flex flex-col gap-8">
+      <section>
+        <div class="mb-3 flex items-center gap-2">
+          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Reglas por defecto</h2>
+          <span class="font-display text-[11px] text-aegis-faint">no eliminables</span>
+        </div>
+        <div class="flex flex-col gap-3">
+          @for (r of reglasDefault; track r.nombre) {
+            <div class="aegis-card flex items-start justify-between gap-4 p-5">
+              <div>
+                <p class="text-sm font-medium text-aegis-text">{{ r.nombre }}</p>
+                <p class="mt-1 text-sm text-aegis-dim">{{ r.descripcion }}</p>
+                <p class="mt-2 rounded-md bg-aegis-surface2 px-2.5 py-1.5 font-display text-xs text-aegis-faint">{{ r.ejemplo }}</p>
+              </div>
+              <app-badge tone="red">{{ r.accion }}</app-badge>
+            </div>
+          }
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Reglas de negocio personalizadas</h2>
+        <div class="mb-4 flex gap-2">
+          <input class="aegis-input" type="text" placeholder='Describe la regla en lenguaje natural, ej. "no revelar la lista de clientes"' [(ngModel)]="nuevaRegla" (keydown.enter)="agregarRegla()" />
+          <button type="button" class="aegis-btn-primary shrink-0" (click)="agregarRegla()">Crear regla</button>
+        </div>
+        <div class="flex flex-col gap-3">
+          @for (r of reglasCustom; track r.nombre) {
+            <div class="aegis-card flex items-start justify-between gap-4 p-5" [class.opacity-50]="!r.activa">
+              <div>
+                <p class="text-sm font-medium text-aegis-text">{{ r.nombre }}</p>
+                <p class="mt-2 rounded-md bg-aegis-surface2 px-2.5 py-1.5 font-display text-xs text-aegis-faint">Ej. dispararía con: {{ r.ejemplo }}</p>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <select class="aegis-select w-32 py-1.5 text-xs" [(ngModel)]="r.accion">
+                  <option>Bloquear</option>
+                  <option>Advertir</option>
+                  <option>Registrar</option>
+                </select>
+                <button type="button" class="aegis-btn-ghost px-2" (click)="r.activa = !r.activa">{{ r.activa ? 'Desactivar' : 'Activar' }}</button>
+              </div>
+            </div>
+          }
+        </div>
+      </section>
+    </div>
+  }
+
+  @if (activeTab === 'asignacion') {
+    <div class="mt-6 aegis-card overflow-hidden">
+      <div class="border-b border-aegis-border px-6 py-4">
+        <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Políticas por área</h2>
+        <p class="mt-1 text-sm text-aegis-dim">Qué herramientas y qué nivel de DLP aplica a cada segmento.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead>
+            <tr class="aegis-label border-b border-aegis-border">
+              <th class="px-6 py-3 font-medium">Área</th>
+              @for (col of columnas; track col) {
+                <th class="px-6 py-3 text-center font-medium">{{ col }}</th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (area of areas; track area) {
+              <tr class="border-b border-aegis-border/60 last:border-0">
+                <td class="px-6 py-3.5 text-aegis-text">{{ area }}</td>
+                @for (val of matriz[area]; track $index) {
+                  <td class="px-6 py-3.5 text-center">
+                    @if (val) {
+                      <span class="mx-auto flex h-5 w-5 items-center justify-center rounded-full bg-aegis-accent/10 text-aegis-accent">
+                        <svg viewBox="0 0 20 20" class="h-3 w-3" fill="none"><path d="M5 10.5l3 3 7-7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      </span>
+                    } @else {
+                      <span class="mx-auto block h-1 w-3 rounded-full bg-aegis-border"></span>
+                    }
+                  </td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+</main>
