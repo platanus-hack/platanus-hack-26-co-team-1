@@ -1,9 +1,10 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TabsComponent, TabItem } from '../../../shared/ui/tabs/tabs.component';
 import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
 import { colorForName } from '../../../shared/utils/color-hash';
+import { PoliticaService } from '../../../shared/data/politica.service';
 
 interface Herramienta {
   nombre: string;
@@ -35,12 +36,101 @@ interface Excepcion {
   imports: [CommonModule, FormsModule, TabsComponent, BadgeComponent],
   templateUrl: './politicas.component.html',
 })
-export class PoliticasComponent {
+export class PoliticasComponent implements OnInit {
   protected readonly colorForName = colorForName;
+  private readonly servicio = inject(PoliticaService);
+
+  readonly politica = this.servicio.politica;
+  readonly guardando = this.servicio.guardando;
+  readonly guardadaEn = this.servicio.guardadaEn;
+
+  async ngOnInit(): Promise<void> {
+    await this.servicio.cargar();
+    this.tomarDeLaPolitica();
+  }
+
+  /** De la política guardada a los controles de la pantalla. */
+  private tomarDeLaPolitica(): void {
+    const p = this.politica();
+    this.urlsBloqueadas = [...p.blocked_domains];
+    this.terminos = Object.entries(p.company_terms).map(([termino, etiqueta]) => ({
+      termino,
+      etiqueta,
+    }));
+    this.herramientas = this.herramientas.map((h) => ({
+      ...h,
+      permitida: p.approved_ai.length ? p.approved_ai.includes(dominioDe(h.nombre)) : h.permitida,
+    }));
+    [...this.reglasDefault, ...this.reglasCustom].forEach((r) => {
+      const accion = p.rule_actions[reglaId(r.nombre)];
+      if (accion) {
+        r.activa = accion !== 'off';
+        r.accion = accion === 'block' ? 'Bloquear' : accion === 'warn' ? 'Advertir' : r.accion;
+      }
+    });
+  }
+
+  /** Y de vuelta: lo que muestra la pantalla es lo que se guarda. */
+  private async persistir(): Promise<void> {
+    const reglas: Record<string, string> = {};
+    [...this.reglasDefault, ...this.reglasCustom].forEach((r) => {
+      reglas[reglaId(r.nombre)] = !r.activa
+        ? 'off'
+        : r.accion === 'Bloquear'
+          ? 'block'
+          : 'warn';
+    });
+
+    const terminos: Record<string, string> = {};
+    this.terminos.forEach((t) => {
+      if (t.termino.trim()) {
+        terminos[t.termino.trim()] = t.etiqueta.trim() || 'interno';
+      }
+    });
+
+    await this.servicio.guardar({
+      approved_ai: this.herramientas.filter((h) => h.permitida).map((h) => dominioDe(h.nombre)),
+      blocked_domains: this.urlsBloqueadas,
+      rule_actions: reglas,
+      company_terms: terminos,
+    });
+  }
+
+  /** El botón de la pantalla. Público porque lo llama la plantilla. */
+  async guardar(): Promise<void> {
+    await this.persistir();
+  }
+
+  // --- El diccionario de la empresa ---------------------------------------
+  //
+  // Es el detector de mayor precisión que hay, porque ningún detector genérico
+  // puede tenerlo: nadie sabe que "Proyecto Fénix" es de esta empresa salvo
+  // esta empresa. Existía en la política desde hace rato y no tenía ni un
+  // campo en toda la UI: sólo se podía escribir por API.
+  terminos: { termino: string; etiqueta: string }[] = [];
+  nuevoTermino = { termino: '', etiqueta: '' };
+
+  agregarTermino(): void {
+    const termino = this.nuevoTermino.termino.trim();
+    if (termino && !this.terminos.some((t) => t.termino === termino)) {
+      this.terminos = [
+        { termino, etiqueta: this.nuevoTermino.etiqueta.trim() || 'interno' },
+        ...this.terminos,
+      ];
+      this.nuevoTermino = { termino: '', etiqueta: '' };
+      void this.persistir();
+    }
+  }
+
+  quitarTermino(termino: string): void {
+    this.terminos = this.terminos.filter((t) => t.termino !== termino);
+    void this.persistir();
+  }
 
   readonly tabs: TabItem[] = [
     { id: 'herramientas', label: 'Herramientas y URLs' },
     { id: 'dlp', label: 'Reglas de DLP' },
+    { id: 'diccionario', label: 'Diccionario de la empresa' },
     { id: 'asignacion', label: 'Asignación' },
   ];
   activeTab = 'herramientas';
@@ -65,10 +155,12 @@ export class PoliticasComponent {
     if (!url || this.urlsBloqueadas.includes(url)) return;
     this.urlsBloqueadas = [...this.urlsBloqueadas, url];
     this.nuevaUrlBloqueada = '';
+    void this.persistir();
   }
 
   quitarUrlBloqueada(url: string): void {
     this.urlsBloqueadas = this.urlsBloqueadas.filter((u) => u !== url);
+    void this.persistir();
   }
 
   excepciones: Excepcion[] = [
@@ -153,4 +245,33 @@ export class PoliticasComponent {
     Ingeniería: [true, true, true, false, true],
     Legal: [true, false, false, true, false],
   };
+}
+
+
+/**
+ * De un nombre de pantalla al dominio que el agente ve en el tráfico.
+ *
+ * La política habla de dominios porque es lo único que el proxy tiene delante:
+ * "Claude" no aparece en ninguna conexión, "claude.ai" sí.
+ */
+function dominioDe(nombre: string): string {
+  const dominios: Record<string, string> = {
+    Claude: 'claude.ai',
+    'Claude Code': 'api.anthropic.com',
+    ChatGPT: 'chatgpt.com',
+    Codex: 'chatgpt.com',
+    Gemini: 'gemini.google.com',
+    'GitHub Copilot': 'api.githubcopilot.com',
+  };
+  return dominios[nombre] ?? nombre.toLowerCase().replace(/\s+/g, '');
+}
+
+/** Del nombre que ve la empresa al rule_id que usa el motor. */
+function reglaId(nombre: string): string {
+  const reglas: Record<string, string> = {
+    'API keys': 'aws_access_key_id',
+    Credenciales: 'credencial_en_espanol',
+    'Bases de datos': 'db_connection_string',
+  };
+  return reglas[nombre] ?? nombre.toLowerCase().replace(/\s+/g, '_');
 }

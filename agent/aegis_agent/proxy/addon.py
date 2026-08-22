@@ -478,7 +478,13 @@ class Aegis:
             # tiene que medir el banco de pruebas. Cuando eran dos copias, el
             # banco reportaba ocho bloqueos falsos que el proxy nunca hacia.
             action = decidir_sobre(
-                classification, result.findings, self.policy, proceso.nombre
+                classification,
+                result.findings,
+                self.policy,
+                proceso.nombre,
+                self.user_id,
+                self.area,
+                host,
             )
             worst = result.findings[0] if result.findings else None
 

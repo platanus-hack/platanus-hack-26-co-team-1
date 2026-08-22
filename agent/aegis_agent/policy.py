@@ -156,6 +156,32 @@ class Policy:
     # mecanismo que lee este campo lo construye otra tarea: aca solo se
     # declara y se serializa.
     blind_spot_action: str = "warn"
+    # Dominios que se cortan siempre, sin mirar el contenido.
+    #
+    # `approved_ai` es una lista blanca y responde otra pregunta: "esto esta
+    # aprobado". Una empresa que quiere prohibir deepseek.com no tiene como
+    # decirlo sacandolo de una lista donde nunca estuvo. Por eso va aparte y no
+    # como el complemento de la otra.
+    #
+    # Gana sobre todo lo demas, incluida una aplicacion en modo observar: es la
+    # unica regla de la politica que expresa una prohibicion y no una gradacion.
+    blocked_domains: frozenset[str] = field(default_factory=frozenset)
+    # Que hacer con una regla concreta, por rule_id: "block", "warn" o "off".
+    #
+    # Las categorias (block_categories, warn_categories) siguen decidiendo por
+    # defecto y esto las matiza de a una. Existe porque una empresa puede querer
+    # que `email_address` no moleste sin bajar toda la categoria `pii`, que es lo
+    # unico que podia hacer antes: la eleccion era todo o nada.
+    rule_actions: dict[str, str] = field(default_factory=dict)
+    # Excepciones por persona: user_id -> accion ("observar" o "bloquear").
+    #
+    # Mismo criterio que app_actions y por la misma razon del ADR 0004: hay que
+    # NOMBRAR a alguien para aflojarle la politica, nunca al reves. Quien no este
+    # en esta lista se queda con la politica estricta.
+    user_actions: dict[str, str] = field(default_factory=dict)
+    # Lo mismo por area. Se resuelve despues de la persona: lo mas especifico
+    # gana, igual que en la resolucion de dominios.
+    area_actions: dict[str, str] = field(default_factory=dict)
 
     def a_dict(self) -> dict[str, Any]:
         """Serializa la politica a tipos JSON, estable y diffeable.
@@ -182,6 +208,10 @@ class Policy:
             "company_terms_action": self.company_terms_action,
             "app_actions": dict(sorted(self.app_actions.items())),
             "blind_spot_action": self.blind_spot_action,
+            "blocked_domains": sorted(self.blocked_domains),
+            "rule_actions": dict(sorted(self.rule_actions.items())),
+            "user_actions": dict(sorted(self.user_actions.items())),
+            "area_actions": dict(sorted(self.area_actions.items())),
         }
 
     @classmethod
@@ -210,9 +240,16 @@ class Policy:
             "model_block_labels",
             "block_categories",
             "warn_categories",
+            "blocked_domains",
         )
         campos_tupla = ("model_labels",)
-        campos_dict = ("app_actions", "company_terms")
+        campos_dict = (
+            "app_actions",
+            "company_terms",
+            "rule_actions",
+            "user_actions",
+            "area_actions",
+        )
         campos_simples = (
             "tenant_id",
             "unknown_domain_action",
@@ -414,11 +451,30 @@ def modo_de_la_app(proceso: str, policy: Policy) -> str:
     return policy.app_actions.get((proceso or "").lower(), BLOQUEAR)
 
 
+def modo_de_la_persona(usuario: str, area: str, policy: Policy) -> str:
+    """Si a esta persona -o a su area- se le aflojo la politica.
+
+    Lo mas especifico gana: una excepcion nombrando a alguien pesa mas que una
+    que nombra a su area entera, igual que en la resolucion de dominios.
+
+    Y como en el ADR 0004: hay que NOMBRAR para aflojar, nunca al reves. Quien
+    no aparezca en ninguna de las dos listas se queda con la politica estricta,
+    asi que agregar un area no puede desproteger a nadie por accidente.
+    """
+
+    propia = policy.user_actions.get((usuario or "").strip().lower())
+    del_area = policy.area_actions.get((area or "").strip().lower())
+    return propia or del_area or BLOQUEAR
+
+
 def decidir_sobre(
     classification: Classification,
     findings: list,
     policy: Policy,
     proceso: str = "",
+    usuario: str = "",
+    area: str = "",
+    host: str = "",
 ) -> Action:
     """La decision completa, incluida la rebaja de autoridad del modelo.
 
@@ -439,10 +495,31 @@ def decidir_sobre(
     action = decide(classification, categorias, policy)
     peor = findings[0] if findings else None
 
+    # Un dominio prohibido corta antes que nada y no lo rebaja nadie: es la
+    # unica regla de la politica que expresa una prohibicion y no una gradacion.
+    # Si una excepcion por persona pudiera aflojarlo, prohibir no significaria
+    # nada.
+    prohibido = _dominio_prohibido(host, policy)
+
+    # La regla concreta matiza a su categoria. "off" apaga solo esa regla, que
+    # es lo que permite callar `email_address` sin bajar toda la categoria pii.
+    if peor is not None and not prohibido:
+        por_regla = policy.rule_actions.get(peor.rule_id)
+        if por_regla == "off":
+            action = "allow"
+        else:
+            if por_regla in ("block", "warn"):
+                action = "block_content" if por_regla == "block" else "warn"
+
     # La aplicacion puede rebajar un corte a un aviso, nunca al reves: el evento
     # se registra igual y la empresa lo ve en el panel. Va antes que la rebaja
     # del modelo porque una vez que quedo en "warn" ya no hay nada que rebajar.
     if action == "block_content" and modo_de_la_app(proceso, policy) == OBSERVAR:
+        action = "warn"
+
+    # Y lo mismo por persona o por area: rebaja un corte a un aviso, nunca al
+    # reves. El evento se registra igual y la empresa lo sigue viendo.
+    if action == "block_content" and modo_de_la_persona(usuario, area, policy) == OBSERVAR:
         action = "warn"
 
     # El diccionario es de la empresa: si ella misma prefiere solo enterarse, se
@@ -467,4 +544,23 @@ def decidir_sobre(
             )
             if not autorizada:
                 action = "warn"
+
+    if prohibido:
+        action = "block_content"
     return action
+
+
+def _dominio_prohibido(host: str, policy: Policy) -> bool:
+    """Si el destino esta en la lista de prohibidos, mirando tambien el dominio padre.
+
+    Prohibir "deepseek.com" tiene que alcanzar para cortar
+    "chat.deepseek.com": nadie va a enumerar los subdominios de un servicio que
+    justamente no quiere usar.
+    """
+
+    limpio = (host or "").strip().lower().rstrip(".")
+    prohibido = False
+    for dominio in policy.blocked_domains:
+        if limpio == dominio or limpio.endswith("." + dominio):
+            prohibido = True
+    return prohibido
