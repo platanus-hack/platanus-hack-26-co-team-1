@@ -36,7 +36,7 @@
       <div class="aegis-card overflow-hidden">
         <div class="flex items-center justify-between border-b border-aegis-border px-6 py-4">
           <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Todo el equipo</h2>
-          <span class="font-display text-xs text-aegis-faint">{{ directorioFiltrado.length }} de {{ directorio.length }}</span>
+          <span class="font-display text-xs text-aegis-faint">{{ directorioFiltrado.length }} de {{ gente().length }}</span>
         </div>
         @if (directorioFiltrado.length) {
           <div class="overflow-x-auto">
@@ -148,17 +148,16 @@
   @if (activeTab === 'bulk') {
     <div class="mt-6 flex flex-col gap-6">
       @if (!archivoNombre) {
-        <button
-          type="button"
-          class="aegis-card flex flex-col items-center justify-center gap-3 border-dashed py-14 text-center transition hover:border-aegis-accent/50"
-          (click)="simularCarga()"
+        <label
+          class="aegis-card flex cursor-pointer flex-col items-center justify-center gap-3 border-dashed py-14 text-center transition hover:border-aegis-accent/50"
         >
+          <input type="file" accept=".csv,text/csv" class="sr-only" (change)="leerArchivo($event)" />
           <svg viewBox="0 0 24 24" fill="none" class="h-8 w-8 text-aegis-faint"><path d="M12 15V4M12 4l-4 4M12 4l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           <div>
             <p class="text-sm font-medium text-aegis-text">Arrastra tu planilla o haz clic para cargar</p>
-            <p class="mt-1 font-display text-xs text-aegis-faint">CSV (columnas: nombre, cargo, área, usuario, contraseña)</p>
+            <p class="mt-1 font-display text-xs text-aegis-faint">CSV con columnas: nombre, cargo, área, usuario</p>
           </div>
-        </button>
+        </label>
       } @else {
         <div class="aegis-card overflow-hidden">
           <div class="flex items-center justify-between border-b border-aegis-border px-6 py-4">
@@ -202,7 +201,7 @@
           </div>
           <div class="flex items-center justify-between border-t border-aegis-border px-6 py-4">
             <p class="text-xs text-aegis-dim">Las filas con error no se importarán. Corrige el archivo y vuelve a cargarlo si es necesario.</p>
-            <button type="button" class="aegis-btn-primary" [disabled]="filasValidas === 0">Confirmar importación ({{ filasValidas }})</button>
+            <button type="button" class="aegis-btn-primary" [disabled]="filasValidas === 0" (click)="confirmarCarga()">Confirmar importación ({{ filasValidas }})</button>
           </div>
         </div>
       }

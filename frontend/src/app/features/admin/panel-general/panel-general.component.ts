@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 import { StatTileComponent } from '../../../shared/ui/stat-tile/stat-tile.component';
 import { BadgeComponent, BadgeTone } from '../../../shared/ui/badge/badge.component';
 import { AvatarStackComponent } from '../../../shared/ui/avatar-stack/avatar-stack.component';
-import { COLABORADORES } from '../../../shared/data/colaboradores';
+import { DirectorioService } from '../../../shared/data/directorio.service';
 // `Ranking` sale del servicio y no se declara aca: las dos ramas lo definieron
 // por su cuenta con la misma forma, y dos definiciones de lo mismo se separan
 // en cuanto una de las dos cambie.
@@ -22,15 +22,25 @@ export class PanelGeneralComponent implements OnInit {
   /** Lo que esta viendo el agente. Cae a la maqueta si no hay API. */
   readonly m = this.metricas.metricas;
 
+  private readonly datos = inject(DirectorioService);
+
   ngOnInit(): void {
     void this.metricas.cargar();
+    void this.datos.cargarGente();
   }
 
   rango = 'Esta semana';
   readonly rangos = ['Esta semana', 'Últimos 14 días', 'Este mes', 'Personalizado'];
 
-  // Solo quienes tienen algo que revisar esta semana: el directorio completo vive en /admin/colaboradores.
-  readonly colaboradores = COLABORADORES.filter((c) => c.intentos > 0).sort((a, b) => b.intentos - a.intentos);
+  // Solo quienes tienen algo que revisar esta semana: el directorio completo
+  // vive en /admin/colaboradores. Los intentos los cuenta el backend cruzando
+  // el seudonimo del evento con el directorio.
+  get colaboradores() {
+    return this.datos
+      .gente()
+      .filter((c) => c.intentos > 0)
+      .sort((a, b) => b.intentos - a.intentos);
+  }
 
   max(lista: Ranking[]): number {
     // Sin el 1, una lista vacia da -Infinity y las barras quedan en NaN.
@@ -57,6 +67,6 @@ export class PanelGeneralComponent implements OnInit {
   }
 
   get pendientes(): number {
-    return COLABORADORES.filter((c) => c.estado === 'pendiente').length;
+    return this.datos.gente().filter((c) => c.estado === 'pendiente').length;
   }
 }

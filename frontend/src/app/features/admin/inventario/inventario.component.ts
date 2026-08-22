@@ -1,5 +1,6 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { DirectorioService } from '../../../shared/data/directorio.service';
 import { BadgeComponent, BadgeTone } from '../../../shared/ui/badge/badge.component';
 import { StatTileComponent } from '../../../shared/ui/stat-tile/stat-tile.component';
 import { AvatarStackComponent } from '../../../shared/ui/avatar-stack/avatar-stack.component';
@@ -53,7 +54,37 @@ const LABEL_POR_ESTADO: Record<EstadoAgente, string> = {
   imports: [CommonModule, BadgeComponent, StatTileComponent, AvatarStackComponent],
   templateUrl: './inventario.component.html',
 })
-export class InventarioComponent {
+export class InventarioComponent implements OnInit {
+  private readonly datos = inject(DirectorioService);
+
+  ngOnInit(): void {
+    // El backend descubre al listar: cada evento dice con que herramienta se
+    // hizo el envio, asi que lo que nadie declaro aparece solo. Es la
+    // definicion de shadow AI y no puede depender de que alguien la escriba.
+    void this.datos.cargarInventario();
+  }
+
+  /** Lo descubierto de verdad. Las listas de abajo son el ejemplo de diseno. */
+  readonly descubiertos = this.datos.inventario;
+
+  get agentesReales(): Agente[] {
+    return this.descubiertos()
+      .filter((f) => f.clase === 'agente')
+      .map((f) => ({
+        nombre: f.nombre,
+        tipo: (f.tipo as Agente['tipo']) ?? 'CLI',
+        colaboradores: f.usuarios,
+        ultimaActividad: f.ultima_actividad ?? 'Visto en el tráfico',
+        estado: f.estado as EstadoAgente,
+      }));
+  }
+
+  /** Con datos reales manda lo real; sin ninguno, la maqueta. */
+  get agentesMostrados(): Agente[] {
+    const reales = this.agentesReales;
+    return reales.length ? reales : this.agentes;
+  }
+
   toneDe(estado: EstadoAgente): BadgeTone {
     return TONE_POR_ESTADO[estado];
   }
@@ -166,7 +197,7 @@ export class InventarioComponent {
   }
 
   get totalSinAprobar(): number {
-    const items = [...this.agentes, ...this.servidoresMcp, ...this.skills];
+    const items = [...this.agentesMostrados, ...this.servidoresMcp, ...this.skills];
     return items.filter((i) => i.estado !== 'aprobado').length;
   }
 }

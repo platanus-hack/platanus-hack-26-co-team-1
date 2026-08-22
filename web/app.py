@@ -23,6 +23,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -34,7 +35,7 @@ sys.path.insert(0, str(RAIZ / "backend"))
 from aegis_agent.panel.demo_data import semana_simulada  # noqa: E402
 from aegis_agent.panel.metrics import compute, repeat_offenders  # noqa: E402
 from aegis_agent.panel.render import render  # noqa: E402
-from aegis_backend import cuentas, rutas, supabase  # noqa: E402
+from aegis_backend import cuentas, directorio, rutas, supabase  # noqa: E402
 from aegis_backend.classifier import anthropic_model  # noqa: E402
 from aegis_backend.store import DomainStore, PolicyStore  # noqa: E402
 
@@ -380,6 +381,16 @@ class Handler(BaseHTTPRequestHandler):
             datos = None
         return datos if isinstance(datos, dict) else None
 
+    # EL ENRUTADO
+    #
+    # Una tabla y no una escalera de if/else. El servicio empezo con tres rutas
+    # y hoy tiene doce; con la escalera, agregar la siguiente cuesta un nivel de
+    # anidamiento mas y la ultima ya estaba a siete. La tabla se lee de una
+    # ojeada y hace evidente cual pide sesion y cual no, que es la propiedad que
+    # de verdad hay que poder auditar de un vistazo.
+    #
+    # `None` en la columna de sesion = ruta publica.
+
     def do_GET(self) -> None:  # noqa: N802  (firma de BaseHTTPRequestHandler)
         # Los eventos se leen dentro de cada rama y no una vez arriba: con el
         # almacen en memoria daba igual, pero contra Supabase esa linea era una
@@ -387,83 +398,136 @@ class Handler(BaseHTTPRequestHandler):
         # icono- para armar una respuesta que ni los mira.
         ruta = _ruta_pedida(self.path)
 
-        if ruta == "/panel" or (ruta == "/" and not hay_front()):
-            # El panel en HTML. Es la portada solo cuando no hay front
-            # construido; con front, queda accesible a proposito en /panel para
-            # poder ver las metricas crudas sin depender del build.
-            registrados = eventos()
-            metricas = compute(registrados)
-            reincidencias = repeat_offenders(registrados)
-            cuerpo = render(metricas, reincidencias, os.environ.get("AEGIS_TENANT", "acme"))
-            self._responder(200, cuerpo.encode("utf-8"), "text/html; charset=utf-8")
-        else:
-            if ruta in ("/api/metrics", "/v1/metrics"):
-                from dataclasses import asdict
+        exactas = {
+            "/api/metrics": self._metricas,
+            "/v1/metrics": self._metricas,
+            "/v1/health": self._salud,
+            "/v1/policy": self._politica_por_defecto,
+            "/v1/stats": self._estadisticas,
+            "/v1/colaboradores": self._listar_colaboradores,
+            "/v1/inventario": self._listar_inventario,
+            "/v1/tenant": self._leer_tenant,
+        }
 
-                sesion = self._sesion()
-                if sesion is None:
-                    self._json(401, {"error": "sesion requerida"})
-                else:
-                    # `sesion["tenant"]` y no un parametro del pedido: es lo
-                    # unico que impide que una empresa lea el panel de otra.
-                    registrados = eventos(sesion["tenant"])
-                    calculadas = compute(registrados)
-                    self._json(
-                        200,
-                        {
-                            "metrics": {
-                                **asdict(calculadas),
-                                # block_rate es una propiedad, no un campo, asi
-                                # que asdict no la trae y quien consuma la API
-                                # la espera.
-                                "block_rate": round(calculadas.block_rate, 1),
-                            },
-                            "repeats": repeat_offenders(registrados),
-                            "almacen": almacen(),
-                            "eventos": len(registrados),
-                            "tenant": sesion["tenant"],
-                        },
-                    )
+        if ruta == "/panel" or (ruta == "/" and not hay_front()):
+            self._panel_en_html()
+        else:
+            if ruta in exactas:
+                exactas[ruta]()
             else:
-                if ruta == "/v1/health":
+                if ruta.startswith("/v1/domains/"):
                     self._json(
-                        200,
-                        {
-                            "ok": True,
-                            "almacen": almacen(),
-                            "eventos": len(eventos()),
-                        },
+                        *rutas.veredicto(ruta[len("/v1/domains/") :], DOMINIOS, MODELO)
                     )
                 else:
-                    if ruta.startswith("/v1/domains/"):
-                        self._json(
-                            *rutas.veredicto(
-                                ruta[len("/v1/domains/") :], DOMINIOS, MODELO
-                            )
-                        )
+                    if ruta.startswith("/v1/policy/"):
+                        self._leer_politica(ruta)
                     else:
-                        if ruta.startswith("/v1/policy/"):
-                            # El agente pide su politica por tenant sin token
-                            # -no tiene con quien loguearse- y eso esta bien: la
-                            # politica es la configuracion que el agente OBEDECE,
-                            # no datos de nadie. Con sesion, manda la sesion, y
-                            # asi el panel no puede leer la de otra empresa.
-                            sesion = self._sesion()
-                            pedido = _tenant_de(ruta, "/v1/policy/")
-                            self._json(
-                                200,
-                                POLITICAS.get(
-                                    sesion["tenant"] if sesion else pedido
-                                ),
-                            )
-                        else:
-                            if ruta == "/v1/policy":
-                                self._json(200, rutas.politica_por_defecto())
-                            else:
-                                if ruta == "/v1/stats":
-                                    self._json(200, {"domains": DOMINIOS.count()})
-                                else:
-                                    self._servir_el_front(ruta)
+                        self._servir_el_front(ruta)
+
+    # -- lecturas -----------------------------------------------------------
+
+    def _panel_en_html(self) -> None:
+        """El panel que arma Python. Es la portada solo cuando no hay front.
+
+        Con front construido queda accesible a proposito en /panel, para poder
+        ver las metricas crudas sin depender de que el build haya salido bien.
+        """
+
+        registrados = eventos()
+        cuerpo = render(
+            compute(registrados),
+            repeat_offenders(registrados),
+            os.environ.get("AEGIS_TENANT", "acme"),
+        )
+        self._responder(200, cuerpo.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _metricas(self) -> None:
+        from dataclasses import asdict
+
+        sesion = self._sesion()
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            # `sesion["tenant"]` y no un parametro del pedido: es lo unico que
+            # impide que una empresa lea el panel de otra.
+            registrados = eventos(sesion["tenant"])
+            calculadas = compute(registrados)
+            self._json(
+                200,
+                {
+                    "metrics": {
+                        **asdict(calculadas),
+                        # block_rate es una propiedad, no un campo, asi que
+                        # asdict no la trae y quien consuma la API la espera.
+                        "block_rate": round(calculadas.block_rate, 1),
+                    },
+                    "repeats": repeat_offenders(registrados),
+                    "almacen": almacen(),
+                    "eventos": len(registrados),
+                    "tenant": sesion["tenant"],
+                },
+            )
+
+    def _salud(self) -> None:
+        self._json(200, {"ok": True, "almacen": almacen(), "eventos": len(eventos())})
+
+    def _politica_por_defecto(self) -> None:
+        self._json(200, rutas.politica_por_defecto())
+
+    def _estadisticas(self) -> None:
+        self._json(200, {"domains": DOMINIOS.count()})
+
+    def _leer_politica(self, ruta: str) -> None:
+        """El agente pide su politica sin token, y esta bien.
+
+        No tiene con quien loguearse, y la politica es la configuracion que el
+        agente OBEDECE, no datos de nadie. Con sesion manda la sesion, y asi el
+        panel no puede leer la de otra empresa.
+        """
+
+        sesion = self._sesion()
+        pedido = _tenant_de(ruta, "/v1/policy/")
+        self._json(200, POLITICAS.get(sesion["tenant"] if sesion else pedido))
+
+    def _listar_colaboradores(self) -> None:
+        sesion = self._sesion()
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            tenant = sesion["tenant"]
+            # Los intentos salen de los eventos y no de una columna: guardarlos
+            # en la fila de la persona seria un contador que hay que mantener al
+            # dia y que se desincroniza en el primer borrado.
+            registrados = eventos(tenant)
+            intentos = Counter(
+                (e.get("actor") or {}).get("user_id", "") for e in registrados
+            )
+            gente = [
+                {**fila, "intentos": intentos.get(fila["usuario"], 0)}
+                for fila in directorio.colaboradores(tenant)
+            ]
+            self._json(200, {"colaboradores": gente, "tenant": tenant})
+
+    def _listar_inventario(self) -> None:
+        sesion = self._sesion()
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            tenant = sesion["tenant"]
+            # Antes de listar, mirar que hay corriendo de verdad: cada evento
+            # dice con que herramienta se hizo el envio, asi que la shadow AI se
+            # descubre sola en vez de esperar a que alguien la escriba.
+            directorio.descubrir_desde_eventos(tenant, eventos(tenant))
+            self._json(200, {"inventario": directorio.inventario(tenant)})
+
+    def _leer_tenant(self) -> None:
+        sesion = self._sesion()
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            datos = directorio.tenant(sesion["tenant"])
+            self._json(200, datos or {"tenant": sesion["tenant"], "areas": []})
 
     def _servir_el_front(self, ruta: str) -> None:
         """Un archivo del build, o el index para que enrute el navegador.
@@ -506,11 +570,16 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     guardar(datos)
                     self._json(202, {"accepted": datos.get("event_id")})
+            elif ruta == "/v1/lessons":
+                self._json(*rutas.leccion(datos, MODELO, _LECCIONES))
+            elif ruta == "/v1/colaboradores":
+                self._con_sesion(datos, self._guardar_colaboradores)
+            elif ruta == "/v1/inventario":
+                self._con_sesion(datos, self._guardar_inventario)
+            elif ruta == "/v1/tenant":
+                self._con_sesion(datos, self._guardar_tenant)
             else:
-                if ruta == "/v1/lessons":
-                    self._json(*rutas.leccion(datos, MODELO, _LECCIONES))
-                else:
-                    self._json(404, {"error": "ruta desconocida"})
+                self._json(404, {"error": "ruta desconocida"})
 
     def _entrar(self, datos: dict) -> None:
         """Login. Un solo motivo de rechazo, a proposito.
@@ -537,6 +606,72 @@ class Handler(BaseHTTPRequestHandler):
                     "rol": cuenta.get("rol", "admin"),
                 },
             )
+
+    # -- escrituras ---------------------------------------------------------
+
+    def _con_sesion(self, datos: dict | None, hacer) -> None:
+        """Casi toda escritura es igual: pedir sesion, validar cuerpo, actuar.
+
+        Escrito una vez para que agregar una ruta no sea otra oportunidad de
+        olvidarse del 401. Lo que llega a `hacer` ya tiene tenant y cuerpo
+        validados, y el tenant viene del token: nunca del pedido.
+
+        El cuerpo se recibe ya parseado y no se lee aca: `rfile` es un socket y
+        se consume una sola vez, asi que leerlo de nuevo devolveria vacio.
+        """
+
+        sesion = self._sesion()
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            if datos is None:
+                self._json(400, {"error": "cuerpo invalido"})
+            else:
+                hacer(sesion["tenant"], datos)
+
+    def _guardar_colaboradores(self, tenant: str, datos: dict) -> None:
+        """Uno o muchos por la misma ruta: el alta manual y el CSV son lo mismo.
+
+        Las filas invalidas se descartan y no cancelan al resto. Subir un CSV de
+        cincuenta personas y que falle entero porque a una le falta el usuario
+        es peor que dar de alta cuarenta y nueve y decir cuantas faltaron.
+        """
+
+        pedidas = datos.get("colaboradores") or [datos]
+        guardadas = directorio.guardar_colaboradores(tenant, pedidas)
+        self._json(
+            200,
+            {
+                "guardados": guardadas,
+                "descartados": len(pedidas) - len(guardadas),
+            },
+        )
+
+    def _guardar_inventario(self, tenant: str, datos: dict) -> None:
+        fila = directorio.guardar_en_inventario(tenant, datos)
+        if fila is None:
+            self._json(400, {"error": "hace falta nombre y una clase conocida"})
+        else:
+            self._json(200, fila)
+
+    def _guardar_tenant(self, tenant: str, datos: dict) -> None:
+        # El tenant sale de la sesion aunque el cuerpo traiga otro: si no, quien
+        # entra a una empresa podria renombrar la de al lado.
+        self._json(200, directorio.guardar_tenant({**datos, "tenant": tenant}))
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        ruta = _ruta_pedida(self.path)
+        sesion = self._sesion()
+
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            if ruta.startswith("/v1/colaboradores/"):
+                usuario = _tenant_de(ruta, "/v1/colaboradores/")
+                directorio.borrar_colaborador(sesion["tenant"], usuario)
+                self._json(200, {"borrado": usuario})
+            else:
+                self._json(404, {"error": "ruta desconocida"})
 
     def do_PUT(self) -> None:  # noqa: N802
         """La politica que escribe el panel. Es el unico PUT del servicio.
