@@ -39,9 +39,14 @@ agent/
     catalog.py    Catálogo semilla de servicios de IA (112 dominios)
     policy.py     Política, clasificación de destinos y detección por forma
     lessons.py    Lecciones locales de respaldo
-  tests/          96 tests: reglas, evasión, shadow AI, datos, panel y e2e
+  tests/          132 tests: reglas, evasión, shadow AI, datos, panel, base
+                  colaborativa, instalador y end-to-end con navegador
+    install/      Instalador reversible: CA, proxy del sistema y variables
+    domains.py    Cliente de la base colaborativa, fuera del camino crítico
   bench/          Medición de latencia en el camino crítico
   demo/           Demo manual con navegador
+backend/
+  aegis_backend/  Base colaborativa: un dominio se clasifica una vez para todos
 docs/
   00-propuesta.md   El producto: problema, propuesta y requisitos del MVP
   adr/              Decisiones de arquitectura y por qué se tomaron
@@ -85,10 +90,19 @@ cd agent
 python -m pip install -r requirements.txt   # mitmproxy y playwright
 python -m playwright install chromium
 
-python -m unittest discover -s tests -t .   # los 96 tests
+python -m unittest discover -s tests -t .   # los 132 tests (o: python ../run_tests.py)
 python -m bench.latency                     # latencia del motor T1
 python -m demo.run                          # demo con navegador
 python -m aegis_agent.panel.server          # panel en :8787
+python -m aegis_backend.app                 # base colaborativa en :8686 (desde backend/)
+```
+
+Para usarlo con tu propio navegador en vez del de la demo:
+
+```bash
+python -m aegis_agent.install.windows plan        # qué va a hacer, antes de hacerlo
+python -m aegis_agent.install.windows install     # CA + proxy + variables (solo tu usuario)
+python -m aegis_agent.install.windows uninstall   # revierte todo
 ```
 
 Medido en un portátil, sin GPU: un prompt típico se inspecciona en **0.16 ms**, y un archivo de
