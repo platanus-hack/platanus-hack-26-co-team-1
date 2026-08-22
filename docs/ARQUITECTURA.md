@@ -56,24 +56,32 @@ paso existe para no pagar el siguiente.
      Si no parece una llamada a un modelo, fin. No se escanea nada.
      Si lo parece, pasa a ai_unknown y se manda a clasificar.
 
-5. Se escanea el payload:
+5. ¿El texto trae órdenes dirigidas al modelo?
+   Es la dirección contraria: no un dato que sale, sino una instrucción para
+   que salga. Va antes del escaneo porque en ese momento **todavía no hay
+   ningún dato sensible en el texto**.
+
+6. Se escanea el payload:
    a. se decodifica (gzip, zip, UTF-16, base64, JSON escapado…)
    b. T1: 28 reglas + firmas de archivo        ~0.2 ms
    c. señal de volumen (15 datos personales = un export)
    d. T2: modelo local, SOLO si T1 no vio nada  ~110 ms
    e. se ordenan por especificidad
 
-6. Se cruza el hallazgo con la política:
+7. Se cruza el hallazgo con la política:
    secret o internal_data       → bloquear
    pii suelto                   → advertir
    hallazgo del modelo, secret/internal_data → bloquear (salvo AEGIS_T2_ACCION=warn)
    hallazgo del modelo, pii     → advertir
 
-7. Si se bloquea:
+8. Si se bloquea:
    navegación → página HTML con la lección
    fetch/CLI  → JSON con el motivo en error.message
 
-8. Se escribe el evento redactado en disco y se sube en segundo plano.
+9. Se escribe el evento redactado en disco y se sube en segundo plano.
+
+10. Y al volver, se mira la respuesta con las mismas reglas de inyección.
+    Ahí solo se registra: cuando la respuesta llega, el modelo ya la generó.
 ```
 
 **El paso 4 es el que hace viable todo lo demás.** Un equipo genera miles de
@@ -87,7 +95,8 @@ modelo.
 |---|---|---|---|---|
 | **T1** | 28 reglas + entropía + Luhn + firmas binarias | Local | ~0.2 ms | Credenciales, volcados, exports, documentos de identidad, archivos críticos |
 | **Volumen** | Agregación sobre los hallazgos de T1 | Local | 0 | Un export de clientes que línea a línea parece inocente |
-| **T2** | Modelo de entidades (~50M parámetros) | Local | ~110 ms | Lo que no tiene formato: nombres de clientes, cifras de contratos, datos de salud |
+| **T2** | Modelo de entidades (289M parámetros) | Local | ~110 ms | Lo que no tiene formato: nombres de clientes, cifras de contratos, datos de salud |
+| **Inyección** | 3 reglas, en las dos direcciones | Local | ~0.1 ms | Órdenes escritas para el modelo dentro del contenido: el ataque que convierte a la herramienta en el que filtra |
 
 T2 corre **solo si T1 no encontró nada**. Si ya hay una credencial detectada,
 gastar 110 ms más no cambia la decisión ni la lección.

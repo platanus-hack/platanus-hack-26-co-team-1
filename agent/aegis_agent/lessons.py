@@ -152,6 +152,46 @@ _BY_RULE: dict[str, dict[str, str]] = {
             "antes, cambiala hoy: es lo unico que la vuelve inservible."
         ),
     },
+    "inyeccion_ignora_instrucciones": {
+        "title": "Ese texto lleva ordenes escritas para tu asistente",
+        "why": (
+            "Alguien dejo instrucciones dirigidas al modelo dentro del contenido que "
+            "estas compartiendo: un archivo, una pagina o un ticket que parece normal. "
+            "Si el asistente las obedece, las ejecuta con tus permisos y con tu nombre, "
+            "y quien las escribio nunca aparece."
+        ),
+        "what_to_do": (
+            "Fijate de donde salio ese contenido antes de darselo al asistente. Si "
+            "viene de afuera de la empresa, pega solo la parte que necesitas o conta el "
+            "problema con tus palabras."
+        ),
+    },
+    "inyeccion_ocultar_al_usuario": {
+        "title": "El texto le pide al asistente que te oculte algo",
+        "why": (
+            "Una herramienta legitima nunca necesita esconderle nada a la persona que "
+            "la usa. Esa frase existe para que no veas lo que esta por pasar, y es de "
+            "las senales mas claras de que el contenido esta preparado."
+        ),
+        "what_to_do": (
+            "No sigas con ese contenido y avisale a seguridad de donde lo sacaste. Si "
+            "vino en un archivo o un enlace compartido, es probable que no seas la "
+            "unica persona que lo recibio."
+        ),
+    },
+    "inyeccion_exfiltracion_dirigida": {
+        "title": "Ese texto le ordena al asistente sacar credenciales",
+        "why": (
+            "No es una fuga todavia: es la instruccion para provocarla. Le dice al "
+            "asistente que busque llaves o contrasenas y las mande afuera, y lo hace en "
+            "el mismo texto donde intenta tomarle el control de sus instrucciones."
+        ),
+        "what_to_do": (
+            "Descarta ese contenido. Si el asistente ya lo leyo, cambia las claves que "
+            "tenga a mano ese proyecto: es mas barato rotarlas que averiguar si alcanzo "
+            "a usarlas."
+        ),
+    },
 }
 
 

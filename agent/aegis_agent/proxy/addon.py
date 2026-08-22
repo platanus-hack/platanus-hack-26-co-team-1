@@ -7,9 +7,14 @@ import time
 
 from mitmproxy import http
 
-from ..detect import model
+from ..detect import inyeccion, model
 from ..detect.owners import exento
-from ..detect.payload import ScanResult, scan_payload
+from ..detect.payload import (
+    ScanResult,
+    scan_payload,
+    texto_de_respuesta,
+    texto_para_inyeccion,
+)
 from ..domains import DomainClient
 from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
@@ -22,9 +27,9 @@ from ..policy import (
     decidir_sobre,
     looks_like_ai_api,
 )
-from ..procesos import DESCONOCIDO, Proceso, del_puerto
 from ..policy_store import cargar as cargar_politica
 from ..policy_store import refrescar_en_segundo_plano
+from ..procesos import DESCONOCIDO, Proceso, del_puerto
 from ..sensor import SensorDePuntosCiegos
 from ..signals import SignalCollector
 from . import blockpage
@@ -271,11 +276,47 @@ class Aegis:
         """
 
         host = flow.request.pretty_host
-        if classify(host, self.policy) == "non_ai" and flow.response is not None:
+        clasificacion = classify(host, self.policy)
+        if clasificacion == "non_ai" and flow.response is not None:
             self.signals.observe_response(
                 host, flow.response.headers.get("Content-Type", "")
             )
             self._maybe_classify(host)
+        else:
+            if flow.response is not None and clasificacion not in ("passthrough", "non_ai"):
+                self._mirar_inyeccion_en_la_respuesta(flow, host, clasificacion)
+
+    def _mirar_inyeccion_en_la_respuesta(
+        self, flow: http.HTTPFlow, host: str, clasificacion: Classification
+    ) -> None:
+        """Lo que el modelo devuelve tambien es texto que alguien va a obedecer.
+
+        Nunca corta. Cuando la respuesta llega, el modelo ya la genero; dejar a
+        la herramienta esperando un cuerpo que no va a llegar rompe la sesion sin
+        evitar nada. Lo que si hace es registrar el intento, que es lo que
+        convierte una sospecha en algo que la empresa puede mirar.
+        """
+
+        try:
+            cuerpo = flow.response.get_content(strict=False) or b""
+        except Exception:
+            # Una respuesta con un encoding roto no puede tumbar el proxy.
+            cuerpo = b""
+
+        # Se extrae el texto del sobre JSON antes de mirarlo: una orden puesta
+        # al principio de la respuesta empieza justo despues de una comilla, y
+        # la regla exige que abra una oracion.
+        texto = texto_de_respuesta(cuerpo)
+        for hallazgo in inyeccion.buscar(texto, direccion="respuesta"):
+            self._record(
+                host=host,
+                classification=clasificacion,
+                finding=hallazgo,
+                action="warned",
+                payload_bytes=len(cuerpo),
+                truncated=len(cuerpo) > inyeccion.MAX_CARACTERES,
+                proceso=self._proceso_de(flow).nombre,
+            )
 
     def _maybe_classify(self, host: str) -> None:
         if self.signals.should_classify(host):
@@ -326,6 +367,56 @@ class Aegis:
             {"X-Aegis-Action": "block_destination"},
         )
 
+    def _inyeccion_en_el_envio(
+        self,
+        flow: http.HTTPFlow,
+        host: str,
+        classification: Classification,
+        body: bytes,
+        proceso: Proceso,
+    ) -> bool:
+        """Contenido envenenado que el agente esta por darle al modelo.
+
+        Devuelve True si corto el envio, para que no se siga inspeccionando algo
+        que ya no va a salir.
+
+        Este es el caso util de los dos: se avisa ANTES de que el modelo lea la
+        orden. En la respuesta ya es tarde para prevenir, solo queda registrar.
+        """
+
+        hallazgos = inyeccion.buscar(texto_para_inyeccion(body), direccion="envio")
+        corto = False
+        if hallazgos:
+            peor = hallazgos[0]
+            corto = self.policy.injection_action == "block"
+            self._record(
+                host=host,
+                classification=classification,
+                finding=peor,
+                action="blocked" if corto else "warned",
+                payload_bytes=len(body),
+                truncated=False,
+                proceso=proceso.nombre,
+            )
+            if corto:
+                leccion = lesson_for(peor.rule_id)
+                _deny(
+                    flow,
+                    blockpage.content_blocked(
+                        host,
+                        peor.rule_id,
+                        peor.evidence,
+                        leccion,
+                        aprobada=classification == "ai_approved",
+                    ),
+                    f"Aegis bloqueo el envio: {leccion['title']}. {leccion['what_to_do']}",
+                    {
+                        "X-Aegis-Action": "block_content",
+                        "X-Aegis-Rule": peor.rule_id,
+                    },
+                )
+        return corto
+
     def _inspect(
         self, flow: http.HTTPFlow, host: str, classification: Classification
     ) -> None:
@@ -348,6 +439,13 @@ class Aegis:
                 classification = "ai_unknown"
 
         if classification != "non_ai":
+            # Antes que el escaneo de fugas, y por separado: lo que se busca aca
+            # no es un dato sensible sino una ORDEN para ir a buscarlo. En este
+            # momento del ataque todavia no hay ningun secreto en el texto, asi
+            # que ninguna de las otras reglas lo veria.
+            if self._inyeccion_en_el_envio(flow, host, classification, body, proceso):
+                return
+
             result = scan_payload(body, query)
             # Una credencial que viaja hacia su propio dueno no es una fuga: es
             # su uso normal. Claude Code manda su token a api.anthropic.com en

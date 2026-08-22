@@ -128,6 +128,15 @@ class Policy:
     # reves. Y esto NO le llega al detector, que sigue recibiendo texto y destino
     # y nada mas.
     app_actions: dict[str, str] = field(default_factory=dict)
+    # Que hacer con un intento de inyeccion de prompt. Por defecto avisa: la
+    # deteccion es heuristica, igual que la del modelo, y cortarle a alguien la
+    # respuesta a mitad de una conversacion por una probabilidad es la forma mas
+    # rapida de que desinstalen Aegis.
+    #
+    # "block" solo aplica al ENVIO. La respuesta no se corta nunca: cuando llega,
+    # el modelo ya la genero, y dejar a la herramienta esperando un cuerpo que no
+    # va a llegar rompe la sesion sin evitar nada.
+    injection_action: str = "warn"
     # Que hacer cuando la capa D detecta un punto ciego (una app que no pasa
     # por el proxy). "warn" solo lo reporta; "block" corta la conexion. El
     # mecanismo que lee este campo lo construye otra tarea: aca solo se
@@ -154,6 +163,7 @@ class Policy:
             "warn_categories": sorted(self.warn_categories),
             "model_labels": list(self.model_labels),
             "model_threshold": self.model_threshold,
+            "injection_action": self.injection_action,
             "app_actions": dict(sorted(self.app_actions.items())),
             "blind_spot_action": self.blind_spot_action,
         }
@@ -193,6 +203,7 @@ class Policy:
             "unapproved_ai_action",
             "model_action",
             "model_threshold",
+            "injection_action",
             "blind_spot_action",
         )
 

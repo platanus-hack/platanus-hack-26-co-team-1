@@ -7,7 +7,7 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 367 en verde (`python run_tests.py` desde la raíz).
+**Tests:** 386 en verde (`python run_tests.py` desde la raíz).
 **Entorno:** `agent/requirements.txt` para el proxy y los tests;
 `agent/requirements-modelo.txt` para T2, que va aparte porque es opcional y pesa.
 
@@ -38,7 +38,9 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Instalador para Windows (CA + proxy + variables) | Funciona | `agent/aegis_agent/install/windows.py` |
 | Cobertura de **Claude Code** | Verificada con el CLI real | ver §8 |
 | Cobertura de **Codex** | Mecanismo listo, **sin verificar** | ver §8 |
-| Lecciones pedagógicas | Locales, estáticas | `agent/aegis_agent/lessons.py` |
+| Lecciones pedagógicas | **Las genera un modelo** desde el evento redactado | `backend/aegis_backend/lecciones.py` |
+| Inyección de prompts, en las dos direcciones | Funciona, avisa por defecto | `agent/aegis_agent/detect/inyeccion.py` |
+| Atribución por aplicación y política por app | Funciona | `agent/aegis_agent/procesos.py`, [ADR 0004](adr/0004-la-politica-conoce-la-aplicacion-el-detector-no.md) |
 
 **Panel desplegado:** https://aegis-panel.onrender.com
 
@@ -46,10 +48,10 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 
 Por orden de lo que más falta para el pitch:
 
-1. **Las lecciones no las genera un modelo.** Están escritas a mano en
-   `lessons.py`. El contrato de datos define `POST /v1/lessons` y el backend
-   responde un placeholder. Falta conectar un LLM que las genere a partir del
-   evento redactado. **Requiere `ANTHROPIC_API_KEY`, que no está configurada.**
+1. **El clasificador de dominios sigue siendo heurístico.** Las lecciones ya las
+   genera un modelo (`backend/aegis_backend/lecciones.py`); el clasificador tiene
+   el camino escrito y probado con un modelo simulado, y espera la misma API key.
+   La clave vive fuera del repositorio: ver `backend/aegis_backend/secretos.py`.
 2. **El clasificador de dominios tampoco usa un modelo.** Descarga la portada del
    sitio y decide con una heurística de contenido. El camino del modelo está
    escrito y probado con uno simulado; espera la misma API key.
