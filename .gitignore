@@ -1,0 +1,31 @@
+# Dependencias
+node_modules/
+.pnp/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Build
+dist/
+build/
+target/
+*.tsbuildinfo
+
+# Entorno y secretos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!docs/**/*.pem
+
+# CA local generada por el instalador (nunca se commitea)
+certs/
+aegis-ca.*
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
