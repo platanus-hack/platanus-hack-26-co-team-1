@@ -7,7 +7,7 @@ import time
 
 from mitmproxy import http
 
-from .. import cert_siblings
+from .. import cert_siblings, identidad
 from ..detect import inyeccion, model
 from ..detect.owners import exento
 from ..detect.payload import (
@@ -18,7 +18,7 @@ from ..detect.payload import (
     texto_para_inyeccion,
 )
 from ..domains import DomainClient
-from ..detect.types import Finding
+from ..detect.types import EVIDENCE_MAX_LEN, Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for, pedir_en_segundo_plano
 from ..policy import (
@@ -380,6 +380,15 @@ class Aegis:
             if compartido == "ai_unapproved":
                 classification = "ai_unapproved"
 
+        degradado_por_la_cuenta = False
+        if classification == "ai_approved":
+            # Aprobar la herramienta no es aprobar la cuenta. Va antes de
+            # cualquier otra cosa porque puede cambiar la clasificacion, y todo
+            # lo que sigue depende de ella.
+            nueva = self._cuenta_de_la_empresa(flow, host, classification)
+            degradado_por_la_cuenta = nueva != classification
+            classification = nueva
+
         if classification in ("ai_approved", "ai_unapproved"):
             # El proxy ya termino el handshake TLS para llegar hasta aca: el
             # certificado esta en la mano y sus SAN casi siempre delatan a la
@@ -393,10 +402,17 @@ class Aegis:
         if corta_destino:
             self._block_destination(flow, host, classification)
         else:
-            if classification == "ai_unapproved":
+            if classification == "ai_unapproved" and not degradado_por_la_cuenta:
                 # Aunque se deje pasar, el uso de una herramienta no aprobada es
                 # justamente lo que la empresa necesita ver en el panel: con que
                 # aplicacion la usan es la otra mitad del dato.
+                #
+                # Salvo cuando la degradacion vino de la cuenta: ese caso ya
+                # dejo su propio evento, que ademas dice POR QUE. Registrar los
+                # dos deja al panel con dos filas para una sola causa, y la
+                # generica diciendo "allowed" al lado de la otra diciendo
+                # "blocked". Dos evidencias que se contradicen es peor que
+                # ninguna.
                 self._registrar_uso(host, classification, self._proceso_de(flow).nombre)
             if flow.request.method in METHODS_WITH_PAYLOAD and classification != "passthrough":
                 self._inspect(flow, host, classification)
@@ -613,8 +629,66 @@ class Aegis:
                         proceso=proceso.nombre,
                     )
 
+    def _cuenta_de_la_empresa(
+        self, flow: http.HTTPFlow, host: str, classification: Classification
+    ) -> Classification:
+        """Degrada una herramienta aprobada usada con una cuenta que no es la de la empresa.
+
+        La degradacion es a `ai_unapproved` y no a un estado nuevo, y eso es
+        deliberado: la empresa ya decidio que hacer con una IA no aprobada
+        (`unapproved_ai_action`), y esa decision vale igual acá. Un camino
+        propio significaria dos lugares donde ajustar la misma politica.
+
+        Cuando la accion es "warn" el envio sigue su curso exactamente como
+        antes y lo unico que cambia es que el panel lo ve. Es el default a
+        proposito: la primera pregunta que tiene una empresa no es a quien
+        cortar sino cuanta gente esta entrando con su cuenta personal.
+        """
+
+        ajena = identidad.es_ajena(
+            flow.request.headers,
+            flow.request.path,
+            self.policy.corporate_accounts,
+        )
+        corta = self.policy.foreign_account_action == "block"
+        resultado = classification
+        if ajena is not None:
+            # Se decide ANTES de registrar. El evento tiene que decir lo que de
+            # verdad paso: grabarlo como "aprobado" y degradar despues deja la
+            # evidencia describiendo un mundo que no ocurrio.
+            resultado = "ai_unapproved" if corta else classification
+            self._registrar_uso(
+                host,
+                resultado,
+                self._proceso_de(flow).nombre,
+                # La identidad completa es la que compara la politica; esto es
+                # solo lo que se muestra. Un uuid recortado a 32 sigue siendo
+                # reconocible y el contrato no admite mas (ver detect/types.py).
+                finding=Finding(
+                    rule_id="cuenta_ajena",
+                    category="policy",
+                    severity="high",
+                    confidence=1.0,
+                    evidence=ajena[:EVIDENCE_MAX_LEN],
+                    start=0,
+                    end=0,
+                ),
+                accion="blocked" if corta else "warned",
+                # Clave propia para que este evento no se coma la pausa del uso
+                # normal del mismo dominio: son dos cosas distintas que el panel
+                # necesita ver por separado.
+                clave=f"cuenta:{host}",
+            )
+        return resultado
+
     def _registrar_uso(
-        self, host: str, classification: Classification, proceso: str = ""
+        self,
+        host: str,
+        classification: Classification,
+        proceso: str = "",
+        finding: Finding | None = None,
+        accion: str = "allowed",
+        clave: str = "",
     ) -> None:
         """Un evento por dominio cada tanto, no uno por peticion.
 
@@ -623,16 +697,17 @@ class Aegis:
         """
 
         ahora = time.time()
+        llave = clave or host
         with self._lock_uso:
-            reciente = ahora - self._ultimo_uso.get(host, 0) < PAUSA_USO
+            reciente = ahora - self._ultimo_uso.get(llave, 0) < PAUSA_USO
             if not reciente:
-                self._ultimo_uso[host] = ahora
+                self._ultimo_uso[llave] = ahora
         if not reciente:
             self._record(
                 host=host,
                 classification=classification,
-                finding=None,
-                action="allowed",
+                finding=finding,
+                action=accion,
                 payload_bytes=0,
                 truncated=False,
                 proceso=proceso,

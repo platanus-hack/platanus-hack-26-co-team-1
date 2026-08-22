@@ -187,6 +187,26 @@ class Policy:
     # Lo mismo por area. Se resuelve despues de la persona: lo mas especifico
     # gana, igual que en la resolucion de dominios.
     area_actions: dict[str, str] = field(default_factory=dict)
+    # Las cuentas de la empresa en las herramientas que SI estan aprobadas.
+    #
+    # `approved_ai` dice "ChatGPT se puede usar" y no alcanza: la cuenta
+    # personal gratuita del empleado viaja por el mismo dominio aprobado y es
+    # justamente la que entrena con lo que le peguen. Esto declara CUALES
+    # cuentas son de la empresa; lo que no este declarado es de otro.
+    #
+    # Son huellas y identificadores de organizacion, nunca credenciales: ver
+    # identidad.py. Vacio significa apagado, porque con la lista vacia toda
+    # cuenta seria ajena y el primer dia se bloquearia la empresa entera.
+    corporate_accounts: frozenset[str] = field(default_factory=frozenset)
+    # Que hacer cuando una herramienta aprobada se usa con una cuenta que no es
+    # de la empresa. Por defecto avisa, igual que unknown_domain_action: el
+    # valor de esta capa es primero VER cuanta gente esta entrando con su cuenta
+    # personal, y esa respuesta suele bastar para que la empresa decida sola.
+    #
+    # "block" degrada el destino a no aprobado, con lo cual hereda todo lo que
+    # la empresa ya decidio para una IA no aprobada (unapproved_ai_action) en
+    # vez de inventar un camino nuevo.
+    foreign_account_action: str = "warn"
 
     def a_dict(self) -> dict[str, Any]:
         """Serializa la politica a tipos JSON, estable y diffeable.
@@ -217,6 +237,8 @@ class Policy:
             "rule_actions": dict(sorted(self.rule_actions.items())),
             "user_actions": dict(sorted(self.user_actions.items())),
             "area_actions": dict(sorted(self.area_actions.items())),
+            "corporate_accounts": sorted(self.corporate_accounts),
+            "foreign_account_action": self.foreign_account_action,
         }
 
     @classmethod
@@ -246,6 +268,7 @@ class Policy:
             "block_categories",
             "warn_categories",
             "blocked_domains",
+            "corporate_accounts",
         )
         campos_tupla = ("model_labels",)
         campos_dict = (
@@ -264,6 +287,7 @@ class Policy:
             "injection_action",
             "company_terms_action",
             "blind_spot_action",
+            "foreign_account_action",
         )
 
         valores: dict[str, Any] = {}
