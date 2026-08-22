@@ -27,6 +27,20 @@ services:
     envVars:
       - key: AEGIS_TENANT
         value: acme
+      # La base. Sin estas dos el servicio arranca igual y guarda en memoria,
+      # que es lo que hacia antes: el plan gratuito de Render no tiene disco, y
+      # cada redespliegue -o cada vez que la instancia se duerme por inactividad-
+      # se llevaba los eventos. La semana simulada tapaba el hueco.
+      #
+      # sync: false y no un valor: la service_role se carga a mano en el panel de
+      # Render y no vive en el repositorio. Con ella se lee el diccionario de
+      # terminos de la empresa, que es la lista mas sensible del sistema.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      # Clasificar dominios y escribir lecciones. Tambien a mano.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       # Con un plan de pago se monta un disco y se apunta AEGIS_DATA_DIR ahi
-      # para que los eventos sobrevivan a los reinicios. En el plan gratuito no
-      # hay discos, y el servicio degrada a memoria a proposito.
+      # para que los eventos sobrevivan a los reinicios aun sin Supabase.

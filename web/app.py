@@ -10,7 +10,7 @@ Dos advertencias que valen mas que cualquier comentario de implementacion:
    del ADR 0003, verificada de nuevo del lado que recibe: no alcanza con que el
    agente prometa portarse bien.
 
-2. El almacenamiento tiene tres niveles y el que corre depende del despliegue.
+2. El almacenamiento tiene cuatro niveles y el que corre depende del despliegue.
    Ver ALMACENAMIENTO mas abajo; es la razon por la que esto dejo de ser una
    funcion serverless.
 """
@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,6 +34,9 @@ sys.path.insert(0, str(RAIZ / "backend"))
 from aegis_agent.panel.demo_data import semana_simulada  # noqa: E402
 from aegis_agent.panel.metrics import compute, repeat_offenders  # noqa: E402
 from aegis_agent.panel.render import render  # noqa: E402
+from aegis_backend import rutas, supabase  # noqa: E402
+from aegis_backend.classifier import anthropic_model  # noqa: E402
+from aegis_backend.store import DomainStore, PolicyStore  # noqa: E402
 
 MAX_EVENTOS = 5000
 CAMPOS_PROHIBIDOS = ("payload", "content", "text", "prompt", "body", "raw")
@@ -41,17 +45,21 @@ PUERTO_POR_DEFECTO = 10000
 
 # ALMACENAMIENTO
 #
-# Tres niveles, de mas duradero a menos, y corre el primero disponible:
+# Cuatro niveles, de mas duradero a menos, y corre el primero disponible:
 #
-#   1. KV externo (Upstash o compatible), si hay AEGIS_KV_URL. Sobrevive a todo.
+#   0. Supabase, si hay SUPABASE_URL y la clave. Es el unico que sobrevive a un
+#      redespliegue del plan gratuito, y el unico que puede consultarse desde
+#      afuera. Ver backend/aegis_backend/supabase.py.
+#   1. KV externo (Upstash o compatible), si hay AEGIS_KV_URL.
 #   2. Disco, si AEGIS_DATA_DIR apunta a algo escribible. En Render eso es un
 #      disco persistente montado, y sobrevive a los reinicios y a que el plan
 #      gratuito apague la instancia por inactividad.
 #   3. Memoria, mientras el proceso viva.
 #
-# El nivel 2 es lo que gano el servicio al mudarse: en una funcion serverless no
-# habia disco que sobreviviera a la invocacion, asi que la unica persistencia
-# posible era pagar un KV aparte.
+# Los niveles de abajo no son solo el caso "sin configurar": son la red que
+# atrapa al de arriba cuando se cae. Un evento que Supabase no acepto se escribe
+# igual en disco o en memoria, porque perderlo seria perder justo el incidente
+# que paso mientras el almacen estaba caido.
 KV_URL = os.environ.get("AEGIS_KV_URL") or os.environ.get("KV_REST_API_URL")
 KV_TOKEN = os.environ.get("AEGIS_KV_TOKEN") or os.environ.get("KV_REST_API_TOKEN")
 KV_CLAVE = "aegis:eventos"
@@ -92,10 +100,13 @@ ARCHIVO = _archivo()
 
 
 def almacen() -> str:
-    if _kv_disponible():
-        nombre = "kv"
+    if supabase.configurado():
+        nombre = "supabase"
     else:
-        nombre = "disco" if ARCHIVO else "memoria"
+        if _kv_disponible():
+            nombre = "kv"
+        else:
+            nombre = "disco" if ARCHIVO else "memoria"
     return nombre
 
 
@@ -138,17 +149,17 @@ def _leer_disco() -> list[dict]:
     return guardados[:MAX_EVENTOS]
 
 
-def eventos() -> list[dict]:
+def _local() -> list[dict]:
     if _kv_disponible():
         respuesta = _kv(["LRANGE", KV_CLAVE, "0", str(MAX_EVENTOS)])
         crudos = (respuesta or {}).get("result") or []
         guardados = [json.loads(e) for e in crudos if e]
     else:
         guardados = _leer_disco() if ARCHIVO else list(_memoria)
-    return guardados or semana_simulada()
+    return guardados
 
 
-def guardar(evento: dict) -> None:
+def _guardar_local(evento: dict) -> None:
     if _kv_disponible():
         _kv(["LPUSH", KV_CLAVE, json.dumps(evento, ensure_ascii=False)])
         _kv(["LTRIM", KV_CLAVE, "0", str(MAX_EVENTOS)])
@@ -166,21 +177,76 @@ def guardar(evento: dict) -> None:
             del _memoria[MAX_EVENTOS:]
 
 
-def lleva_contenido(evento: dict) -> bool:
-    """La frontera del ADR 0003, revisada del lado que recibe.
+# El panel se refresca solo y hay tres widgets que piden lo mismo. Con el
+# almacen en memoria eso era gratis; contra Supabase es una llamada de red por
+# refresco, y el panel abierto en una pantalla de oficina lo llamaria todo el
+# dia. Dos segundos de cache no cambian nada de lo que se ve y le sacan al
+# almacen la parte aburrida del trabajo.
+VENTANA_DE_CACHE = 2.0
+_cache: tuple[float, list[dict]] | None = None
 
-    No alcanza con que el agente prometa no mandar contenido: el servicio que lo
-    recibe tiene que poder rechazarlo, porque cualquiera puede escribir a este
-    endpoint.
-    """
 
-    evidencia = (evento.get("detection") or {}).get("evidence", "")
-    destino = evento.get("destination", {}).get("domain", "")
-    return (
-        any(campo in evento for campo in CAMPOS_PROHIBIDOS)
-        or len(evidencia) > EVIDENCIA_MAX
-        or "/" in destino
-    )
+def eventos() -> list[dict]:
+    global _cache
+
+    guardados: list[dict] | None = None
+    if supabase.configurado():
+        vigente = _cache is not None and (time.time() - _cache[0]) < VENTANA_DE_CACHE
+        if vigente:
+            guardados = _cache[1]
+        else:
+            guardados = supabase.leer_eventos(MAX_EVENTOS)
+            if guardados is not None:
+                _cache = (time.time(), guardados)
+
+    # None es "Supabase no contesto", que no es lo mismo que "no hay eventos":
+    # en ese caso se cae al nivel de abajo en vez de dar el panel por vacio.
+    if guardados is None:
+        guardados = _local()
+
+    # La semana simulada es lo ultimo y solo cuando no hay NADA: sirve para
+    # ensenar el producto, y taparia un almacen recien conectado que todavia no
+    # recibio su primer evento.
+    return guardados or semana_simulada()
+
+
+def guardar(evento: dict) -> None:
+    global _cache
+
+    subido = supabase.guardar_evento(evento) if supabase.configurado() else False
+    if subido:
+        # Sin esto el evento existe en la base pero el panel no lo ve hasta que
+        # venza la ventana, y en una demo dos segundos de nada son eternos.
+        _cache = None
+    else:
+        _guardar_local(evento)
+
+
+# La frontera del ADR 0003 se revisa del lado que recibe, y ahora se revisa en un
+# solo lugar: estaba escrita dos veces, aca y en el backend, con dos nombres. Una
+# regla de seguridad copiada es una que en algun momento se corrige en un lado
+# solo. Ver backend/aegis_backend/rutas.py.
+lleva_contenido = rutas.lleva_contenido
+
+
+# EL BACKEND COLABORATIVO
+#
+# Dominios, politicas y lecciones estaban escritos y no estaban desplegados:
+# `render.yaml` levanta este archivo y nada mas, asi que en produccion /v1/policy
+# y /v1/domains no existian y el agente le pedia su politica al aire. Corren aca
+# por la misma razon por la que el front tampoco tiene servicio propio: son
+# piezas del mismo producto y separarlas cuesta una URL mas y CORS en el medio.
+#
+# El JSON local es el cache; lo que sobrevive a un redespliegue esta en Supabase.
+_BASE = Path(DATA_DIR) if DATA_DIR else RAIZ
+DOMINIOS = DomainStore(_BASE / "aegis-domains.json")
+POLITICAS = PolicyStore(_BASE / "aegis-policies.json")
+MODELO = anthropic_model()
+_LECCIONES: dict[tuple, dict] = {}
+
+
+def _tenant_de(ruta: str, prefijo: str) -> str:
+    return ruta[len(prefijo) :].split("?")[0].strip("/")
 
 
 # EL FRONT
@@ -265,13 +331,17 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:  # noqa: N802  (firma de BaseHTTPRequestHandler)
+        # Los eventos se leen dentro de cada rama y no una vez arriba: con el
+        # almacen en memoria daba igual, pero contra Supabase esa linea era una
+        # consulta por cada archivo del front -cada .js, cada fuente, cada
+        # icono- para armar una respuesta que ni los mira.
         ruta = _ruta_pedida(self.path)
-        registrados = eventos()
 
         if ruta == "/panel" or (ruta == "/" and not hay_front()):
             # El panel en HTML. Es la portada solo cuando no hay front
             # construido; con front, queda accesible a proposito en /panel para
             # poder ver las metricas crudas sin depender del build.
+            registrados = eventos()
             metricas = compute(registrados)
             reincidencias = repeat_offenders(registrados)
             cuerpo = render(metricas, reincidencias, os.environ.get("AEGIS_TENANT", "acme"))
@@ -280,6 +350,7 @@ class Handler(BaseHTTPRequestHandler):
             if ruta in ("/api/metrics", "/v1/metrics"):
                 from dataclasses import asdict
 
+                registrados = eventos()
                 calculadas = compute(registrados)
                 self._json(
                     200,
@@ -302,11 +373,29 @@ class Handler(BaseHTTPRequestHandler):
                         {
                             "ok": True,
                             "almacen": almacen(),
-                            "eventos": len(registrados),
+                            "eventos": len(eventos()),
                         },
                     )
                 else:
-                    self._servir_el_front(ruta)
+                    if ruta.startswith("/v1/domains/"):
+                        self._json(
+                            *rutas.veredicto(
+                                ruta[len("/v1/domains/") :], DOMINIOS, MODELO
+                            )
+                        )
+                    else:
+                        if ruta.startswith("/v1/policy/"):
+                            self._json(
+                                200, POLITICAS.get(_tenant_de(ruta, "/v1/policy/"))
+                            )
+                        else:
+                            if ruta == "/v1/policy":
+                                self._json(200, rutas.politica_por_defecto())
+                            else:
+                                if ruta == "/v1/stats":
+                                    self._json(200, {"domains": DOMINIOS.count()})
+                                else:
+                                    self._servir_el_front(ruta)
 
     def _servir_el_front(self, ruta: str) -> None:
         """Un archivo del build, o el index para que enrute el navegador.
@@ -338,17 +427,45 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             datos = None
 
-        if ruta not in ("/v1/events", "/api/events"):
-            self._json(404, {"error": "ruta desconocida"})
+        if not isinstance(datos, dict):
+            self._json(400, {"error": "cuerpo invalido"})
         else:
-            if not isinstance(datos, dict):
-                self._json(400, {"error": "cuerpo invalido"})
-            else:
+            if ruta in ("/v1/events", "/api/events"):
                 if lleva_contenido(datos):
                     self._json(422, {"error": "el evento contiene campos prohibidos"})
                 else:
                     guardar(datos)
                     self._json(202, {"accepted": datos.get("event_id")})
+            else:
+                if ruta == "/v1/lessons":
+                    self._json(*rutas.leccion(datos, MODELO, _LECCIONES))
+                else:
+                    self._json(404, {"error": "ruta desconocida"})
+
+    def do_PUT(self) -> None:  # noqa: N802
+        """La politica que escribe el panel. Es el unico PUT del servicio.
+
+        Sin esto, la pantalla de Politicas era un formulario que no salia de la
+        memoria del navegador: se llenaba, se guardaba, y al recargar volvia a
+        estar como antes.
+        """
+
+        ruta = _ruta_pedida(self.path)
+        largo = int(self.headers.get("Content-Length", "0") or 0)
+
+        try:
+            datos = json.loads(self.rfile.read(largo) if largo else b"{}")
+        except ValueError:
+            datos = None
+
+        if not ruta.startswith("/v1/policy/"):
+            self._json(404, {"error": "ruta desconocida"})
+        else:
+            if not isinstance(datos, dict):
+                self._json(400, {"error": "cuerpo invalido"})
+            else:
+                tenant = _tenant_de(ruta, "/v1/policy/")
+                self._json(200, POLITICAS.put(tenant, datos))
 
     def log_message(self, *args) -> None:
         """Silencio: un log de accesos guardaria que dominios mira cada cliente."""
