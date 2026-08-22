@@ -1,0 +1,14 @@
+# Nunca subir eventos reales: la cola local tiene la navegacion del usuario.
+*.jsonl
+aegis-domains.json
+aegis-domains-cache.json
+
+# Nada de esto hace falta en la funcion
+agent/tests/
+agent/bench/
+agent/demo/
+docs/
+investigacion/
+__pycache__/
+*.pyc
+.mitmproxy/

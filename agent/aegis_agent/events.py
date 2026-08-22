@@ -13,6 +13,9 @@ from .detect.types import Finding
 # esta caido el agente igual protege (ADR 0003) y la cola se drena cuando vuelva.
 DEFAULT_QUEUE = Path(os.environ.get("AEGIS_QUEUE", "aegis-events.jsonl"))
 
+# Subir al panel remoto es opcional y siempre en segundo plano.
+UPLOAD_TIMEOUT = 6
+
 _lock = threading.Lock()
 
 
@@ -68,3 +71,34 @@ def enqueue(event: dict, queue: Path = DEFAULT_QUEUE) -> None:
     with _lock:
         with open(queue, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
+    _subir(line)
+
+
+def _subir(line: str) -> None:
+    """Manda el evento al panel remoto sin esperar la respuesta.
+
+    Primero se escribe en disco y despues se intenta subir: si el envio falla, el
+    evento no se pierde y la decision de bloquear ya se tomo hace rato. La red
+    nunca esta en el camino de la proteccion.
+    """
+
+    destino = os.environ.get("AEGIS_EVENTS_URL")
+    if destino:
+        threading.Thread(target=_enviar, args=(destino, line), daemon=True).start()
+
+
+def _enviar(destino: str, line: str) -> None:
+    import urllib.error
+    import urllib.request
+
+    peticion = urllib.request.Request(
+        destino,
+        data=line.encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        urllib.request.urlopen(peticion, timeout=UPLOAD_TIMEOUT).close()
+    except (urllib.error.URLError, OSError, ValueError):
+        # El panel remoto es telemetria, no proteccion: que se caiga no cambia
+        # nada de lo que ya paso en el equipo.
+        pass

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "{agent/aegis_agent/**,backend/aegis_backend/**}"
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index?ruta=$1" }
+  ]
+}
