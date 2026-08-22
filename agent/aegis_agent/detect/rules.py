@@ -4,7 +4,13 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-from .entropy import looks_random, luhn_valid
+from .entropy import (
+    looks_random,
+    luhn_valid,
+    parece_contrasena,
+    parece_documento_de_identidad,
+    parece_secreto_asignado,
+)
 from .types import Category, Severity
 
 
@@ -29,6 +35,15 @@ class Rule:
 def _compile(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern)
 
+
+# "Clave" en espanol son dos cosas distintas. Una clave primaria, foranea o
+# publica no se oculta: es vocabulario de base de datos y de criptografia, y
+# aparecia constantemente en texto de trabajo legitimo. Lo comparten las dos
+# reglas en espanol para que no se separen con el tiempo.
+_CLAVE_NO_SECRETA = (
+    r"(?!s?\s+(?:primaria|primarias|foranea|foraneas|unica|unicas|compuesta"
+    r"|candidata|natural|subrogada|publica|publicas|simetrica|asimetrica))"
+)
 
 # Las cinco formas de escribir un parametro segun el driver que uses.
 _PLACEHOLDERS = re.compile(r"\?|:\w+|%\(\w+\)s|%s|\$\d+|@\w+")
@@ -197,7 +212,7 @@ _SECRETS: tuple[Rule, ...] = (
         ),
         description="Asignacion de credencial con valor de alta entropia",
         group=1,
-        validator=looks_random,
+        validator=parece_secreto_asignado,
     ),
     Rule(
         id="credencial_en_espanol",
@@ -212,13 +227,63 @@ _SECRETS: tuple[Rule, ...] = (
             #
             # Lo que sostiene la precision es looks_random sobre el valor: sin
             # eso, "la clave es la de siempre" entraria como incidente critico.
-            r"(?i)(?:contrasena|contrasenas|clave|claves|credencial|credenciales"
-            r"|usuario y clave|acceso)\b[^.\n]{0,40}?\s(?:es|son|:)\s+"
+            r"(?i)(?:contrasena|contrasenas|credencial|credenciales"
+            r"|usuario y clave|acceso|clave" + _CLAVE_NO_SECRETA + r"s?)"
+            r"\b[^.\n]{0,40}?\s(?:es|son|:)\s+"
             r"\\?[\"']?([^\s\"'\\]{12,})"
         ),
         description="Credencial dicha en lenguaje natural, no como asignacion",
         group=1,
         validator=looks_random,
+    ),
+    Rule(
+        id="credencial_en_espanol_sin_verbo",
+        category="secret",
+        severity="critical",
+        confidence=0.8,
+        pattern=_compile(
+            # La regla de arriba necesita un verbo entre la palabra y el valor
+            # ("la contrasena ES X"). Media conversacion real no lo tiene: "entra
+            # con la clave Temporal#2026", "el acceso es aegis / Sup3rS3cret".
+            # Medido sobre el corpus: de las tres credenciales dichas en lenguaje
+            # natural, aquella veia una y estas dos se escapaban enteras, sin que
+            # el modelo local viera ninguna (0/3). Una contrasena es lo mas grave
+            # que puede salir y no puede depender de como este redactada.
+            #
+            # Tres cosas sostienen la precision, y las tres se midieron:
+            #
+            #   - La ventana es corta (24 caracteres). Con 30, "la credencial se
+            #     rota segun la ISO27001_v3" entraba como incidente critico.
+            #   - El valor tiene que MEZCLAR clases de caracteres: minuscula, mas
+            #     digito, mas mayuscula o simbolo. Es lo que exige cualquier
+            #     politica de contrasenas y lo que ninguna palabra comun tiene.
+            #     Por eso el (?i:) va solo sobre las palabras ancla: aplicado a
+            #     todo el patron, [A-Z] casaria minusculas y la mezcla dejaria de
+            #     existir.
+            #   - "clave" se excluye cuando la sigue jerga de base de datos o de
+            #     criptografia: una clave primaria o una clave publica no son un
+            #     secreto, y aparecian constantemente.
+            r"(?i:\b(?:contrasena|contrasenas|password|passwd|credencial"
+            r"|credenciales|acceso|login|usuario"
+            r"|clave" + _CLAVE_NO_SECRETA + r"s?)\b)"
+            r"[^.\n]{0,24}?\s"
+            # La barra invertida corta el valor a proposito. El prompt viaja
+            # dentro de un JSON, donde "explicitamente" se escribe
+            # "expl\u00edcitamente": el escape le mete digitos a una palabra
+            # espanola corriente y la vuelve indistinguible de una contrasena.
+            # Cerca de la palabra "usuario" eso bloqueaba una sesion entera de
+            # Claude Code por su propio archivo de memoria. La version
+            # desescapada del cuerpo es otra vista y ahi la credencial de verdad
+            # se sigue viendo, asi que no se pierde nada.
+            r"(?=[^\s\\]{10,64}(?:[\s.,;:)\"'\\]|$))"
+            r"(?=[^\s\\]*[a-z])"
+            r"(?=[^\s\\]*[A-Z0-9])"
+            r"(?=[^\s\\]*\d)"
+            r"([^\s\"',;\\]{10,64})"
+        ),
+        description="Credencial nombrada sin verbo, por la forma del valor",
+        group=1,
+        validator=parece_contrasena,
     ),
 )
 
@@ -319,15 +384,31 @@ _PII: tuple[Rule, ...] = (
         confidence=0.9,
         # Sin la palabra que lo antecede, una cedula es indistinguible de
         # cualquier numero de seis a doce digitos.
+        #
+        # Pero la palabra casi nunca esta pegada al numero. En espanol se dice
+        # "mi numero de cedula ES 1.020.345.678" y "la cedula DEL CLIENTE es
+        # 79.482.113": con la version que exigia adyacencia, ninguna de las dos
+        # se veia. La cedula es el dato personal mas comun que existe en
+        # Colombia, asi que eso no era un caso borde.
+        #
+        # Las anclas van separadas en dos grupos porque no valen lo mismo.
+        # "cedula", "NIT" o "DNI" nombran un documento y nada mas, asi que
+        # aguantan una ventana de 24 caracteres. "documento" es una palabra
+        # comun ("el documento 2024-15 del contrato", "el documento ISO
+        # 9001-2015") y se queda pegada al numero, como estaba.
         pattern=_compile(
-            r"(?i)\b(?:c\.?c\.?|cedula|c[eé]dula|documento|nit|rut|cpf|dni)\b"
-            r"\s*[:#\-]?\s*\d[\d.\- ]{5,14}\d"
+            r"(?i)(?:"
+            r"\b(?:c\.?c\.?|c[eé]dulas?|nit|rut|cpf|dni|documento\s+de\s+identidad)\b"
+            r"[^.\n\d]{0,24}?[:#\-]?\s*\d[\d.\- ]{5,14}\d"
+            r"|\bdocumento\b\s*[:#\-]?\s*\d[\d.\- ]{5,14}\d"
             # La CURP mexicana mezcla letras y digitos, no sirve el patron de arriba.
             r"|\bcurp\b\s*[:#\-]?\s*[A-Z0-9]{16,18}"
+            r")"
         ),
         description="Documento de identidad latinoamericano",
         redact_as="type",
         kind="national_id",
+        validator=parece_documento_de_identidad,
     ),
     Rule(
         id="iban",

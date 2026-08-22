@@ -4,6 +4,7 @@ import base64
 import binascii
 import io
 import re
+import unicodedata
 import zipfile
 import zlib
 from collections import Counter
@@ -196,6 +197,13 @@ def _base64_views(text: str, depth: int = BASE64_MAX_DEPTH) -> list[str]:
     return views
 
 
+def sin_tildes(text: str) -> str:
+    """El texto sin diacriticos: contrasena por contrasena, cedula por cedula."""
+
+    descompuesto = unicodedata.normalize("NFD", text)
+    return "".join(c for c in descompuesto if not unicodedata.combining(c))
+
+
 def _derived_views(text: str) -> list[str]:
     views: list[str] = []
 
@@ -245,8 +253,28 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
         views.append(principal)
         views.extend(_derived_views(principal))
 
+    # El espanol de verdad lleva tildes y enes. Las reglas estan escritas sin
+    # ellas, asi que una regla veia "la contrasena del servidor" y NINGUNA veia
+    # "la contraseña", que es como se escribe la palabra. No era una evasion:
+    # era la forma normal de escribirla.
+    #
+    # Va aca y no dentro de _derived_views porque el prompt viaja dentro de un
+    # JSON que escapa la ene como ñ: el texto principal es ASCII y la ene
+    # solo aparece en la vista desescapada. Aplicarlo sobre TODAS las vistas es
+    # lo unico que la alcanza, y de paso una regla nueva hereda la cobertura sin
+    # que su autor tenga que acordarse.
+    views.extend(
+        plano
+        for vista in list(views)
+        if not vista.isascii() and (plano := sin_tildes(vista)) != vista
+    )
+
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
+    # La vista sin tildes es, por construccion, casi una copia de su original:
+    # sin esto cada fuga con una ene se reportaria dos veces. Se comparan por
+    # posicion porque quitar un diacritico no mueve los caracteres de lugar.
+    posiciones: set[tuple[str, int]] = set()
     counts: Counter[str] = Counter()
     budget = MAX_TOTAL_EXPANDED_CHARS
     scanned = 0
@@ -263,8 +291,10 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
                 counts[rule_id] = max(counts[rule_id], total)
             for finding in view_findings:
                 key = (finding.rule_id, finding.evidence)
-                if key not in seen:
+                posicion = (finding.rule_id, finding.start)
+                if key not in seen and posicion not in posiciones:
                     seen.add(key)
+                    posiciones.add(posicion)
                     findings.append(finding)
 
     # El archivo puede ser critico por lo que es, no por lo que dice: un

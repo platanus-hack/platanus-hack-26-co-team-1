@@ -23,7 +23,7 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 
 | Pieza | Estado | Dónde |
 |---|---|---|
-| Motor T1: 26 reglas deterministas + firmas de archivo | Funciona | `agent/aegis_agent/detect/` |
+| Motor T1: 28 reglas deterministas + firmas de archivo | Funciona | `agent/aegis_agent/detect/` |
 | Motor T2: modelo local (GLiNER) | Funciona, **apagado por defecto**. Etiquetas y umbral elegidos midiendo | `agent/aegis_agent/detect/model.py` |
 | Sensor de puntos ciegos (capa D) | Funciona | `agent/aegis_agent/sensor.py` |
 | Corte del punto ciego por firewall | Funciona, requiere administrador | `agent/aegis_agent/install/firewall.py` |

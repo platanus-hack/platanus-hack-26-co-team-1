@@ -94,14 +94,14 @@ Start-Process -FilePath mitmdump.exe -ArgumentList "--listen-port","8899",`
 
 ## 6. La batería de credenciales
 
-Dispara 34 credenciales de prueba de proveedores distintos contra el proxy que
+Dispara 27 credenciales de prueba de proveedores distintos contra el proxy que
 esté levantado y reporta qué se escapa. Todos los valores son falsos.
 
 ```bash
 cd agent && python -m demo.bateria_credenciales
 ```
 
-Debe dar **34 de 34**. Si alguna se escapa, es un hueco real.
+Debe dar **27 de 27**. Si alguna se escapa, es un hueco real.
 
 ## 7. Variables de entorno
 

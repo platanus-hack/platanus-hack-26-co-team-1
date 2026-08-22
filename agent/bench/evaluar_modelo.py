@@ -14,6 +14,7 @@ atencion; uno que bloquea cuesta el producto.
 
 from __future__ import annotations
 
+import json
 import os
 import statistics
 import sys
@@ -22,6 +23,7 @@ import time
 os.environ.setdefault("AEGIS_T2", "1")
 
 from aegis_agent.detect import model  # noqa: E402
+from aegis_agent.detect.payload import scan_payload  # noqa: E402
 from aegis_agent.policy import Policy  # noqa: E402
 from bench.corpus import GRUPOS_NORMALES, GRUPOS_SENSIBLES, NORMAL, SENSIBLE  # noqa: E402
 
@@ -105,7 +107,51 @@ def main() -> int:
             f"\nLatencia: p50 {statistics.median(tiempos):.0f} ms, p95 {p95:.0f} ms, "
             f"presupuesto {model.LATENCIA_MAXIMA_MS} ms"
         )
+
+    _cascada()
     return 0
+
+
+def _cuerpo(frase: str) -> bytes:
+    """La frase como la manda un cliente de verdad: dentro del JSON del request."""
+
+    return json.dumps({"messages": [{"role": "user", "content": frase}]}).encode()
+
+
+def _cascada() -> None:
+    """Lo unico que el producto promete: que T1 y T2 juntos no dejen salir esto.
+
+    Las tablas de arriba miden T2 solo, y solo se ve peor de lo que es: no
+    encuentra ni una credencial, y no tiene por que: un extractor de entidades
+    reconoce tipos de cosa, y una contrasena no es un tipo de cosa. Lo que
+    decide si Aegis protege es la cascada entera, en el orden real y sobre el
+    cuerpo del request, no sobre la frase suelta. Eso es lo que mide esto.
+    """
+
+    print("\nLa cascada completa (T1 y despues T2, como en el proxy):")
+    escapadas: list[str] = []
+    for nombre, frases in GRUPOS_SENSIBLES.items():
+        vistas = 0
+        for frase in frases:
+            if scan_payload(_cuerpo(frase)).findings:
+                vistas += 1
+            else:
+                escapadas.append(frase)
+        print(f"   sensible  {nombre:<22} {vistas}/{len(frases)}")
+
+    falsos: list[str] = []
+    for frase in NORMAL:
+        hallazgos = scan_payload(_cuerpo(frase)).findings
+        if any(h.category in POLITICA.block_categories for h in hallazgos):
+            falsos.append(frase)
+    print(f"   normal    {'bloqueos falsos':<22} {len(falsos)}/{len(NORMAL)}")
+    for frase in falsos:
+        print(f"     BLOQUEO FALSO: {frase}")
+
+    if escapadas:
+        print(f"\n   Se escapan {len(escapadas)} de {len(SENSIBLE)}:")
+        for frase in escapadas:
+            print(f"     - {frase}")
 
 
 if __name__ == "__main__":

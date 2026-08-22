@@ -110,6 +110,34 @@ _BY_RULE: dict[str, dict[str, str]] = {
             "la transaccion."
         ),
     },
+    "credencial_en_espanol": {
+        "title": "Una contrasena escrita en una frase sigue siendo una contrasena",
+        "why": (
+            "No hace falta que este en un archivo de configuracion para que sirva: "
+            "quien lea esa frase entra igual. Y una vez que sale del equipo ya no "
+            "se puede saber donde quedo guardada, ni por cuanto tiempo, ni quien la "
+            "va a leer despues."
+        ),
+        "what_to_do": (
+            "Contale a la IA el problema sin la clave: 'no puedo entrar al panel con "
+            "el usuario de soporte' alcanza para que te ayude. Si la clave ya salio "
+            "antes, cambiala hoy: es lo unico que la vuelve inservible."
+        ),
+    },
+    "credencial_en_espanol_sin_verbo": {
+        "title": "Una contrasena escrita en una frase sigue siendo una contrasena",
+        "why": (
+            "No hace falta que este en un archivo de configuracion para que sirva: "
+            "quien lea esa frase entra igual. Y una vez que sale del equipo ya no "
+            "se puede saber donde quedo guardada, ni por cuanto tiempo, ni quien la "
+            "va a leer despues."
+        ),
+        "what_to_do": (
+            "Contale a la IA el problema sin la clave: 'no puedo entrar al panel con "
+            "el usuario de soporte' alcanza para que te ayude. Si la clave ya salio "
+            "antes, cambiala hoy: es lo unico que la vuelve inservible."
+        ),
+    },
 }
 
 

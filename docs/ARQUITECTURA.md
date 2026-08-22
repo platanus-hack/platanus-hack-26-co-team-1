@@ -58,7 +58,7 @@ paso existe para no pagar el siguiente.
 
 5. Se escanea el payload:
    a. se decodifica (gzip, zip, UTF-16, base64, JSON escapado…)
-   b. T1: 26 reglas + firmas de archivo        ~0.2 ms
+   b. T1: 28 reglas + firmas de archivo        ~0.2 ms
    c. señal de volumen (15 datos personales = un export)
    d. T2: modelo local, SOLO si T1 no vio nada  ~110 ms
    e. se ordenan por especificidad
@@ -85,7 +85,7 @@ modelo.
 
 | Nivel | Qué es | Dónde corre | Costo | Qué atrapa |
 |---|---|---|---|---|
-| **T1** | 26 reglas + entropía + Luhn + firmas binarias | Local | ~0.2 ms | Credenciales, volcados, exports, documentos de identidad, archivos críticos |
+| **T1** | 28 reglas + entropía + Luhn + firmas binarias | Local | ~0.2 ms | Credenciales, volcados, exports, documentos de identidad, archivos críticos |
 | **Volumen** | Agregación sobre los hallazgos de T1 | Local | 0 | Un export de clientes que línea a línea parece inocente |
 | **T2** | Modelo de entidades (~50M parámetros) | Local | ~110 ms | Lo que no tiene formato: nombres de clientes, cifras de contratos, datos de salud |
 

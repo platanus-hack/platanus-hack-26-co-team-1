@@ -34,10 +34,21 @@ EMPRESA = [
 ]
 
 # Credenciales dichas en lenguaje natural, sin el formato que busca una regla.
+#
+# El modelo local encuentra CERO de estas, y no es un defecto suyo: un extractor
+# de entidades reconoce tipos de cosa (una persona, una empresa), y una
+# contrasena no es un tipo de cosa, es una cadena cualquiera que resulta ser
+# secreta por el contexto. Las ve T1 con dos reglas deterministas. Se miden aca
+# igual, porque son lo mas grave que puede salir y hay que saber si salen.
 CREDENCIALES = [
     "La contrasena del servidor de produccion es Verano2026Bogota",
     "Entra con el usuario admin y la clave Temporal#2026 al panel",
     "El acceso al FTP es aegis / Sup3rS3cret, no lo cambies todavia",
+    "Te paso el acceso: usuario soporte, clave Bogota#2026Aegis",
+    "La clave de la wifi de la oficina es Platanus2026Hack",
+    "Guarda esta credencial del correo corporativo: Mktg2026Flash",
+    "Usuario juan.perez, password Aegis2026Demo, entorno de produccion",
+    "El login del panel de pagos quedo con la clave Cartera#2026Co",
 ]
 
 # Datos personales y de salud. Alcanza con avisar: cortar por esto le frena el
@@ -112,7 +123,44 @@ PALABRA_TRAMPA = [
     "Cual es la diferencia entre autenticacion y autorizacion?",
 ]
 
-NORMAL = RUTINA + PERSONAS_SIN_FUGA + EMPRESAS_SIN_FUGA + DINERO_SIN_FUGA + PALABRA_TRAMPA
+# Los negativos de la regla de credenciales, que es la mas peligrosa de todas
+# porque su categoria es `secret` y por lo tanto BLOQUEA. Cada frase de aca
+# nombra una credencial y no la contiene: son las que hacen que un desarrollador
+# no pueda trabajar. Tres de ellas rompieron versiones anteriores de la regla y
+# por eso estan escritas tal cual:
+#
+#   "ISO27001_v3"      entraba con la ventana de 30 caracteres, ahora son 24
+#   "usuarios_2024_id" entraba hasta que "clave primaria" quedo excluida
+#   "Free2024"         entraba con el largo minimo en 8, ahora son 10
+TRAMPAS_DE_CREDENCIAL = [
+    "const password = hashPassword(input.value)",
+    "Explicame OAuth2.0 y como funciona el acceso con tokens",
+    "La clave primaria de la tabla es usuarios_2024_id",
+    "El usuario reporto un error 500 en el endpoint /api/v2/checkout",
+    "Como valido una contrasena con al menos 8 caracteres y un numero?",
+    "Documenta el acceso a la API REST usando Bearer <TOKEN_AQUI>",
+    "El login falla en Chrome 120.0.6099 pero funciona en Firefox",
+    "Instala el paquete con pip install django-allauth==0.57.0 para el login",
+    "La credencial se rota cada 90 dias segun la ISO27001_v3 del area",
+    "Usuario: Juan Perez. Cargo: analista. Ingreso: 2024-03-15",
+    "Escribi un test para la funcion de login con pytest-mock 3.12",
+    "El acceso al repositorio es via GitHub Actions, no con clave personal",
+    "Como configuro el acceso SSH con llave publica en Ubuntu 24.04?",
+    "Revisa el modulo auth/Login2FA.tsx que valida la contrasena",
+    "El acceso de invitados usa el plan Free2024 sin costo",
+    "El usuario admin del entorno de pruebas no tiene datos reales",
+    "Configura el login social con Auth0 siguiendo la guia oficial",
+    "La clave publica del servidor cambia con cada despliegue automatico",
+]
+
+NORMAL = (
+    RUTINA
+    + PERSONAS_SIN_FUGA
+    + EMPRESAS_SIN_FUGA
+    + DINERO_SIN_FUGA
+    + PALABRA_TRAMPA
+    + TRAMPAS_DE_CREDENCIAL
+)
 
 # Los grupos, para poder mirar donde falla y no solo cuanto falla.
 GRUPOS_SENSIBLES = {
@@ -127,4 +175,5 @@ GRUPOS_NORMALES = {
     "empresas sin fuga": EMPRESAS_SIN_FUGA,
     "dinero sin fuga": DINERO_SIN_FUGA,
     "palabra trampa": PALABRA_TRAMPA,
+    "trampas de credencial": TRAMPAS_DE_CREDENCIAL,
 }
