@@ -22,7 +22,11 @@ from __future__ import annotations
 import base64
 import gzip
 import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from aegis_agent.detect import diccionario
 from aegis_agent.detect.payload import scan_payload
@@ -143,6 +147,19 @@ class TestEscondidoNoSirve(unittest.TestCase):
 
 
 class TestLaDecisionYLaLeccion(unittest.TestCase):
+    def setUp(self):
+        # Sin esto, lesson_for lee el cache de lecciones generadas que haya en el
+        # directorio de trabajo, y el test afirma sobre el texto que escribio un
+        # modelo en otra corrida en vez de sobre el que el codigo garantiza.
+        self.workdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.workdir.cleanup)
+        parche = patch.dict(
+            os.environ,
+            {"AEGIS_LESSONS_CACHE": str(Path(self.workdir.name) / "lecciones.json")},
+        )
+        parche.start()
+        self.addCleanup(parche.stop)
+
     def test_por_defecto_corta(self):
         # Un termino declarado es una decision explicita de la empresa, no una
         # probabilidad: merece la misma autoridad que una regla de formato.

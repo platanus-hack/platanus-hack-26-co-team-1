@@ -195,9 +195,20 @@ _BY_RULE: dict[str, dict[str, str]] = {
 }
 
 
-RUTA_CACHE = Path(
-    os.environ.get("AEGIS_LESSONS_CACHE", "aegis-lessons-cache.json")
-)
+RUTA_POR_DEFECTO = Path("aegis-lessons-cache.json")
+
+
+def _ruta() -> Path:
+    """Donde vive el cache, releyendo el entorno en cada llamada.
+
+    Y no una sola vez al importar, que es como estaba: asi un test (o un proxy
+    de demo) puede apuntar a otro archivo sin recargar el modulo. Cuando se
+    resolvia al importar, un test unitario leia el cache de verdad del
+    directorio de trabajo y afirmaba sobre el texto que habia escrito un modelo
+    en otra corrida. Mismo criterio que policy_store y domains.
+    """
+
+    return Path(os.environ.get("AEGIS_LESSONS_CACHE", str(RUTA_POR_DEFECTO)))
 
 TIMEOUT = 20
 
@@ -209,7 +220,7 @@ def _cache() -> dict[str, dict[str, str]]:
     """Lo que ya escribio el modelo, de disco. Un cache ilegible no es un error."""
 
     try:
-        datos = json.loads(RUTA_CACHE.read_text(encoding="utf-8"))
+        datos = json.loads(_ruta().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         datos = {}
     return datos if isinstance(datos, dict) else {}
@@ -223,7 +234,7 @@ def _guardar(rule_id: str, leccion: dict) -> None:
         "what_to_do": leccion.get("what_to_do", ""),
     }
     try:
-        RUTA_CACHE.write_text(
+        _ruta().write_text(
             json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     except OSError:
