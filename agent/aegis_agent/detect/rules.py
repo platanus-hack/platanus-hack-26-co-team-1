@@ -30,7 +30,23 @@ def _compile(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern)
 
 
-RULES: tuple[Rule, ...] = (
+# Las cinco formas de escribir un parametro segun el driver que uses.
+_PLACEHOLDERS = re.compile(r"\?|:\w+|%\(\w+\)s|%s|\$\d+|@\w+")
+
+
+def has_literal_values(values: str) -> bool:
+    """Distingue un INSERT con datos de una consulta preparada.
+
+    Un desarrollador pega plantillas con VALUES (?, ?) todo el dia; bloquearlas
+    convierte a Aegis en un obstaculo y nadie lo deja instalado una semana.
+    """
+
+    remainder = _PLACEHOLDERS.sub("", values).strip(" ,\t\n\r")
+    return bool(remainder)
+
+
+# Familia 1: credenciales. Formato conocido, confianza alta, bloqueo directo.
+_SECRETS: tuple[Rule, ...] = (
     Rule(
         id="aws_access_key_id",
         category="secret",
@@ -130,6 +146,87 @@ RULES: tuple[Rule, ...] = (
         group=1,
         validator=looks_random,
     ),
+)
+
+# Familia 2: datos de la empresa. Un .env es lo mas facil de detectar y lo menos
+# frecuente; lo que la gente pega de verdad son consultas, tablas y exports.
+_INTERNAL_DATA: tuple[Rule, ...] = (
+    Rule(
+        id="sql_dump_header",
+        category="internal_data",
+        severity="critical",
+        confidence=0.98,
+        pattern=_compile(
+            r"(?i)(?:--\s*(?:MySQL|PostgreSQL|MariaDB)\s+(?:\w+\s+)?dump|pg_dump"
+            r"|mysqldump|--\s*Dumping data for table)"
+        ),
+        description="Volcado de base de datos",
+        redact_as="type",
+        kind="db_dump",
+    ),
+    Rule(
+        id="sql_insert_rows",
+        category="internal_data",
+        severity="high",
+        confidence=0.9,
+        pattern=_compile(
+            r"(?i)\bINSERT\s+INTO\s+[`\"\[]?\w+[`\"\]]?\s*\([^)]*\)\s*VALUES\s*"
+            r"\(([^)]{0,300})\)"
+        ),
+        description="Filas de una tabla con datos reales",
+        group=1,
+        validator=lambda values: has_literal_values(values),
+        redact_as="type",
+        kind="db_rows",
+    ),
+    Rule(
+        id="sql_schema_sensitive",
+        category="internal_data",
+        severity="high",
+        confidence=0.88,
+        pattern=_compile(
+            r"(?i)CREATE\s+TABLE[\s\S]{0,400}?\b"
+            r"(?:password|passwd|contrasena|salario|salary|cedula|documento|tarjeta"
+            r"|card_number|ssn|nit)\b"
+        ),
+        description="Esquema de tabla con columnas sensibles",
+        redact_as="type",
+        kind="db_schema",
+    ),
+    Rule(
+        id="csv_pii_export",
+        category="internal_data",
+        severity="critical",
+        confidence=0.9,
+        # Una cabecera con correo y otro dato personal en la misma linea es un
+        # export de base de datos, no una mencion suelta.
+        pattern=_compile(
+            r"(?im)^[^\n]{0,200}?\b(?:email|correo|e-mail)\b[^\n]{0,200}?[;,\t]"
+            r"[^\n]{0,200}?\b(?:telefono|tel[eé]fono|phone|celular|documento"
+            r"|c[eé]dula|nit|direcci[oó]n|salario|nombre)\b"
+        ),
+        description="Cabecera de export con datos personales",
+        redact_as="type",
+        kind="csv_export",
+    ),
+    Rule(
+        id="confidentiality_marker",
+        category="internal_data",
+        severity="medium",
+        confidence=0.7,
+        pattern=_compile(
+            r"(?i)\b(?:confidencial|uso interno|no distribuir|bajo nda"
+            r"|internal use only|company confidential)\b"
+        ),
+        description="Documento marcado como interno o confidencial",
+        redact_as="type",
+        kind="internal_doc",
+    ),
+)
+
+# Familia 3: datos personales. Se advierte por defecto y se bloquea en volumen,
+# porque un correo suelto es una mencion y trescientos son una base de clientes.
+_PII: tuple[Rule, ...] = (
     Rule(
         id="credit_card",
         category="pii",
@@ -142,6 +239,33 @@ RULES: tuple[Rule, ...] = (
         kind="credit_card",
     ),
     Rule(
+        id="latam_national_id",
+        category="pii",
+        severity="high",
+        confidence=0.9,
+        # Sin la palabra que lo antecede, una cedula es indistinguible de
+        # cualquier numero de seis a doce digitos.
+        pattern=_compile(
+            r"(?i)\b(?:c\.?c\.?|cedula|c[eé]dula|documento|nit|rut|cpf|dni)\b"
+            r"\s*[:#\-]?\s*\d[\d.\- ]{5,14}\d"
+            # La CURP mexicana mezcla letras y digitos, no sirve el patron de arriba.
+            r"|\bcurp\b\s*[:#\-]?\s*[A-Z0-9]{16,18}"
+        ),
+        description="Documento de identidad latinoamericano",
+        redact_as="type",
+        kind="national_id",
+    ),
+    Rule(
+        id="iban",
+        category="pii",
+        severity="high",
+        confidence=0.9,
+        pattern=_compile(r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){3,7}\b"),
+        description="Cuenta bancaria en formato IBAN",
+        redact_as="type",
+        kind="iban",
+    ),
+    Rule(
         id="email_address",
         category="pii",
         severity="medium",
@@ -152,5 +276,7 @@ RULES: tuple[Rule, ...] = (
         kind="email",
     ),
 )
+
+RULES: tuple[Rule, ...] = _SECRETS + _INTERNAL_DATA + _PII
 
 RULES_BY_ID = {rule.id: rule for rule in RULES}

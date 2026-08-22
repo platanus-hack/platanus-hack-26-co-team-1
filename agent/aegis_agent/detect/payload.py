@@ -6,6 +6,7 @@ import gzip
 import io
 import re
 import zipfile
+from collections import Counter
 from dataclasses import dataclass
 from urllib.parse import unquote_plus
 
@@ -44,11 +45,35 @@ _WHITESPACE = re.compile(r"[\s​ ]+")
 BASE64_MAX_DEPTH = 2
 
 
+# Un correo suelto en un prompt es una mencion. Quince en el mismo envio son una
+# base de clientes, y ninguna regla individual puede notar la diferencia: la
+# senal esta en el volumen, no en el dato.
+BULK_PII_THRESHOLD = 15
+_BULK_PII_RULES = ("email_address", "credit_card", "latam_national_id", "iban")
+
+
 @dataclass(frozen=True)
 class ScanResult:
     findings: list[Finding]
     truncated: bool
     views: int
+
+
+def _bulk_pii(counts: Counter[str]) -> Finding | None:
+    total = sum(counts[rule_id] for rule_id in _BULK_PII_RULES)
+    if total >= BULK_PII_THRESHOLD:
+        finding = Finding(
+            rule_id="bulk_pii_export",
+            category="internal_data",
+            severity="critical",
+            confidence=0.95,
+            evidence=f"<pii x{total}>"[:32],
+            start=0,
+            end=0,
+        )
+    else:
+        finding = None
+    return finding
 
 
 def _decode(payload: bytes) -> str:
@@ -164,6 +189,7 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
 
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
+    counts: Counter[str] = Counter()
     budget = MAX_TOTAL_EXPANDED_CHARS
     scanned = 0
     for view in views:
@@ -172,10 +198,19 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
             scanned += 1
             # El tope de la vista incluye la cola: recortar aca de nuevo dejaria
             # afuera justo el pedazo que se conservo para no perder el final.
-            for finding in scan(view[: MAX_INSPECT_BYTES + TAIL_BYTES]):
+            view_findings = scan(view[: MAX_INSPECT_BYTES + TAIL_BYTES])
+            for rule_id, total in Counter(f.rule_id for f in view_findings).items():
+                # Se toma el maximo por vista y no la suma: el mismo export visto
+                # en texto plano y en base64 no son dos fugas distintas.
+                counts[rule_id] = max(counts[rule_id], total)
+            for finding in view_findings:
                 key = (finding.rule_id, finding.evidence)
                 if key not in seen:
                     seen.add(key)
                     findings.append(finding)
+
+    bulk = _bulk_pii(counts)
+    if bulk is not None:
+        findings.insert(0, bulk)
 
     return ScanResult(findings=findings, truncated=truncated, views=scanned)
