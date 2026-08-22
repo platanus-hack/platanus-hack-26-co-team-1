@@ -222,9 +222,21 @@ def install(port: int, mitmdump: str) -> list[str]:
         if trust_ca():
             hechos.append("CA confiada en el almacen del usuario")
         else:
-            hechos.append("No se pudo confiar la CA (revisa el dialogo de Windows)")
-    write_proxy_settings(True, f"127.0.0.1:{port}", proxy_bypass_list())
-    hechos.append(f"Proxy del navegador apuntando a 127.0.0.1:{port}")
+            # Windows exige confirmacion humana para instalar una CA raiz y no
+            # hay forma de saltarla, ni deberia haberla. Se le da al usuario el
+            # comando exacto en vez de dejarlo adivinando.
+            hechos.append(
+                "La CA necesita tu confirmacion. Corre esto y acepta el dialogo:\n"
+                f'      certutil -addstore -user Root "{CA_CERT}"'
+            )
+    # El proxy del navegador solo se activa si la CA quedo confiada. Sin eso,
+    # cada sitio HTTPS mostraria un aviso de certificado y el usuario quedaria
+    # peor que antes de instalar nada.
+    if ca_is_trusted():
+        write_proxy_settings(True, f"127.0.0.1:{port}", proxy_bypass_list())
+        hechos.append(f"Proxy del navegador apuntando a 127.0.0.1:{port}")
+    else:
+        hechos.append("Proxy del navegador sin activar hasta que la CA este confiada")
     set_env_vars(port)
     hechos.append("Variables de entorno configuradas para los CLIs")
     return hechos
