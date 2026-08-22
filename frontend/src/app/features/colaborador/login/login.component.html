@@ -1,0 +1,66 @@
+<div class="min-h-screen bg-aegis-bg lg:flex">
+  <div
+    class="relative flex flex-col justify-between gap-10 overflow-hidden px-8 py-10 lg:w-[380px] lg:shrink-0 lg:px-10 lg:py-12"
+    style="background: linear-gradient(165deg, #0e5fa8 0%, #0a4879 100%)"
+  >
+    <app-gradient-waves></app-gradient-waves>
+
+    <div class="relative z-10">
+      <app-logo [light]="true"></app-logo>
+    </div>
+
+    <div class="relative z-10">
+      <span class="aegis-label text-white/60">Bienvenido de vuelta</span>
+      <h1 class="mt-3 text-3xl font-semibold leading-[1.1] tracking-[-0.02em] text-white">Sigue usando tu IA, tranquilo</h1>
+      <p class="mt-3 text-sm leading-relaxed text-white/70">Aegis corre en segundo plano y avisa antes de que compartas algo que no deba salir.</p>
+    </div>
+
+    <div class="relative z-10"></div>
+  </div>
+
+  <div class="flex flex-1 items-center justify-center px-6 py-16 sm:px-10">
+    <div class="w-full max-w-sm">
+      @if (!modoRecuperar) {
+        <div class="mb-8 border-b border-aegis-border pb-4">
+          <h2 class="text-xl font-semibold text-aegis-text">Inicia sesión</h2>
+          <p class="mt-1.5 text-sm text-aegis-dim">Usa las credenciales de primer acceso entregadas por tu administrador.</p>
+        </div>
+
+        <div class="flex flex-col gap-4">
+          <div>
+            <label class="aegis-label">Usuario</label>
+            <input class="aegis-input mt-1.5" type="text" placeholder="usuario.acceso" [(ngModel)]="usuario" />
+          </div>
+          <div>
+            <label class="aegis-label">Contraseña</label>
+            <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="password" />
+          </div>
+          <button type="button" class="aegis-btn-primary mt-2" (click)="ingresar()">Ingresar ↗</button>
+          <button type="button" class="font-display text-xs uppercase tracking-wide text-aegis-faint hover:text-aegis-dim" (click)="modoRecuperar = true">Olvidé mi contraseña</button>
+        </div>
+      } @else {
+        @if (!enviado) {
+          <div class="mb-8 border-b border-aegis-border pb-4">
+            <h2 class="text-xl font-semibold text-aegis-text">Recuperar acceso</h2>
+            <p class="mt-1.5 text-sm text-aegis-dim">Te enviaremos un link de reseteo a tu correo. No necesitas contactar a tu administrador.</p>
+          </div>
+          <div class="flex flex-col gap-4">
+            <div>
+              <label class="aegis-label">Email corporativo</label>
+              <input class="aegis-input mt-1.5" type="email" placeholder="tu@empresa.com" [(ngModel)]="emailRecuperacion" />
+            </div>
+            <button type="button" class="aegis-btn-primary mt-2" (click)="enviarRecuperacion()">Enviar link de reseteo ↗</button>
+            <button type="button" class="font-display text-xs uppercase tracking-wide text-aegis-faint hover:text-aegis-dim" (click)="modoRecuperar = false">← Volver a inicio de sesión</button>
+          </div>
+        } @else {
+          <div class="flex flex-col items-center py-4 text-center">
+            <svg viewBox="0 0 20 20" fill="none" class="mb-3 h-8 w-8 text-aegis-accent"><path d="M3 6l7 5 7-5M3 6v8a1 1 0 001 1h12a1 1 0 001-1V6a1 1 0 00-1-1H4a1 1 0 00-1 1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+            <h2 class="mb-1 text-xl font-semibold text-aegis-text">Revisa tu correo</h2>
+            <p class="mb-6 text-sm text-aegis-dim">Enviamos un link de reseteo a {{ emailRecuperacion || 'tu correo' }}.</p>
+            <button type="button" class="aegis-btn-secondary" (click)="modoRecuperar = false; enviado = false">Volver a inicio de sesión</button>
+          </div>
+        }
+      }
+    </div>
+  </div>
+</div>

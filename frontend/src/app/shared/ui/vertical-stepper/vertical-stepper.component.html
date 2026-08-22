@@ -1,0 +1,32 @@
+<ol class="flex flex-col">
+  @for (step of steps; track step; let i = $index; let last = $last) {
+    <li class="flex gap-3.5" [class.pb-5]="!last">
+      <div class="flex flex-col items-center">
+        <span
+          class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition-colors"
+          [class.border-white]="state(i) !== 'pending'"
+          [class.bg-white]="state(i) === 'done'"
+          [class.text-aegis-accentdeep]="state(i) === 'done'"
+          [class.text-white]="state(i) === 'active'"
+          [class.border-white/30]="state(i) === 'pending'"
+          [class.text-white/40]="state(i) === 'pending'"
+        >
+          @if (state(i) === 'done') {
+            <svg viewBox="0 0 20 20" class="h-3 w-3" fill="none"><path d="M5 10.5l3 3 7-7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          } @else {
+            {{ i + 1 }}
+          }
+        </span>
+        @if (!last) {
+          <span class="mt-1 w-px flex-1" [class.bg-white/50]="state(i) === 'done'" [class.bg-white/20]="state(i) !== 'done'"></span>
+        }
+      </div>
+      <span
+        class="pt-0.5 text-sm"
+        [class.text-white]="state(i) !== 'pending'"
+        [class.text-white/40]="state(i) === 'pending'"
+        [class.font-medium]="state(i) === 'active'"
+      >{{ step }}</span>
+    </li>
+  }
+</ol>

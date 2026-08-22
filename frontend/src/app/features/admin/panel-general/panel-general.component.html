@@ -1,0 +1,108 @@
+<header class="flex flex-wrap items-center justify-between gap-4 border-b border-aegis-border bg-aegis-surface px-8 py-6">
+  <div>
+    <p class="aegis-label">Vista agregada</p>
+    <h1 class="mt-1 font-display text-xl font-semibold text-aegis-text">Panel general</h1>
+  </div>
+  <select class="aegis-select w-48" [(ngModel)]="rango">
+    @for (r of rangos; track r) {
+      <option [value]="r">{{ r }}</option>
+    }
+  </select>
+</header>
+
+<main class="flex-1 px-8 py-6">
+  <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+    <app-stat-tile label="Intentos de filtración" value="41" trend="↑ 12% vs. semana pasada" [trendUp]="true"></app-stat-tile>
+    <app-stat-tile label="Colaboradores activos" value="27 / 31" trend="87% adopción"></app-stat-tile>
+    <app-stat-tile label="Pendientes de instalar" value="{{ pendientes }}"></app-stat-tile>
+    <app-stat-tile label="Herramienta más usada" value="Claude" trend="48% del uso total"></app-stat-tile>
+  </div>
+
+  <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
+    <div class="aegis-card p-6">
+      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Áreas más vulnerables</h2>
+      <div class="flex flex-col gap-3.5">
+        @for (a of areasVulnerables; track a.nombre) {
+          <div>
+            <div class="mb-1.5 flex items-center justify-between text-sm">
+              <span class="text-aegis-text">{{ a.nombre }}</span>
+              <span class="font-display text-xs text-aegis-faint">{{ a.valor }}</span>
+            </div>
+            <div class="h-1.5 w-full rounded-full bg-aegis-surface3">
+              <div class="h-1.5 rounded-full bg-aegis-red" [style.width.%]="(a.valor / max(areasVulnerables)) * 100"></div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="aegis-card p-6">
+      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Áreas que más usan IA</h2>
+      <div class="flex flex-col gap-3.5">
+        @for (a of areasUsoIa; track a.nombre) {
+          <div>
+            <div class="mb-1.5 flex items-center justify-between text-sm">
+              <span class="text-aegis-text">{{ a.nombre }}</span>
+              <span class="font-display text-xs text-aegis-faint">{{ a.valor }}</span>
+            </div>
+            <div class="h-1.5 w-full rounded-full bg-aegis-surface3">
+              <div class="h-1.5 rounded-full bg-aegis-accent" [style.width.%]="(a.valor / max(areasUsoIa)) * 100"></div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="aegis-card p-6">
+      <h2 class="mb-4 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Herramienta de IA más usada</h2>
+      <div class="flex flex-col gap-3.5">
+        @for (h of herramientas; track h.nombre) {
+          <div>
+            <div class="mb-1.5 flex items-center justify-between text-sm">
+              <span class="text-aegis-text">{{ h.nombre }}</span>
+              <span class="font-display text-xs text-aegis-faint">{{ h.valor }}%</span>
+            </div>
+            <div class="h-1.5 w-full rounded-full bg-aegis-surface3">
+              <div class="h-1.5 rounded-full bg-aegis-amber" [style.width.%]="(h.valor / max(herramientas)) * 100"></div>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-6 aegis-card overflow-hidden">
+    <div class="flex items-center justify-between border-b border-aegis-border px-6 py-4">
+      <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Colaboradores</h2>
+      <span class="font-display text-xs text-aegis-faint">{{ colaboradores.length }} en total</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm">
+        <thead>
+          <tr class="aegis-label border-b border-aegis-border">
+            <th class="px-6 py-3 font-medium">Nombre</th>
+            <th class="px-6 py-3 font-medium">Área</th>
+            <th class="px-6 py-3 font-medium">Estado</th>
+            <th class="px-6 py-3 font-medium">Intentos (7d)</th>
+            <th class="px-6 py-3 font-medium"></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (c of colaboradores; track c.id) {
+            <tr class="border-b border-aegis-border/60 last:border-0">
+              <td class="px-6 py-3.5 text-aegis-text">{{ c.nombre }}</td>
+              <td class="px-6 py-3.5 text-aegis-dim">{{ c.area }}</td>
+              <td class="px-6 py-3.5">
+                <app-badge [tone]="c.estado === 'activo' ? 'green' : 'amber'">{{ c.estado }}</app-badge>
+              </td>
+              <td class="px-6 py-3.5 font-display text-aegis-dim">{{ c.intentos }}</td>
+              <td class="px-6 py-3.5 text-right">
+                <a [routerLink]="['/admin/panel', c.id]" class="aegis-btn-ghost inline-flex px-2 py-1">Ver detalle →</a>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>

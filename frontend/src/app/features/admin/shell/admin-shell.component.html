@@ -1,0 +1,46 @@
+<div class="flex min-h-screen bg-aegis-bg">
+  <aside class="flex w-64 shrink-0 flex-col border-r border-aegis-border bg-aegis-surface px-4 py-6">
+    <div class="mb-8 px-2">
+      <app-logo></app-logo>
+      <p class="mt-1 pl-[30px] font-display text-[10px] uppercase tracking-[0.14em] text-aegis-faint">Consola admin</p>
+    </div>
+
+    <nav class="flex flex-1 flex-col gap-1">
+      @for (item of nav; track item.path) {
+        <a
+          [routerLink]="item.path"
+          routerLinkActive="bg-aegis-surface3 text-aegis-text border-aegis-borderlight"
+          [routerLinkActiveOptions]="{ exact: false }"
+          class="flex items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-sm text-aegis-dim transition-colors hover:text-aegis-text"
+        >
+          <span class="flex h-5 w-5 items-center justify-center text-aegis-faint">
+            @switch (item.icon) {
+              @case ('building') {
+                <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><rect x="4" y="2" width="12" height="16" rx="1" stroke="currentColor" stroke-width="1.4"/><path d="M7 6h1M12 6h1M7 9h1M12 9h1M7 12h1M12 12h1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              }
+              @case ('users') {
+                <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><circle cx="7" cy="7" r="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 16c.5-3 2.2-4.5 4.5-4.5s4 1.5 4.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="14" cy="7.5" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M12.5 11.5c1.8.2 3 1.5 3.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              }
+              @case ('shield') {
+                <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><path d="M10 2l6 2.2v4.6c0 4-2.6 6.6-6 8-3.4-1.4-6-4-6-8V4.2L10 2z" stroke="currentColor" stroke-width="1.4"/></svg>
+              }
+              @case ('chart') {
+                <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><path d="M3 17V9M9 17V3M15 17v-6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              }
+            }
+          </span>
+          {{ item.label }}
+        </a>
+      }
+    </nav>
+
+    <div class="mt-auto rounded-lg border border-aegis-border bg-aegis-surface2 px-3 py-3">
+      <p class="font-display text-[10px] uppercase tracking-wide text-aegis-faint">Empresa</p>
+      <p class="mt-1 truncate text-sm text-aegis-text">Vertice Consulting</p>
+    </div>
+  </aside>
+
+  <div class="flex min-h-screen flex-1 flex-col">
+    <router-outlet></router-outlet>
+  </div>
+</div>
