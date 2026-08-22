@@ -25,6 +25,12 @@ REQUEST_TIMEOUT = 5
 # proposito: si en cuatro segundos no hubo veredicto, lo tendra la proxima visita.
 RETRY_BACKOFF = (0.3, 0.7, 1.5, 0)
 
+# Cada cuanto se sincroniza el delta con el backend. Nunca esta en el camino
+# de ninguna decision (la comparacion es local, ver suffixes.py), asi que
+# puede ser tan espaciado como haga falta.
+INTERVALO_SYNC = 300
+DESDE_EL_ORIGEN = "1970-01-01T00:00:00Z"
+
 
 class DomainClient:
     def __init__(
@@ -41,6 +47,7 @@ class DomainClient:
         self._lock = threading.Lock()
         self._cache: dict[str, dict] = {}
         self._in_flight: set[str] = set()
+        self._ultima_sincronizacion = DESDE_EL_ORIGEN
         self._load()
 
     # -- cache --------------------------------------------------------------
@@ -134,6 +141,51 @@ class DomainClient:
                 "source": datos.get("source", ""),
             }
             self._save()
+
+    # -- sincronizacion -------------------------------------------------------
+
+    def sincronizar(self) -> None:
+        """Baja el delta del backend desde la ultima sincronizacion y lo mezcla.
+
+        Es lo que mantiene la lista negra al dia sin que la comparacion del
+        camino critico tenga que tocar la red nunca (esa sigue siendo
+        instantanea y 100% local, ver suffixes.py). Sin red, no lanza: el
+        cache en disco queda tal cual estaba, que es lo unico que garantiza
+        el ADR 0003.
+        """
+
+        if self.enabled:
+            try:
+                peticion = urllib.request.Request(
+                    f"{self.backend}/v1/domains/sync?desde={self._ultima_sincronizacion}"
+                )
+                with urllib.request.urlopen(peticion, timeout=REQUEST_TIMEOUT) as respuesta:
+                    datos = json.loads(respuesta.read())
+            except (urllib.error.URLError, OSError, ValueError):
+                datos = None
+            if datos is not None:
+                with self._lock:
+                    for veredicto in datos.get("dominios", []):
+                        dominio = self._normalize(veredicto.get("domain", ""))
+                        if dominio:
+                            self._cache[dominio] = {
+                                "classification": veredicto.get("classification", ""),
+                                "kind": veredicto.get("kind", ""),
+                                "confidence": veredicto.get("confidence", 0),
+                                "evidence": veredicto.get("evidence", ""),
+                                "source": veredicto.get("source", ""),
+                            }
+                    self._save()
+                self._ultima_sincronizacion = datos.get(
+                    "hasta", self._ultima_sincronizacion
+                )
+
+    def sincronizar_en_segundo_plano(self) -> None:
+        """Bucle de fondo: sincroniza al arrancar y despues cada INTERVALO_SYNC."""
+
+        while True:
+            self.sincronizar()
+            time.sleep(INTERVALO_SYNC)
 
     # -- utilidades ---------------------------------------------------------
 

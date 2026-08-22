@@ -127,6 +127,12 @@ class Aegis:
                 os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686"),
                 self.policy.tenant_id,
             )
+            # La lista negra se sincroniza sola al arrancar y despues cada
+            # tanto: nunca en el camino de una decision, que sigue siendo
+            # 100% local (suffixes.py).
+            threading.Thread(
+                target=self.domains.sincronizar_en_segundo_plano, daemon=True
+            ).start()
 
         # Capa D: lo que Aegis no puede ver. Una aplicacion con su propio stack
         # de red no consulta el proxy y su trafico no pasa por aca nunca. El

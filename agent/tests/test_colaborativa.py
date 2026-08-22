@@ -78,6 +78,18 @@ class TestStore(unittest.TestCase):
         store.put(self._verdict())
         self.assertIsNotNone(store.get("IA-MAGICA.CO."))
 
+    def test_desde_devuelve_solo_lo_clasificado_despues_de_la_marca(self):
+        import time as _t
+
+        store = DomainStore(self.path)
+        store.put(self._verdict("viejo.co"))
+        marca = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_t.time() + 1))
+        _t.sleep(1.1)
+        store.put(self._verdict("nuevo.co"))
+
+        dominios = {v.domain for v in store.desde(marca)}
+        self.assertEqual(dominios, {"nuevo.co"})
+
 
 class TestTTL(unittest.TestCase):
     """Cuanto dura un veredicto antes de que convenga volver a mirarlo.
@@ -391,6 +403,119 @@ class TestReclasificacionPorTTL(BackendVivo):
             self.store.get("revisado-a-mano.co").classified_at,
             revisado.classified_at,
         )
+
+
+class TestSincronizacion(BackendVivo):
+    """GET /v1/domains/sync: el delta que el agente baja para su cache local.
+
+    Existe para que la lista negra sea instantanea en el camino critico (ver
+    suffixes.py): el agente no consulta la base en cada request, la
+    sincroniza de vez en cuando y compara en memoria.
+    """
+
+    def test_devuelve_solo_lo_actualizado_desde_la_marca(self):
+        self.store.put(
+            Verdict(
+                domain="viejo-sync.co",
+                classification="non_ai",
+                kind="non_ai",
+                confidence=0.2,
+                evidence="x",
+                source="heuristic",
+                classified_at=time.time() - (10 * 24 * 3600),
+            )
+        )
+        marca = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))
+
+        estado, datos = self._get(f"/v1/domains/sync?desde={marca}")
+
+        self.assertEqual(estado, 200)
+        dominios = {v["domain"] for v in datos["dominios"]}
+        self.assertNotIn("viejo-sync.co", dominios)
+        self.assertIn("hasta", datos)
+
+    def test_un_dominio_reciente_si_aparece(self):
+        self.store.put(
+            Verdict(
+                domain="fresco-sync.co",
+                classification="ai_unapproved",
+                kind="llm_chat",
+                confidence=0.9,
+                evidence="x",
+                source="llm_classifier",
+                classified_at=time.time(),
+            )
+        )
+        marca = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))
+
+        estado, datos = self._get(f"/v1/domains/sync?desde={marca}")
+
+        dominios = {v["domain"] for v in datos["dominios"]}
+        self.assertIn("fresco-sync.co", dominios)
+
+    def test_sync_no_se_confunde_con_un_dominio_llamado_sync(self):
+        # La ruta /v1/domains/ es un prefijo generico; /sync no puede caer
+        # ahi como si "sync" fuera el nombre de un dominio a clasificar.
+        estado, datos = self._get("/v1/domains/sync?desde=1970-01-01T00:00:00Z")
+        self.assertEqual(estado, 200)
+        self.assertIn("dominios", datos)
+
+
+class TestSincronizacionDelAgente(BackendVivo):
+    """DomainClient.sincronizar(): el agente baja el delta y lo mezcla local.
+
+    Es lo que hace que la lista negra sea instantanea (suffixes.py) sin dejar
+    de estar al dia: se sincroniza de vez en cuando, no en cada request.
+    """
+
+    def _cliente(self):
+        ruta = Path(self.workdir.name) / f"cache-{id(self)}.json"
+        return DomainClient(f"http://127.0.0.1:{self.port}", ruta)
+
+    def test_sincronizar_trae_lo_que_ya_esta_clasificado(self):
+        self.store.put(
+            Verdict(
+                domain="ya-clasificado.co",
+                classification="ai_unapproved",
+                kind="llm_chat",
+                confidence=0.9,
+                evidence="x",
+                source="llm_classifier",
+                classified_at=time.time(),
+            )
+        )
+        cliente = self._cliente()
+
+        cliente.sincronizar()
+
+        self.assertEqual(cliente.cached("ya-clasificado.co"), "ai_unapproved")
+
+    def test_sincronizar_dos_veces_no_vuelve_a_traer_lo_viejo(self):
+        cliente = self._cliente()
+        cliente.sincronizar()  # deja la marca en "ahora"
+
+        self.store.put(
+            Verdict(
+                domain="viejo-antes-de-sincronizar.co",
+                classification="non_ai",
+                kind="non_ai",
+                confidence=0.1,
+                evidence="x",
+                source="heuristic",
+                classified_at=time.time() - (10 * 24 * 3600),
+            )
+        )
+        cliente.sincronizar()
+
+        self.assertIsNone(cliente.cached("viejo-antes-de-sincronizar.co"))
+
+    def test_sin_backend_no_lanza_y_el_cache_queda_como_estaba(self):
+        ruta = Path(self.workdir.name) / "cache-sin-backend.json"
+        cliente = DomainClient("http://127.0.0.1:1", ruta)
+
+        cliente.sincronizar()  # no debe lanzar
+
+        self.assertIsNone(cliente.cached("cualquiera.co"))
 
 
 class TestPolicyRoutes(BackendVivo):

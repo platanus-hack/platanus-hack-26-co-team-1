@@ -7,9 +7,10 @@ import time
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from .classifier import anthropic_model, classify
-from .store import DomainStore, PolicyStore, Verdict, vencido
+from .store import DomainStore, PolicyStore, SupabaseDomainStore, Verdict, store_from_env, vencido
 
 DEFAULT_PORT = 8686
 
@@ -24,7 +25,7 @@ class BackendHandler(BaseHTTPRequestHandler):
     def __init__(
         self,
         *args,
-        store: DomainStore,
+        store: DomainStore | SupabaseDomainStore,
         ask_model=None,
         policy_store: PolicyStore | None = None,
         **kwargs,
@@ -58,19 +59,24 @@ class BackendHandler(BaseHTTPRequestHandler):
     # -- rutas --------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path.startswith("/v1/domains/"):
-            self._domain(self.path[len("/v1/domains/") :])
+        if self.path.startswith("/v1/domains/sync"):
+            # Ruta especifica antes que el prefijo generico: "sync" no puede
+            # caer en _domain() como si fuera el nombre de un dominio.
+            self._domains_sync()
         else:
-            if self.path.startswith("/v1/policy/"):
-                self._policy_tenant(self.path[len("/v1/policy/") :])
+            if self.path.startswith("/v1/domains/"):
+                self._domain(self.path[len("/v1/domains/") :])
             else:
-                if self.path.startswith("/v1/policy"):
-                    self._send(200, _policy())
+                if self.path.startswith("/v1/policy/"):
+                    self._policy_tenant(self.path[len("/v1/policy/") :])
                 else:
-                    if self.path.startswith("/v1/stats"):
-                        self._send(200, {"domains": self.store.count()})
+                    if self.path.startswith("/v1/policy"):
+                        self._send(200, _policy())
                     else:
-                        self._send(404, {"error": "ruta desconocida"})
+                        if self.path.startswith("/v1/stats"):
+                            self._send(200, {"domains": self.store.count()})
+                        else:
+                            self._send(404, {"error": "ruta desconocida"})
 
     def do_PUT(self) -> None:  # noqa: N802
         if self.path.startswith("/v1/policy/"):
@@ -111,6 +117,21 @@ class BackendHandler(BaseHTTPRequestHandler):
         else:
             self._enqueue(domain)
             self._send(202, {"domain": domain, "classification": "pending"})
+
+    def _domains_sync(self) -> None:
+        """El delta que el agente baja para su cache local.
+
+        La comparacion del camino critico (ver suffixes.py) nunca toca la
+        base: el agente sincroniza de vez en cuando y compara en memoria. Sin
+        `desde`, se manda todo -- lo mismo que un agente nuevo pediria en su
+        primer arranque.
+        """
+
+        query = parse_qs(urlsplit(self.path).query)
+        marca = query.get("desde", ["1970-01-01T00:00:00Z"])[0]
+        ahora = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        veredictos = [v.as_response() for v in self.store.desde(marca)]
+        self._send(200, {"dominios": veredictos, "hasta": ahora})
 
     def _enqueue(self, domain: str) -> None:
         with _pending_lock:
@@ -177,12 +198,13 @@ def main() -> None:
     ruta = Path(os.environ.get("AEGIS_DB", "aegis-domains.json"))
     ruta_politicas = Path(os.environ.get("AEGIS_POLICY_DB", "aegis-policies.json"))
     puerto = int(os.environ.get("AEGIS_BACKEND_PORT", DEFAULT_PORT))
-    store = DomainStore(ruta)
+    store = store_from_env(ruta)
     policy_store = PolicyStore(ruta_politicas)
     modelo = anthropic_model()
     servidor = serve(store, puerto, modelo, policy_store)
     origen = "con clasificador de modelo" if modelo else "solo con heuristica"
-    print(f"Backend de Aegis en http://127.0.0.1:{puerto} ({origen}, base: {ruta})")
+    base = ruta if isinstance(store, DomainStore) else "Supabase"
+    print(f"Backend de Aegis en http://127.0.0.1:{puerto} ({origen}, base: {base})")
     servidor.serve_forever()
 
 
