@@ -37,18 +37,19 @@ class MockUpstream:
     def request(self, flow: http.HTTPFlow) -> None:
         if flow.response is None:
             host = flow.request.pretty_host
-            site = _SITES.get(host)
-            if site is not None:
-                name, action, field = site
-                if flow.request.method == "GET":
-                    body = _CHAT_PAGE.format(name=name, action=action, field=field)
-                else:
-                    body = _REPLY_PAGE
-                flow.response = http.Response.make(
-                    200,
-                    body.encode("utf-8"),
-                    {"Content-Type": "text/html; charset=utf-8"},
-                )
+            # Cualquier host desconocido tambien responde, para poder recorrer el
+            # catalogo entero por navegador: si esta pagina llega a verse, es
+            # porque Aegis dejo pasar algo que no debia.
+            name, action, field = _SITES.get(host, (host, "/api/chat", "prompt"))
+            if flow.request.method == "GET":
+                body = _CHAT_PAGE.format(name=name, action=action, field=field)
+            else:
+                body = _REPLY_PAGE
+            flow.response = http.Response.make(
+                200,
+                body.encode("utf-8"),
+                {"Content-Type": "text/html; charset=utf-8"},
+            )
 
 
 addons = [MockUpstream()]
