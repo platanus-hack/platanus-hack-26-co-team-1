@@ -43,6 +43,9 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Diccionario de la empresa (sus clientes, proyectos, dominios) | Funciona | `agent/aegis_agent/detect/diccionario.py` |
 | Sistema de diseño único en las tres superficies | Funciona | `agent/aegis_agent/ui/tokens.py` |
 | Atribución por aplicación y política por app | Funciona | `agent/aegis_agent/procesos.py`, [ADR 0004](adr/0004-la-politica-conoce-la-aplicacion-el-detector-no.md) |
+| Subida de archivos hacia una IA | Funciona (navegador). Falta la app de escritorio | `agent/aegis_agent/subidas.py` |
+| Filtro de placeholder + validadores de contexto | Funciona | `agent/aegis_agent/detect/placeholders.py`, `contexto.py` |
+| Banco de precisión + trinquete en la suite | Funciona, 1.375 casos | `agent/bench/precision.py` |
 
 **Desplegado:** https://aegis-panel.onrender.com — un solo servicio con el front y el API
 
@@ -114,6 +117,10 @@ Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
 | El proxy escuchaba en todas las interfaces: un proxy que descifra TLS abierto al wifi de al lado. Ahora va atado a loopback. | — |
 | Con Aegis en el medio, **Claude Code no podia ni autenticarse**: su propio token hacia api.anthropic.com se leia como una fuga. Una credencial que va hacia su dueño no es una fuga. | `test_dueno_de_la_credencial.py` |
 | La regla genérica disparaba sobre marcado: un `` `git ... `` en el contexto bloqueaba una sesión limpia. | `test_dueno_de_la_credencial.py` |
+| **`sk-proj-XXXXXXXX` y `postgres://user:password@localhost` cortaban el envío.** Un placeholder tiene forma de credencial y no es ninguna, y las reglas de *formato* no tenían validador porque el formato les alcanzaba. Un desarrollador preguntando por su propio `.env.example` se comía un 403. El filtro va en el motor, no en cada regla, para que ninguna regla nueva se olvide de pasarlo. Y **no** filtra por la palabra "example": la llave canónica de AWS es `AKIAIOSFODNN7EXAMPLE`, así que eso sería el bypass más fácil del producto. | `test_placeholders.py` |
+| **El adjunto se iba sin abrirse.** Los bytes de un archivo arrastrado a ChatGPT van a `files.oaiusercontent.com`, no a `chatgpt.com`, y `looks_like_ai_api` busca la forma de una *conversación*: una subida no la tiene. No era una regla que faltaba, era un agujero en el embudo. | `test_subida_de_archivos.py` |
+| **`c.c. 43.115.902` no se veía nunca** — la forma más común de escribir una cédula en Colombia. El `` iba después de toda la alternancia y `c.c.` termina en punto: un límite de palabra pegado a un punto necesita un carácter de palabra al lado. A ojo la alternancia se ve perfecta; lo encontró el banco de precisión. La CURP tenía el mismo error, tres líneas más arriba, ya arreglado para la cédula. | `test_trinquete_precision.py` |
+| **`la password del servidor de producción es X` se iba entera.** Las dos reglas de credencial en español tenían listas de anclas **distintas** y se habían ido separando. Y `Sup3rS3cret1` da 3,08 bits de entropía —por debajo del umbral— siendo exactamente la clave que una política de empresa obliga a poner: la condición de mezcla de clases vivía dentro de una sola regex y ahora es una función que las dos comparten. | `test_trinquete_precision.py` |
 
 ## 6. Trampa de herramientas que te va a morder
 
@@ -146,10 +153,16 @@ En el orden en que más valor agregan:
    `feature/frontend-ui` la pantalla de Políticas con sus tabs. Lo que falta es
    que el formulario escriba de verdad — hoy es todo estado local del componente.
    El diccionario de la empresa es el campo que más rinde conectar primero.
-3. **Más casos de negocio en el corpus.** `bench/corpus.py` tiene 84 frases y
-   con eso ya se eligieron etiquetas y umbral. Es también lo que bloquea la
-   decisión del modelo: con 30 frases sensibles, la diferencia entre dos modelos
-   no se puede distinguir del azar (ver [MODELO-LOCAL §9](MODELO-LOCAL.md)).
+3. **Más casos de negocio en el corpus.** El corpus ya no son 84 frases: son
+   1.375, y hay un banco que mide la precisión del corte con un trinquete en la
+   suite (`bench/precision.py`, [§9](#9-la-precisión-medida)). Lo que sigue
+   faltando es lo mismo de antes y es lo único que falta: **casos de negocio
+   reales**. Las 1.291 frases nuevas son generadas por composición, y para las
+   que tienen formato eso mide regresión y no cobertura. La receta buena es
+   generación sintética con un LLM sobre plantillas de dominio (es lo que hace el
+   paper de CAPID) y está bloqueada por la misma API key del punto 1. El otro
+   camino, gratis y disponible hoy, es bajar el split en español de
+   `ai4privacy/pii-masking-400k`.
 4. **Un disco en Render** (o un KV) para que el panel desplegado no pierda los
    eventos: el código ya persiste en disco si `AEGIS_DATA_DIR` apunta a uno, pero
    el plan gratuito no monta discos y hoy degrada a memoria.
@@ -175,7 +188,43 @@ mecanismo es el mismo y las variables ya están puestas (`CODEX_CA_CERTIFICATE`,
 honra, pero **eso no es lo mismo que haberlo probado**. Si instalás Codex, la
 prueba es idéntica a la de arriba y toma dos minutos.
 
-## 9. Documentos
+## 9. La precisión medida
+
+Antes de este banco, la precisión de T1 no tenía número: se sabía que las reglas
+funcionaban porque había tests, que es otra cosa. El banco corre sobre 1.375
+casos y reporta tres cifras:
+
+```bash
+cd agent
+python -m bench.precision              # el reporte
+python -m bench.precision --guardar    # y subir la línea base
+```
+
+| Métrica | Hoy |
+|---|---|
+| **Precisión del corte** (de lo que Aegis frena, cuánto merecía frenarse) | **100 %** |
+| Falsos positivos que **cortan**, sobre 524 negativos duros | **0** |
+| Falsos positivos que solo avisan | **0** |
+| Recall: secretos con formato / credenciales en español / documentos / exports | 280/280 · 256/256 · 77/77 · 16/16 |
+
+**El número es la precisión del corte y no el F1**, por una razón asimétrica: un
+aviso equivocado cuesta atención, un corte equivocado cuesta el producto. Quien
+recibe un bloqueo injustificado no abre un ticket, busca cómo desinstalar Aegis,
+y a partir de ahí el recall real es cero.
+
+**Y hay que saber leerlo.** Los positivos con formato los fabrica el mismo prefijo
+que busca la regla: ahí la medición es de **regresión**, no de cobertura. Donde sí
+hay evidencia es en los 524 negativos duros, que ninguna regla vio nunca cuando
+se escribió. Está explicado en `bench/corpus_generado.py` y conviene leerlo antes
+de citar el 100 % en una presentación.
+
+El trinquete (`tests/test_trinquete_precision.py`) corre con la suite y se pone
+rojo si baja la precisión, si suben los falsos positivos, si baja el recall de
+alguna familia, o si el corpus se encogió. Se verificó que muerde: quitando una
+regla el recall cae a 214/256, y agregando una regla ruidosa la precisión cae a
+99,10 %.
+
+## 10. Documentos
 
 - [Arquitectura](ARQUITECTURA.md) — cómo encaja todo y por dónde pasa un request
 - [Operación](OPERACION.md) — cómo levantar cada pieza y todas las variables
