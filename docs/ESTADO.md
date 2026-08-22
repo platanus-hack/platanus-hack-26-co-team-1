@@ -7,7 +7,9 @@
 
 **Última actualización:** 22 de agosto de 2026
 **Estado:** MVP funcionando de punta a punta, verificado en una máquina real.
-**Tests:** 212 en verde (`python run_tests.py` desde la raíz).
+**Tests:** 276 en verde (`.venv/Scripts/python run_tests.py` desde la raíz).
+**Entorno:** hay un `.venv` en la raíz. Ver `agent/requirements.txt` y
+`agent/requirements-modelo.txt` (T2 va aparte porque es opcional y pesa).
 
 ---
 
@@ -22,7 +24,11 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Pieza | Estado | Dónde |
 |---|---|---|
 | Motor T1: 26 reglas deterministas + firmas de archivo | Funciona | `agent/aegis_agent/detect/` |
-| Motor T2: modelo local (GLiNER) | Funciona, **apagado por defecto** | `agent/aegis_agent/detect/model.py` |
+| Motor T2: modelo local (GLiNER) | Funciona, **apagado por defecto**. Etiquetas y umbral elegidos midiendo | `agent/aegis_agent/detect/model.py` |
+| Sensor de puntos ciegos (capa D) | Funciona | `agent/aegis_agent/sensor.py` |
+| Corte del punto ciego por firewall | Funciona, requiere administrador | `agent/aegis_agent/install/firewall.py` |
+| Política como dato, editable desde el backend | Funciona | `agent/aegis_agent/policy_store.py` |
+| Verificación de cobertura de escritorio | Funciona | `install/windows.py verificar` |
 | Normalización anti-evasión (base64, gzip, docx, UTF-16…) | Funciona | `agent/aegis_agent/detect/payload.py` |
 | Proxy de intercepción (mitmproxy) | Funciona | `agent/aegis_agent/proxy/` |
 | Catálogo de 112 dominios de IA | Funciona | `agent/aegis_agent/catalog.py` |
@@ -45,13 +51,15 @@ Por orden de lo que más falta para el pitch:
 2. **El clasificador de dominios tampoco usa un modelo.** Descarga la portada del
    sitio y decide con una heurística de contenido. El camino del modelo está
    escrito y probado con uno simulado; espera la misma API key.
-3. **No hay perfil de empresa ni de empleado.** El panel es de un solo tenant y
-   la política vive en código (`policy.py`), no en una base de datos. El MVP de
-   la propuesta pide los dos roles.
+3. **No hay perfil de empresa ni de empleado.** El panel es de un solo tenant.
+   La política ya **no** vive en código: se lee de `~/.aegis/politica.json` y el
+   backend la sirve por `GET`/`PUT /v1/policy/{tenant}`. Lo que falta es la
+   pantalla que la edite y los dos roles.
 4. **No hay instalador para macOS ni Linux.** Solo Windows.
-5. **Las apps que ignoran el proxy del sistema no están cubiertas.** Es la capa D
-   del ADR 0001 (driver WFP / System Extension). Se detecta el hueco con el
-   sensor de conexiones, no se cierra.
+5. **Las apps que ignoran el proxy del sistema no se pueden interceptar.** Es la
+   capa D del ADR 0001. Lo que sí existe ahora: el sensor las detecta, y con
+   `blind_spot_action = "block"` se les corta la ruta directa por firewall. Lo
+   que no existe es *ver* qué mandaron: para eso haría falta un driver WFP.
 6. **El almacenamiento del panel desplegado es efímero.** Sin `AEGIS_KV_URL` los
    eventos viven mientras la función esté caliente.
 
@@ -118,8 +126,8 @@ En el orden en que más valor agregan:
 1. **Conectar el modelo a las lecciones y al clasificador de dominios.** Es lo
    único que separa el producto actual del que dice la propuesta. Solo falta la
    API key; el código y los tests con modelo simulado ya están.
-2. **Perfil de empresa y de empleado**, con la política en base de datos en vez
-   de en `policy.py`.
+2. **La pantalla que edita la política.** La cañería ya está: `Policy.a_dict()`,
+   `policy_store` y `PUT /v1/policy/{tenant}`. Falta el formulario y los roles.
 3. **Más casos de negocio en el corpus.** `bench/corpus.py` tiene 61 frases y
    con eso ya se eligieron etiquetas y umbral. Donde el modelo ve menos es en
    datos de la empresa (1/14): esas frases son las que más rinde agregar.
