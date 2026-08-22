@@ -21,3 +21,27 @@ services:
       # Con un plan de pago se monta un disco y se apunta AEGIS_DATA_DIR ahi
       # para que los eventos sobrevivan a los reinicios. En el plan gratuito no
       # hay discos, y el servicio degrada a memoria a proposito.
+
+  # El front principal (Angular). Va como sitio estatico y no como servicio web
+  # porque no necesita servidor: `ng build` deja HTML, JS y CSS, y Render los
+  # sirve desde su CDN.
+  - type: web
+    name: aegis-ui
+    runtime: static
+    branch: main
+    rootDir: frontend
+    # npm install y no npm ci: el package-lock.json quedo desincronizado con el
+    # package.json (le faltan @emnapi/core y @emnapi/runtime) y `npm ci` se
+    # niega a instalar. Cuando el lock se actualice, esto deberia volver a
+    # `npm ci`, que es lo unico que da builds reproducibles.
+    buildCommand: npm install && npm run build
+    # El builder `application` de Angular deja el sitio en browser/, no en la
+    # raiz de dist/.
+    staticPublishPath: dist/aegis-ui/browser
+    routes:
+      # Sin esto, entrar directo a /admin/politicas o recargar la pagina da 404:
+      # el enrutado es del lado del cliente y en el servidor esa ruta no existe
+      # como archivo.
+      - type: rewrite
+        source: /*
+        destination: /index.html

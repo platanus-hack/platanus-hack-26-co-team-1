@@ -44,7 +44,7 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Sistema de diseño único en las tres superficies | Funciona | `agent/aegis_agent/ui/tokens.py` |
 | Atribución por aplicación y política por app | Funciona | `agent/aegis_agent/procesos.py`, [ADR 0004](adr/0004-la-politica-conoce-la-aplicacion-el-detector-no.md) |
 
-**Panel desplegado:** https://aegis-panel.onrender.com
+**Desplegado:** front https://aegis-ui-tzz6.onrender.com · panel https://aegis-panel.onrender.com
 
 ## 3. Qué NO existe todavía
 

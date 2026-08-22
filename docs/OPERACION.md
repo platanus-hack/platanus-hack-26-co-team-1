@@ -141,7 +141,27 @@ Debe dar **27 de 27**. Si alguna se escapa, es un hueco real.
 | `AEGIS_DATA_DIR` | — | Disco donde persistir los eventos del panel desplegado |
 | `AEGIS_KV_URL` / `AEGIS_KV_TOKEN` | — | Almacén compatible con Upstash para el panel desplegado |
 
-## 8. El panel desplegado
+## 8. Lo desplegado
+
+| Qué | URL | Qué es |
+|---|---|---|
+| **Front principal** | https://aegis-ui-tzz6.onrender.com | La app Angular (landing, onboarding, admin) |
+| **Panel** | https://aegis-panel.onrender.com | Las métricas y la ingesta de eventos, en Python |
+
+Los dos salen de `main` y están declarados en `render.yaml`. Cada push los
+redespliega solos.
+
+El front va como **sitio estático** y no como servicio web porque no necesita
+servidor: `ng build` deja HTML, JS y CSS. Dos detalles que no son obvios y que
+si se pierden rompen el despliegue:
+
+- El publish path es `dist/aegis-ui/browser`, no `dist/aegis-ui`. El builder
+  `application` de Angular deja el sitio en `browser/`.
+- Hay una regla de reescritura `/* → /index.html`. Sin ella, entrar directo a
+  `/admin/politicas` o recargar la página da 404: el enrutado es del lado del
+  cliente y esa ruta no existe como archivo en el servidor.
+
+### El panel
 
 https://aegis-panel.onrender.com
 
