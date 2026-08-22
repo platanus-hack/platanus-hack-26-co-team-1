@@ -423,14 +423,13 @@ def install(port: int, mitmdump: str | None = None) -> list[str]:
                 "La CA necesita tu confirmacion. Corre esto y acepta el dialogo:\n"
                 f'      certutil -addstore -user Root "{CA_CERT}"'
             )
-    # El proxy del navegador solo se activa si la CA quedo confiada. Sin eso,
-    # cada sitio HTTPS mostraria un aviso de certificado y el usuario quedaria
-    # peor que antes de instalar nada.
-    if ca_is_trusted():
-        write_proxy_settings(True, f"127.0.0.1:{port}", proxy_bypass_list())
-        hechos.append(f"Proxy del navegador apuntando a 127.0.0.1:{port}")
-    else:
-        hechos.append("Proxy del navegador sin activar hasta que la CA este confiada")
+    # OJO: aca NO se prende el proxy del navegador. Se prende en `enrutar()`, y
+    # solo despues de confirmar que hay alguien escuchando en el puerto.
+    #
+    # Estaba al reves y esa es la causa de la peor falla que tuvo el producto:
+    # instalar dejaba el navegador apuntando a 127.0.0.1 sin que nada estuviera
+    # levantado, o sea a la persona SIN INTERNET, y sin ninguna pista de por que.
+    # El orden no es un detalle de estilo: es el invariante.
     set_env_vars(port)
     hechos.append("Variables de entorno configuradas para los CLIs")
     if registrar_arranque(port):
@@ -445,6 +444,32 @@ def install(port: int, mitmdump: str | None = None) -> list[str]:
             "o desinstala."
         )
     return hechos
+
+
+def enrutar(port: int) -> tuple[bool, str]:
+    """Manda el trafico del navegador a Aegis. El ULTIMO paso, nunca antes.
+
+    Se exigen las dos condiciones y ninguna es negociable:
+
+      1. **Que haya alguien escuchando.** Prender el proxy sin eso deja a la
+         persona sin internet, que es el unico estado en el que Aegis empeora el
+         equipo. Ya paso.
+      2. **Que la CA este confiada.** Sin eso cada sitio HTTPS muestra un aviso de
+         certificado, y la persona queda peor que antes de instalar nada.
+    """
+
+    if not puerto_escuchando(port):
+        return False, (
+            f"NO se activo el proxy: no hay nada escuchando en el puerto {port}. "
+            "Se prefiere quedarse sin proteccion antes que dejarte sin internet."
+        )
+    if not ca_is_trusted():
+        return False, (
+            "NO se activo el proxy: la CA no esta confiada y cada sitio HTTPS te "
+            "mostraria una advertencia."
+        )
+    write_proxy_settings(True, f"127.0.0.1:{port}", proxy_bypass_list())
+    return True, f"Proxy del navegador apuntando a 127.0.0.1:{port}"
 
 
 def uninstall() -> list[str]:

@@ -32,19 +32,53 @@ AYUDA = __doc__
 
 
 def _instalar(puerto: int) -> int:
+    """El orden de los pasos ES el arreglo, no un detalle de estilo.
+
+    Antes: configurar el proxy del navegador y despues arrancar. Entre las dos
+    cosas --y para siempre, si arrancar fallaba-- el navegador apuntaba a un
+    puerto muerto y la persona quedaba SIN INTERNET, sin ninguna pista de por que.
+
+    Ahora: arrancar, CONFIRMAR que escucha, y recien entonces enrutar el trafico.
+    Asi el estado peligroso no existe en ningun momento, ni siquiera por un
+    instante, ni siquiera si algo falla en el medio.
+    """
+
     from .install import windows
 
+    # 1. La CA y las variables. No redirigen nada, asi que son seguras de hacer
+    #    primero: si el proceso muere aca, la red de la persona esta intacta.
     for hecho in windows.install(puerto):
         print(f"  {hecho}")
 
-    # Arrancar despues de configurar, no antes: si el proxy levanta primero y la
-    # configuracion falla, queda un proceso escuchando que nadie pidio.
-    if windows.arranque_registrado() and not windows.puerto_escuchando(puerto):
-        print("\n  Levantando Aegis...")
-        if _arrancar_en_segundo_plano(puerto):
-            print(f"  Aegis esta protegiendo este equipo (puerto {puerto})")
+    # 2. El servicio, y se VERIFICA que escuche. Decirle a alguien que esta
+    #    protegido sin comprobarlo es la unica mentira que este producto no se
+    #    puede permitir.
+    if not windows.puerto_escuchando(puerto):
+        print()
+        print("  Levantando Aegis...")
+        if not _arrancar_en_segundo_plano(puerto):
+            print(
+                "  NO se pudo levantar Aegis, asi que NO se toco tu proxy.\n"
+                "  Tu red esta intacta. Corre `aegis instalar` de nuevo o revisa\n"
+                f"  si algo mas esta usando el puerto {puerto}."
+            )
+            return 1
+
+    # 3. Recien ahora el trafico. enrutar() vuelve a chequear el puerto y la CA:
+    #    dos veces, porque es el paso que puede dejar a alguien sin internet.
+    enrutado, detalle = windows.enrutar(puerto)
+    print(f"  {detalle}")
+
+    # 4. Y el guardian, que apaga el proxy si el servicio se muere despues.
+    if enrutado:
+        from . import guardian
+
+        if guardian.lanzar(puerto) is not None:
+            print("  Guardian activo: si Aegis se cae, te devuelve la red solo")
         else:
-            print("  No se pudo levantar. Corre `aegis servicio` en otra ventana.")
+            print("  AVISO: no se pudo lanzar el guardian")
+        print()
+        print(f"  Aegis esta protegiendo este equipo (puerto {puerto})")
     return 0
 
 
@@ -144,9 +178,36 @@ def _plan(puerto: int) -> int:
 
 
 def _servicio(puerto: int) -> int:
-    from . import servicio
+    """Corre el proxy, con su guardian al lado.
 
+    El guardian se lanza aca y no solo en `instalar` porque el arranque
+    automatico ejecuta esta accion directamente: sin esto, despues de reiniciar
+    la maquina el proxy quedaria sin red de contencion.
+    """
+
+    from . import guardian, servicio
+
+    if windows_apunta_a_aegis(puerto):
+        guardian.lanzar(puerto)
     return servicio.correr(puerto)
+
+
+def windows_apunta_a_aegis(puerto: int) -> bool:
+    """Si no le apunta, no hace falta guardian: no hay nada que devolver."""
+
+    try:
+        from .install import windows
+
+        estado = windows.read_proxy_settings()
+        return bool(estado["enabled"]) and estado["server"] == f"127.0.0.1:{puerto}"
+    except Exception:
+        return False
+
+
+def _guardian(puerto: int) -> int:
+    from . import guardian
+
+    return guardian.vigilar(puerto)
 
 
 def _demo(puerto: int) -> int:
@@ -180,6 +241,7 @@ ACCIONES: dict[str, str] = {
     "uninstall": "_desinstalar",
     "plan": "_plan",
     "demo": "_demo",
+    "guardian": "_guardian",
 }
 
 
@@ -191,6 +253,19 @@ def main(argv: list[str] | None = None) -> int:
         print(AYUDA)
         codigo = 0
     elif accion in ACCIONES:
+        # La ultima red, antes de cualquier accion: si el navegador apunta a Aegis
+        # y Aegis no esta, se apaga el proxy y se DICE. Cubre el caso en que
+        # mataron al servicio y al guardian, o en que la maquina se apago de golpe.
+        #
+        # Se hace en cada invocacion y no solo en `estado` porque la persona que
+        # se quedo sin internet va a escribir cualquier cosa, no la correcta.
+        if accion not in ("servicio", "run", "guardian"):
+            from . import guardian as _g
+
+            aviso = _g.reconciliar(entorno.puerto())
+            if aviso:
+                print(f"  {aviso}")
+                print()
         funcion = getattr(sys.modules[__name__], ACCIONES[accion])
         codigo = funcion(entorno.puerto())
     else:

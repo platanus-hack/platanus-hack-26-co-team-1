@@ -173,31 +173,37 @@ class TestInstalarArranca(CasoAislado):
 
     def test_instalar_levanta_el_proxy(self):
         with patch.object(windows, "install", return_value=["configurado"]), patch.object(
-            windows, "arranque_registrado", return_value="Aegis.exe servicio"
-        ), patch.object(windows, "puerto_escuchando", return_value=False), patch.object(
+            windows, "puerto_escuchando", return_value=False
+        ), patch.object(windows, "enrutar", return_value=(False, "")), patch.object(
             cli, "_arrancar_en_segundo_plano", return_value=True
-        ) as arrancar:
+        ) as arrancar, patch("builtins.print"):
             cli._instalar(8899)
         arrancar.assert_called_once()
 
-    def test_si_no_puede_arrancar_lo_dice(self):
-        """Callarse aca deja a la persona sin internet y sin explicacion."""
+    def test_si_no_puede_arrancar_no_toca_la_red_y_lo_dice(self):
+        """Lo que importa afirmar ya no es el mensaje: es que NO se enruto nada.
+
+        El invariante completo se prueba en test_nunca_sin_internet.py; aca queda
+        el caso que motivo este archivo, con la asercion corregida.
+        """
 
         with patch.object(windows, "install", return_value=[]), patch.object(
-            windows, "arranque_registrado", return_value="x"
-        ), patch.object(windows, "puerto_escuchando", return_value=False), patch.object(
+            windows, "puerto_escuchando", return_value=False
+        ), patch.object(
             cli, "_arrancar_en_segundo_plano", return_value=False
-        ), patch("builtins.print") as impreso:
-            cli._instalar(8899)
+        ), patch.object(windows, "enrutar") as enrutar, patch("builtins.print") as impreso:
+            codigo = cli._instalar(8899)
+        enrutar.assert_not_called()
+        self.assertEqual(codigo, 1)
         dicho = " ".join(str(c) for c in impreso.call_args_list)
-        self.assertIn("No se pudo levantar", dicho)
+        self.assertIn("Tu red esta intacta", dicho)
 
     def test_no_arranca_dos_veces(self):
         with patch.object(windows, "install", return_value=[]), patch.object(
-            windows, "arranque_registrado", return_value="x"
-        ), patch.object(windows, "puerto_escuchando", return_value=True), patch.object(
+            windows, "puerto_escuchando", return_value=True
+        ), patch.object(windows, "enrutar", return_value=(False, "")), patch.object(
             cli, "_arrancar_en_segundo_plano"
-        ) as arrancar:
+        ) as arrancar, patch("builtins.print"):
             cli._instalar(8899)
         arrancar.assert_not_called()
 
