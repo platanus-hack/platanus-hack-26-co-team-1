@@ -135,6 +135,9 @@ Debe dar **27 de 27**. Si alguna se escapa, es un hueco real.
 | `ANTHROPIC_API_KEY` | — | Si está, clasifica dominios con un modelo en vez de heurística |
 | `SUPABASE_URL` | — | La base duradera. Sin ella, todo persiste en JSON local |
 | `SUPABASE_SERVICE_KEY` | — | La clave `service_role`. **No la `anon`**: ver abajo |
+| `AEGIS_FIRMA` | al azar por proceso | Con qué se firman los tokens de sesión. Sin ella, reiniciar caduca las sesiones |
+| `AEGIS_ADMIN_USUARIO` | `admin` | Usuario de la cuenta que se siembra al arrancar |
+| `AEGIS_ADMIN_PASSWORD` | `admin` | Su contraseña. **Cámbiala antes de que esto sea de alguien** |
 
 `ANTHROPIC_API_KEY`, `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` salen del entorno
 del proceso o, si no está ahí, de `~/.aegis/secretos.env`. El archivo existe por
@@ -180,6 +183,7 @@ corriendo.
 | `GET /v1/domains/{dominio}` | Veredicto compartido, o 202 mientras se averigua |
 | `POST /v1/lessons` | La lección de un corte (422 si trae contenido) |
 | `GET /v1/stats` | Cuántos dominios hay clasificados |
+| `POST /v1/login` | Entrar al panel. Devuelve el token firmado |
 | `/panel` | El panel en HTML que arma Python, de respaldo |
 
 Las cinco rutas de `/v1/` estaban escritas y **no estaban desplegadas**: el
@@ -293,3 +297,47 @@ citarla.
 | Un sitio se bloquea y no debería | Mirá la cola de eventos: `rule_id` dice qué regla lo marcó |
 | El panel está vacío | Sin eventos muestra la semana de demostración; si hay eventos reales los prefiere |
 | Todo pasa sin bloquear | ¿El destino está clasificado como IA? `classify()` en `policy.py` |
+
+## 11. Quién ve qué
+
+El panel era público: `/admin/panel` lo abría cualquiera y mostraba **todos** los
+eventos, de todas las empresas. El contrato tiene `tenant_id` desde el primer día
+y ninguna consulta lo miraba.
+
+Para entrar hay una cuenta, y `/api/metrics` devuelve 401 sin ella:
+
+```
+POST /v1/login   {"usuario": "admin", "password": "admin"}
+              →  {"token": "...", "tenant": "acme", "rol": "admin"}
+
+GET  /api/metrics    Authorization: Bearer <token>
+```
+
+**La regla de la que cuelga todo: el tenant sale del token, nunca del pedido.**
+Si viniera en la URL —`/api/metrics?tenant=otra`— cualquier cuenta leería los
+datos de cualquier otra cambiando un parámetro, y no habría login que lo
+arregle. El token se firma en el servidor con el tenant adentro; el cliente lo
+lleva y no lo puede editar sin romper la firma. Hay tests que lo intentan por
+las tres vías: parámetro, token editado y ruta de otra empresa.
+
+Tres detalles que no son obvios:
+
+- **El caché de eventos va por tenant.** Con una sola variable, la primera
+  empresa que carga el panel deja sus eventos ahí y la siguiente los recibe
+  durante dos segundos. Un caché compartido entre inquilinos es una fuga con
+  fecha de vencimiento, no un caché.
+- **El filtro va en la consulta, no en Python.** Filtrando después, los datos de
+  las demás empresas igual viajaron por la red y están en la memoria del proceso
+  que atiende a una sola.
+- **`POST /v1/events` queda abierto.** El agente no tiene con quién loguearse; lo
+  que protege ese endpoint es la frontera de contenido, no una sesión.
+
+La contraseña no se guarda: se guarda `scrypt(contraseña, sal)` con una sal
+distinta por cuenta, y las comparaciones van con `compare_digest`. El login no
+distingue «no existe ese usuario» de «la contraseña no va», porque la diferencia
+le confirma a quien prueba cuáles cuentas existen.
+
+> **`admin` / `admin` es para la demo.** La cuenta inicial se siembra sólo si no
+> existe, así que cambiar la contraseña es definitivo: reiniciar el servicio no
+> la devuelve a la de fábrica. Cámbiala con `AEGIS_ADMIN_PASSWORD` antes de que
+> esto tenga datos de alguien de verdad.

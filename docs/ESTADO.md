@@ -51,6 +51,7 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Presupuesto de latencia de T1 (500 ms, cabeza y cola siempre) | Funciona | `agent/aegis_agent/detect/payload.py` |
 | Base duradera en Supabase (eventos, dominios, políticas) | Funciona | `backend/aegis_backend/supabase.py` |
 | Rutas del backend colaborativo, **desplegadas** | Funciona | `backend/aegis_backend/rutas.py`, `web/app.py` |
+| Cuentas y aislamiento por empresa | Funciona. `admin`/`admin` es de demo | `backend/aegis_backend/cuentas.py` |
 
 **Desplegado:** https://aegis-panel.onrender.com — un solo servicio con el front y el API
 
@@ -128,6 +129,15 @@ Y dos reglas de producto que están sostenidas por medición, no por gusto:
 ## 5. Bugs reales que ya encontramos (no los reintroduzcas)
 
 Cada uno tiene su test; si tocás esa zona y el test se pone rojo, es esto:
+
+-1. **La suite subía sus eventos al panel de producción.** El instalador escribe
+   `AEGIS_EVENTS_URL` en el entorno de USUARIO apuntando al panel desplegado, y
+   cada proxy que levantan los e2e la heredaba: `chrome-headless-shell.exe`
+   visitando `novaai.local` llegaba a la tabla de verdad. Existía desde siempre
+   y no se veía porque el panel guardaba en memoria y se perdían en el
+   siguiente redespliegue. Se tapa en `run_tests.py` **y** en
+   `tests/aislamiento.py`, porque el helper solo protege a los tests que se
+   acuerdan de usarlo. Medido: 563 tests dejan cero filas.
 
 0. **`do_GET` leía el almacén antes de mirar la ruta.** Con los eventos en
    memoria era gratis. En cuanto el almacén pasó a ser una base hospedada, cada
