@@ -12,6 +12,17 @@ Engine = Literal["t1_rules", "t2_model"]
 EVIDENCE_MAX_LEN = 32
 EVIDENCE_VISIBLE_PREFIX = 4
 
+# De donde salio el texto en el que se encontro el hallazgo.
+#
+# No es cosmetico: decide cuanta autoridad tiene. El texto de un OCR es
+# aproximado -medido en detect/ocr.py, `Verano2026Bogota` salio como
+# `Verano2o26Bogota` y una llave de AWS no se leyo a 900 px y si a 1800-, asi
+# que un hallazgo leido de una imagen es tan probabilistico como uno del modelo
+# local y no puede cortar un envio con la misma autoridad que una llave con
+# formato reconocido. Ver policy.ocr_action.
+ORIGEN_TEXTO = "texto"
+ORIGEN_IMAGEN = "imagen"
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -22,6 +33,9 @@ class Finding:
     evidence: str
     start: int
     end: int
+    # Va al final y con default para que las decenas de sitios que construyen un
+    # Finding no tengan que nombrarlo: lo normal es que el texto sea texto.
+    origen: str = ORIGEN_TEXTO
 
     def __post_init__(self) -> None:
         # La evidencia es el unico campo que sale del equipo. Si algun dia una

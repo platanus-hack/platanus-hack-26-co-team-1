@@ -21,7 +21,7 @@ from .files import scan_files
 from .imagenes import extraer as extraer_imagenes
 from .model import scan_model
 from .prompt import extract_prompt
-from .types import Finding
+from .types import ORIGEN_IMAGEN, Finding
 
 # Un secreto casi nunca viaja en texto plano y derecho: viaja dentro de un JSON
 # escapado, de un multipart, de un .docx (que es un zip), en base64 o en un body
@@ -607,6 +607,11 @@ def scan_payload(
         truncated = True
 
     views: list[str] = []
+    # Se rastrea por POSICION y no por contenido. Rastrear por texto parece mas
+    # simple hasta que el OCR lee exactamente lo mismo que dice el cuerpo: ahi
+    # la vista del texto queda marcada como imagen y una fuga escrita de verdad
+    # se rebaja a un aviso. La rebaja tiene que equivocarse hacia bloquear.
+    indices_de_imagen: set[int] = set()
     principal = ""
     if query:
         views.append(query)
@@ -629,7 +634,11 @@ def scan_payload(
         if ocr.habilitado():
             imagenes = extraer_imagenes(payload, principal)
             if imagenes:
+                # De cual vista salio cada hallazgo decide cuanta autoridad
+                # tiene (ver types.ORIGEN_IMAGEN).
+                desde = len(views)
                 views.extend(ocr.vistas(imagenes))
+                indices_de_imagen.update(range(desde, len(views)))
 
     # El espanol de verdad lleva tildes y enes. Las reglas estan escritas sin
     # ellas, asi que una regla veia "la contrasena del servidor" y NINGUNA veia
@@ -641,11 +650,15 @@ def scan_payload(
     # solo aparece en la vista desescapada. Aplicarlo sobre TODAS las vistas es
     # lo unico que la alcanza, y de paso una regla nueva hereda la cobertura sin
     # que su autor tenga que acordarse.
-    views.extend(
-        plano
-        for vista in list(views)
-        if not vista.isascii() and (plano := sin_tildes(vista)) != vista
-    )
+    for indice, vista in enumerate(list(views)):
+        if not vista.isascii() and (plano := sin_tildes(vista)) != vista:
+            # La vista derivada hereda el origen de la suya: quitarle las tildes
+            # al texto de un OCR no lo vuelve mas confiable. Se marca ANTES de
+            # agregarla, cuando len(views) todavia es la posicion que va a
+            # ocupar.
+            if indice in indices_de_imagen:
+                indices_de_imagen.add(len(views))
+            views.append(plano)
 
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
@@ -657,7 +670,7 @@ def scan_payload(
     budget = MAX_TOTAL_EXPANDED_CHARS
     scanned = 0
     arranque = time.perf_counter()
-    for view in views:
+    for indice, view in enumerate(views):
         gastado = (time.perf_counter() - arranque) * 1000
         if gastado > PRESUPUESTO_MS:
             # Se agoto el tiempo y quedan vistas sin mirar. Se dice en el evento:
@@ -689,13 +702,22 @@ def scan_payload(
                 # Se toma el maximo por vista y no la suma: el mismo export visto
                 # en texto plano y en base64 no son dos fugas distintas.
                 counts[rule_id] = max(counts[rule_id], total)
+            de_imagen = indice in indices_de_imagen
             for finding in view_findings:
                 key = (finding.rule_id, finding.evidence)
                 posicion = (finding.rule_id, finding.start)
                 if key not in seen and posicion not in posiciones:
                     seen.add(key)
                     posiciones.add(posicion)
-                    findings.append(finding)
+                    # El mismo secreto visto en el texto Y en una imagen se
+                    # queda con el primero que se vio, que por el orden de las
+                    # vistas es siempre el del texto. Es lo que corresponde: si
+                    # esta escrito en el cuerpo, no hay nada probabilistico.
+                    findings.append(
+                        replace(finding, origen=ORIGEN_IMAGEN)
+                        if de_imagen
+                        else finding
+                    )
 
     # El archivo puede ser critico por lo que es, no por lo que dice: un
     # volcado binario no tiene ni una palabra que una regla de texto encuentre.

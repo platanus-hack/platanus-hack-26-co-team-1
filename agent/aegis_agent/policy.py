@@ -16,6 +16,7 @@ from .detect.model import (  # noqa: E402
     ETIQUETAS_PRECISAS,
     UMBRAL_POR_DEFECTO,
 )
+from .detect.types import ORIGEN_IMAGEN  # noqa: E402
 from .suffixes import most_specific_match  # noqa: E402
 
 # Dominios que no se descifran nunca, ni para inspeccionar. Ver ADR 0003.
@@ -156,6 +157,18 @@ class Policy:
     # el modelo ya la genero, y dejar a la herramienta esperando un cuerpo que no
     # va a llegar rompe la sesion sin evitar nada.
     injection_action: str = "warn"
+    # Que autoridad tiene lo que se leyo de una IMAGEN.
+    #
+    # Es la tercera deteccion probabilistica del sistema y hasta aca era la
+    # unica sin freno: un hallazgo de OCR cortaba con la misma autoridad que una
+    # llave de AWS con formato reconocido. No corresponde, y esta medido en
+    # detect/ocr.py: el texto que sale de una imagen es aproximado
+    # -`Verano2026Bogota` se leyo como `Verano2o26Bogota`- asi que un caracter
+    # mal leido puede cortarle el envio a alguien sin que hubiera nada.
+    #
+    # Por defecto avisa, igual que el modelo y que la inyeccion. "block" le
+    # devuelve la autoridad completa a la empresa que la quiera.
+    ocr_action: str = "warn"
     # Que hacer cuando la capa D detecta un punto ciego (una app que no pasa
     # por el proxy). "warn" solo lo reporta; "block" corta la conexion. El
     # mecanismo que lee este campo lo construye otra tarea: aca solo se
@@ -229,6 +242,7 @@ class Policy:
             "model_labels": list(self.model_labels),
             "model_threshold": self.model_threshold,
             "injection_action": self.injection_action,
+            "ocr_action": self.ocr_action,
             "company_terms": dict(sorted(self.company_terms.items())),
             "company_terms_action": self.company_terms_action,
             "app_actions": dict(sorted(self.app_actions.items())),
@@ -288,6 +302,7 @@ class Policy:
             "company_terms_action",
             "blind_spot_action",
             "foreign_account_action",
+            "ocr_action",
         )
 
         valores: dict[str, Any] = {}
@@ -589,6 +604,18 @@ def decidir_sobre(
         and action == "block_content"
         and peor.rule_id.startswith("empresa_")
         and policy.company_terms_action == "warn"
+    ):
+        action = "warn"
+
+    # Lo leido de una imagen se rebaja por el mismo motivo que lo del modelo: es
+    # probabilistico. Va antes de la rebaja del modelo y no despues porque son
+    # excluyentes -- scan_model corre sobre el texto principal, nunca sobre una
+    # vista de OCR -- y asi cada una se lee sin tener que pensar en la otra.
+    if (
+        peor is not None
+        and action == "block_content"
+        and peor.origen == ORIGEN_IMAGEN
+        and policy.ocr_action != "block"
     ):
         action = "warn"
 
