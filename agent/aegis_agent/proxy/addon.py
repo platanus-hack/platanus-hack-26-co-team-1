@@ -558,7 +558,9 @@ class Aegis:
             if self._inyeccion_en_el_envio(flow, host, classification, body, proceso):
                 return
 
-            result = scan_payload(body, query, self.policy.company_terms)
+            result = scan_payload(
+                body, query, self.policy.company_terms, self.policy.ocr_enabled
+            )
             # Una credencial que viaja hacia su propio dueno no es una fuga: es
             # su uso normal. Claude Code manda su token a api.anthropic.com en
             # cada peticion, y bloquear eso solo logra que la herramienta no

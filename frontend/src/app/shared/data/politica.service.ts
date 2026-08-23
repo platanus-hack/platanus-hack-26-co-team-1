@@ -34,6 +34,15 @@ export interface Politica {
   company_terms_action: string;
   injection_action: string;
   /**
+   * Si se lee el texto de las imágenes que salen del equipo.
+   *
+   * Apagado por defecto: cuesta ~2 s por imagen, así que es una decisión de la
+   * empresa. Vive acá y no en una variable de entorno porque `ocr_action` ya
+   * está en el panel, y elegir qué hacer con lo que se encuentra en una imagen
+   * mientras la lectura está apagada por otro lado promete algo que no ocurre.
+   */
+  ocr_enabled: boolean;
+  /**
    * Qué autoridad tiene lo que se leyó de una imagen.
    *
    * Es la tercera detección probabilística del sistema, junto con el modelo
@@ -70,6 +79,7 @@ const VACIA: Politica = {
   company_terms: {},
   company_terms_action: 'block',
   injection_action: 'warn',
+  ocr_enabled: false,
   ocr_action: 'warn',
   blind_spot_action: 'warn',
   unknown_domain_action: 'warn',

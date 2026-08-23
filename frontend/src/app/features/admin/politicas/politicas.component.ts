@@ -143,7 +143,7 @@ export class PoliticasComponent implements OnInit {
     { valor: 'warn', etiqueta: 'Sólo avisar' },
   ];
 
-  async cambiarAvanzado(campo: string, valor: string): Promise<void> {
+  async cambiarAvanzado(campo: string, valor: string | boolean): Promise<void> {
     await this.servicio.guardar({ [campo]: valor } as any);
   }
 

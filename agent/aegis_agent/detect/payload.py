@@ -592,7 +592,10 @@ def scan_preview(preview: str) -> list[Finding]:
 
 
 def scan_payload(
-    body: bytes | None, query: str = "", terminos: dict[str, str] | None = None
+    body: bytes | None,
+    query: str = "",
+    terminos: dict[str, str] | None = None,
+    leer_imagenes: bool = False,
 ) -> ScanResult:
     """Escanea un request completo, incluidas sus formas ofuscadas.
 
@@ -631,7 +634,7 @@ def scan_payload(
         # que todo lo de arriba ya se resolvio antes de considerar pagarla. La
         # extraccion de las imagenes es barata y siempre corre; lo que esta
         # apagado por defecto es leerlas.
-        if ocr.habilitado():
+        if leer_imagenes or ocr.habilitado():
             imagenes = extraer_imagenes(payload, principal)
             if imagenes:
                 # De cual vista salio cada hallazgo decide cuanta autoridad

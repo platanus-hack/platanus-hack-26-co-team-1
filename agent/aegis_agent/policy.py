@@ -157,6 +157,19 @@ class Policy:
     # el modelo ya la genero, y dejar a la herramienta esperando un cuerpo que no
     # va a llegar rompe la sesion sin evitar nada.
     injection_action: str = "warn"
+    # Si se lee el texto de las imagenes que salen del equipo.
+    #
+    # Apagado por defecto porque cuesta segundos y no milisegundos (ver
+    # detect/ocr.py), asi que tiene que ser una decision de la empresa. Lo que
+    # NO puede seguir siendo es una variable de entorno invisible: `ocr_action`
+    # ya vive en el panel, y una pantalla que deja elegir que hacer con lo que
+    # se encuentra en una imagen mientras la lectura esta apagada por otro lado
+    # promete algo que no ocurre. Las dos preguntas se contestan en el mismo
+    # lugar o ninguna sirve.
+    #
+    # AEGIS_OCR sigue funcionando como interruptor de desarrollo: manda
+    # cualquiera de los dos que diga que si.
+    ocr_enabled: bool = False
     # Que autoridad tiene lo que se leyo de una IMAGEN.
     #
     # Es la tercera deteccion probabilistica del sistema y hasta aca era la
@@ -242,6 +255,7 @@ class Policy:
             "model_labels": list(self.model_labels),
             "model_threshold": self.model_threshold,
             "injection_action": self.injection_action,
+            "ocr_enabled": self.ocr_enabled,
             "ocr_action": self.ocr_action,
             "company_terms": dict(sorted(self.company_terms.items())),
             "company_terms_action": self.company_terms_action,
@@ -303,6 +317,7 @@ class Policy:
             "blind_spot_action",
             "foreign_account_action",
             "ocr_action",
+            "ocr_enabled",
         )
 
         valores: dict[str, Any] = {}

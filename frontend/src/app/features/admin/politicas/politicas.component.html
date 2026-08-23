@@ -378,6 +378,23 @@
           Nadie transcribe la nómina: le saca una foto a la pantalla. Aegis puede leer el texto de una captura antes
           de que salga del equipo, y es el canal que más crece.
         </p>
+        <div class="mt-4 flex items-start justify-between gap-4 rounded-lg border border-aegis-border bg-aegis-surface2 px-4 py-3">
+          <div>
+            <p class="text-sm font-medium text-aegis-text">Leer el texto de las imágenes</p>
+            <p class="mt-0.5 text-xs text-aegis-faint">Cuesta ~2 s por imagen y sólo se paga cuando alguien manda una.</p>
+          </div>
+          <button
+            type="button"
+            class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+            [class.bg-aegis-accent]="politica().ocr_enabled"
+            [class.bg-aegis-surface3]="!politica().ocr_enabled"
+            (click)="cambiarAvanzado('ocr_enabled', !politica().ocr_enabled)"
+            [attr.aria-label]="(politica().ocr_enabled ? 'Dejar de leer' : 'Leer') + ' el texto de las imágenes'"
+          >
+            <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all" [style.left.px]="politica().ocr_enabled ? 22 : 2"></span>
+          </button>
+        </div>
+
         <div class="mt-4">
           <label class="aegis-label">Cuando se encuentra algo en una imagen</label>
           <select class="aegis-select mt-1.5 w-full" [ngModel]="politica().ocr_action" (ngModelChange)="cambiarAvanzado('ocr_action', $event)">

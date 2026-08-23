@@ -202,3 +202,43 @@ class TestElDescarteNoEsSilencioso(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestElInterruptorViveEnLaPolitica(unittest.TestCase):
+    """Leer imagenes se decide en el panel, no en una variable de entorno.
+
+    `ocr_action` ya estaba en la pantalla. Un panel que deja elegir que hacer
+    con lo que se encuentra en una imagen mientras la lectura esta apagada por
+    otro lado promete algo que no ocurre, que es el defecto que este repositorio
+    se sigue encontrando.
+    """
+
+    def _con_ocr_falso(self, leer_imagenes):
+        from unittest.mock import patch
+
+        from aegis_agent.detect.payload import scan_payload
+
+        with patch("aegis_agent.detect.payload.ocr.habilitado", return_value=False), \
+             patch("aegis_agent.detect.payload.extraer_imagenes", return_value=[b"png"]), \
+             patch(
+                 "aegis_agent.detect.payload.ocr.vistas",
+                 return_value=(["la contrasena del servidor es Verano2026Bogota"], False),
+             ) as vistas:
+            scan_payload(b'{"m":"captura"}', leer_imagenes=leer_imagenes)
+        return vistas
+
+    def test_apagado_no_lee_ninguna_imagen(self):
+        self._con_ocr_falso(False).assert_not_called()
+
+    def test_encendido_desde_la_politica_lee(self):
+        """Aunque AEGIS_OCR diga que no: la politica alcanza sola."""
+
+        self._con_ocr_falso(True).assert_called_once()
+
+    def test_el_campo_viaja_en_la_politica(self):
+        from aegis_agent.policy import Policy
+
+        self.assertTrue(Policy.desde_dict(Policy(ocr_enabled=True).a_dict()).ocr_enabled)
+        # Y un backend viejo que no lo nombra no lo apaga solo.
+        base = Policy(ocr_enabled=True)
+        self.assertTrue(Policy.desde_dict({"tenant_id": "acme"}, base=base).ocr_enabled)
