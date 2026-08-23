@@ -235,11 +235,48 @@ class TestSinSesionNoSeVeNada(ServicioConCuentas):
         estado, _ = self.pedir("POST", "/v1/login", {"usuario": "admin", "password": "no"})
         self.assertEqual(estado, 401)
 
-    def test_el_agente_sigue_pudiendo_subir_eventos(self):
-        # El agente no tiene con quien loguearse. Su endpoint queda abierto a
-        # proposito y lo protege la frontera de contenido, no una sesion.
+    def test_subir_un_evento_sin_credencial_ya_no_se_puede(self):
+        """Este test AFIRMABA lo contrario, y afirmaba un agujero.
+
+        Decia que el endpoint del agente "queda abierto a proposito" porque el
+        agente no tiene con quien loguearse. Pero abierto significaba que
+        cualquiera con la URL podia mandar un evento con el tenant_id que se le
+        ocurriera: inventar incidentes en el panel de una empresa y
+        atribuirselos a una persona real. La frontera de contenido impide que
+        entre el SECRETO, no que entre la mentira.
+
+        Ahora el agente si tiene con quien identificarse: su token de equipo,
+        que sale de canjear el codigo de enrolamiento.
+        """
+
         estado, _ = self.pedir("POST", "/v1/events", _evento("nuevo", "acme", "chatgpt.com"))
+        self.assertEqual(estado, 401)
+
+    def test_el_agente_sube_eventos_con_su_token_de_equipo(self):
+        from aegis_backend import enrolamiento
+
+        equipo = enrolamiento.emitir_equipo("acme")
+        estado, _ = self.pedir(
+            "POST", "/v1/events", _evento("nuevo", "acme", "chatgpt.com"), token=equipo
+        )
         self.assertEqual(estado, 202)
+
+    def test_el_tenant_del_evento_lo_decide_el_token_y_no_el_cuerpo(self):
+        """Si lo decidiera el cuerpo, el token no serviria para nada."""
+
+        from aegis_backend import enrolamiento
+
+        equipo = enrolamiento.emitir_equipo("acme")
+        self.pedir(
+            "POST",
+            "/v1/events",
+            _evento("mentiroso", "bancolombia", "chatgpt.com"),
+            token=equipo,
+        )
+        _, mias = self.pedir("GET", "/api/metrics", token=self.entrar("admin", "admin"))
+        # Aparece en el panel de acme, que es de donde es su token, y no en el
+        # de la empresa que el evento decia ser.
+        self.assertGreater(mias["metrics"]["total"], 0)
 
 
 class TestUnaEmpresaNoVeLaDeOtra(ServicioConCuentas):

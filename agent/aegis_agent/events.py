@@ -91,10 +91,16 @@ def _enviar(destino: str, line: str) -> None:
     import urllib.error
     import urllib.request
 
+    # El token de equipo dice a que empresa pertenece este agente. Sin el, el
+    # panel contesta 401 y no guarda nada: hasta que existio el enrolamiento,
+    # /v1/events aceptaba cualquier cosa de cualquiera.
+    cabeceras = {"Content-Type": "application/json"}
+    token = os.environ.get("AEGIS_EVENTS_TOKEN", "").strip()
+    if token:
+        cabeceras["Authorization"] = f"Bearer {token}"
+
     peticion = urllib.request.Request(
-        destino,
-        data=line.encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        destino, data=line.encode("utf-8"), headers=cabeceras
     )
     try:
         urllib.request.urlopen(peticion, timeout=UPLOAD_TIMEOUT).close()

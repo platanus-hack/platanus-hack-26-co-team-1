@@ -35,7 +35,7 @@ sys.path.insert(0, str(RAIZ / "backend"))
 from aegis_agent.panel.demo_data import semana_simulada  # noqa: E402
 from aegis_agent.panel.metrics import compute, repeat_offenders  # noqa: E402
 from aegis_agent.panel.render import render  # noqa: E402
-from aegis_backend import cuentas, directorio, rutas, supabase  # noqa: E402
+from aegis_backend import cuentas, directorio, enrolamiento, rutas, supabase  # noqa: E402
 from aegis_backend.classifier import anthropic_model  # noqa: E402
 from aegis_backend.store import DomainStore, PolicyStore  # noqa: E402
 
@@ -223,6 +223,24 @@ def eventos(tenant: str | None = None) -> list[dict]:
     return guardados or semana_simulada()
 
 
+
+def _url_publica(host: str) -> str:
+    """A donde tiene que reportar un agente, deducido de por donde entro.
+
+    Se saca del Host y no de una constante porque este mismo codigo corre en
+    Render, en una maquina de desarrollo y en los tests, y una URL fija manda a
+    los tres al lugar equivocado en dos de los casos. `AEGIS_URL_PUBLICA` la
+    fija cuando hay un proxy adelante que cambia el Host.
+    """
+
+    fijada = os.environ.get("AEGIS_URL_PUBLICA", "").strip().rstrip("/")
+    if fijada:
+        return fijada
+    limpio = (host or "127.0.0.1").strip()
+    esquema = "http" if limpio.startswith(("127.0.0.1", "localhost")) else "https"
+    return f"{esquema}://{limpio}"
+
+
 def guardar(evento: dict) -> None:
     global _cache
 
@@ -407,6 +425,7 @@ class Handler(BaseHTTPRequestHandler):
             "/v1/colaboradores": self._listar_colaboradores,
             "/v1/inventario": self._listar_inventario,
             "/v1/tenant": self._leer_tenant,
+            "/v1/enrolamiento": self._listar_codigos,
         }
 
         if ruta == "/panel" or (ruta == "/" and not hay_front()):
@@ -529,6 +548,15 @@ class Handler(BaseHTTPRequestHandler):
             datos = directorio.tenant(sesion["tenant"])
             self._json(200, datos or {"tenant": sesion["tenant"], "areas": []})
 
+    def _listar_codigos(self) -> None:
+        """Los codigos de la empresa de quien pregunta. De ninguna otra."""
+
+        sesion = self._sesion()
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            self._json(200, {"codigos": enrolamiento.listar(sesion["tenant"])})
+
     def _servir_el_front(self, ruta: str) -> None:
         """Un archivo del build, o el index para que enrute el navegador.
 
@@ -565,11 +593,11 @@ class Handler(BaseHTTPRequestHandler):
             if ruta == "/v1/login":
                 self._entrar(datos)
             elif ruta in ("/v1/events", "/api/events"):
-                if lleva_contenido(datos):
-                    self._json(422, {"error": "el evento contiene campos prohibidos"})
-                else:
-                    guardar(datos)
-                    self._json(202, {"accepted": datos.get("event_id")})
+                self._recibir_evento(datos)
+            elif ruta == "/v1/enrolar":
+                self._enrolar(datos)
+            elif ruta == "/v1/enrolamiento":
+                self._con_sesion(datos, self._crear_codigo)
             elif ruta == "/v1/lessons":
                 self._json(*rutas.leccion(datos, MODELO, _LECCIONES))
             elif ruta == "/v1/colaboradores":
@@ -580,6 +608,69 @@ class Handler(BaseHTTPRequestHandler):
                 self._con_sesion(datos, self._guardar_tenant)
             else:
                 self._json(404, {"error": "ruta desconocida"})
+
+    def _recibir_evento(self, datos: dict) -> None:
+        """Un evento, del equipo que dice su token y de ningun otro.
+
+        EL TENANT SALE DEL TOKEN, NUNCA DEL CUERPO. Es la misma regla que
+        gobierna a las sesiones, y aca es lo unico que separa un panel de un
+        buzon abierto: hasta este cambio cualquiera con la URL podia mandar un
+        evento con el tenant_id que se le ocurriera -- inventar incidentes en el
+        panel de una empresa y atribuirselos a una persona real. En un producto
+        cuyo valor es el registro, un registro donde cualquiera escribe no vale
+        nada.
+        """
+
+        tenant = enrolamiento.tenant_del_encabezado(
+            self.headers.get("Authorization")
+        )
+        if tenant is None:
+            self._json(401, {"error": "este equipo no esta enrolado"})
+        elif lleva_contenido(datos):
+            self._json(422, {"error": "el evento contiene campos prohibidos"})
+        else:
+            # Se pisa lo que haya dicho el cuerpo. No se compara ni se rechaza:
+            # que un agente mande otro tenant no es un ataque que valga la pena
+            # distinguir, y rechazarlo solo le ensena a quien prueba cual era el
+            # correcto.
+            guardar({**datos, "tenant_id": tenant})
+            self._json(202, {"accepted": datos.get("event_id")})
+
+    def _enrolar(self, datos: dict) -> None:
+        """Canjea el codigo por el token de equipo y por a donde reportar.
+
+        Es el unico endpoint que crea una credencial sin sesion, asi que
+        devuelve lo minimo: a que empresa entro, con que token, y a que URL
+        mandar los eventos. Nada del panel, nada de la politica.
+        """
+
+        canje = enrolamiento.canjear(str(datos.get("codigo", "")))
+        if canje is None:
+            # Un solo motivo, igual que en el login: distinguir "no existe" de
+            # "vencio" le confirma a quien prueba codigos cuales existieron.
+            self._json(400, {"error": "codigo invalido o vencido"})
+        else:
+            base = _url_publica(self.headers.get("Host", ""))
+            self._json(
+                200,
+                {
+                    "tenant": canje["tenant"],
+                    "token": canje["token"],
+                    "eventos_url": f"{base}/v1/events",
+                    "backend_url": base,
+                },
+            )
+
+    def _crear_codigo(self, tenant: str, datos: dict) -> None:
+        """Un codigo nuevo para la empresa de quien lo pide.
+
+        El tenant lo entrega `_con_sesion` desde el TOKEN y no del cuerpo, por
+        el mismo motivo de siempre: si viniera del cuerpo, cualquier admin
+        podria fabricar codigos para la empresa de otro.
+        """
+
+        self._json(200, enrolamiento.crear(tenant))
+
 
     def _entrar(self, datos: dict) -> None:
         """Login. Un solo motivo de rechazo, a proposito.

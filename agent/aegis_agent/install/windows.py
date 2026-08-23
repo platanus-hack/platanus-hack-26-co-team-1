@@ -16,6 +16,9 @@ from ..policy import PASSTHROUGH_DOMAINS
 MITM_CA_DIR = Path.home() / ".mitmproxy"
 CA_CERT = MITM_CA_DIR / "mitmproxy-ca-cert.cer"
 CA_PEM = MITM_CA_DIR / "mitmproxy-ca-cert.pem"
+# Las raices publicas MAS la CA de Aegis, en un solo archivo. Ver
+# `escribir_ca_bundle`: no es lo mismo agregar una CA que reemplazarlas todas.
+CA_BUNDLE = MITM_CA_DIR / "mitmproxy-ca-bundle.pem"
 
 INTERNET_SETTINGS = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
 CA_FRIENDLY_NAME = "mitmproxy"
@@ -41,6 +44,22 @@ def env_vars(port: int) -> dict[str, str]:
 
     Todo lo que sea Node, Python, Go o Rust lee de aca y no del registro, y ahi
     viven justamente los CLIs de IA.
+
+    **Estas variables NO son todas iguales y confundirlas rompe el equipo.**
+    `NODE_EXTRA_CA_CERTS` y `CODEX_CA_CERTIFICATE` AGREGAN nuestra CA a las que
+    la herramienta ya confia, asi que ahi va el `.pem` pelado. En cambio
+    `SSL_CERT_FILE` y `REQUESTS_CA_BUNDLE` --que leen OpenSSL, `requests`, `uv`,
+    `pip` y casi todo Python-- REEMPLAZAN el almacen entero por el archivo que
+    se les pasa. Apuntarlas al `.pem` pelado deja al equipo confiando en UNA
+    sola CA: la nuestra.
+
+    Mientras todo el trafico pase por el proxy eso no se nota, porque todos los
+    certificados los firma justamente esa CA. Pero cualquier host excluido del
+    proxy --`PASSTHROUGH_DOMAINS`, o un `NO_PROXY` mas amplio puesto por otra
+    herramienta-- se conecta directo, presenta su certificado real y ninguna CA
+    publica queda para validarlo: `invalid peer certificate: UnknownIssuer`, y
+    no solo en Aegis sino en cada `pip install` y cada `npm install` del equipo.
+    Por eso esas dos apuntan al bundle combinado.
     """
 
     proxy = f"http://127.0.0.1:{port}"
@@ -48,10 +67,12 @@ def env_vars(port: int) -> dict[str, str]:
         "HTTP_PROXY": proxy,
         "HTTPS_PROXY": proxy,
         "NO_PROXY": ",".join(sorted(PASSTHROUGH_DOMAINS) + ["localhost", "127.0.0.1"]),
+        # Semantica de AGREGAR: el .pem pelado es lo correcto.
         "NODE_EXTRA_CA_CERTS": str(CA_PEM),
         "CODEX_CA_CERTIFICATE": str(CA_PEM),
-        "SSL_CERT_FILE": str(CA_PEM),
-        "REQUESTS_CA_BUNDLE": str(CA_PEM),
+        # Semantica de REEMPLAZAR: tiene que ir el bundle completo.
+        "SSL_CERT_FILE": str(CA_BUNDLE),
+        "REQUESTS_CA_BUNDLE": str(CA_BUNDLE),
     }
 
 
@@ -65,6 +86,7 @@ def plan(port: int) -> list[Step]:
     pasos = [
         Step("Generar la CA local de Aegis", str(CA_CERT)),
         Step("Confiar la CA en tu usuario (no en la maquina)", "certutil -addstore -user Root"),
+        Step("Combinar las CAs publicas con la de Aegis", str(CA_BUNDLE)),
         Step("Enrutar el navegador al proxy local", f"HKCU {INTERNET_SETTINGS} -> 127.0.0.1:{port}"),
         Step("Excluir banca, salud y gobierno", proxy_bypass_list()),
     ]
@@ -90,6 +112,70 @@ def ensure_ca(mitmdump: str | None = None, timeout: int = 30) -> bool:
     """
 
     return entorno.generar_ca()
+
+
+def _raices_publicas() -> list[str]:
+    """Las CAs publicas del equipo, en PEM.
+
+    Primero `certifi`, que es dependencia declarada de mitmproxy y por lo tanto
+    esta garantizada tambien adentro del ejecutable empaquetado. Si por lo que
+    sea no se puede leer, se cae al almacen de Windows, que ademas es lo que la
+    maquina confia de verdad. Nunca se devuelve vacio en silencio: quien llama
+    verifica, porque un bundle sin raices publicas es exactamente el bug que
+    esto viene a arreglar.
+    """
+
+    pems: list[str] = []
+    try:
+        import certifi
+
+        pems.append(Path(certifi.where()).read_text(encoding="utf-8"))
+    except Exception:
+        import ssl
+
+        for der, _formato, _confianza in ssl.enum_certificates("ROOT"):
+            pems.append(ssl.DER_cert_to_PEM_cert(der))
+    return pems
+
+
+def escribir_ca_bundle() -> bool:
+    """Deja en disco las raices publicas MAS la CA de Aegis, en un solo archivo.
+
+    Es lo que hace que interceptar el trafico no implique dejar de confiar en
+    el resto de internet. Con el proxy en el medio los certificados los firma
+    nuestra CA; con un host excluido del proxy llega el certificado real y hace
+    falta la raiz publica. Las dos cosas tienen que poder validar, porque las
+    dos rutas existen al mismo tiempo.
+
+    Devuelve False y no escribe nada si falta cualquiera de las dos mitades. Un
+    bundle a medias es peor que ninguno: `SSL_CERT_FILE` apuntando a un archivo
+    incompleto rompe TODO el HTTPS del equipo y sin ninguna pista de por que.
+    """
+
+    raices = _raices_publicas()
+    escrito = False
+    if raices and CA_PEM.exists():
+        partes = [*raices, CA_PEM.read_text(encoding="utf-8")]
+        contenido = "\n".join(parte.strip() for parte in partes if parte.strip())
+        try:
+            MITM_CA_DIR.mkdir(parents=True, exist_ok=True)
+            CA_BUNDLE.write_text(contenido + "\n", encoding="utf-8")
+            escrito = True
+        except OSError:
+            escrito = False
+    return escrito
+
+
+def borrar_ca_bundle() -> bool:
+    """Saca el bundle del disco. Lo que se deja al instalar se saca al desinstalar."""
+
+    borrado = False
+    try:
+        CA_BUNDLE.unlink()
+        borrado = True
+    except OSError:
+        borrado = False
+    return borrado
 
 
 # -- registro de Windows ----------------------------------------------------
@@ -187,6 +273,31 @@ def clear_env_vars() -> None:
     winreg = _registry()
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as clave:
         for nombre in env_vars(0):
+            try:
+                winreg.DeleteValue(clave, nombre)
+            except FileNotFoundError:
+                pass
+
+
+def escribir_variables(valores: dict[str, str]) -> None:
+    """Deja variables sueltas en el entorno del usuario.
+
+    Existe aparte de `set_env_vars` porque son dos cosas distintas: aquellas son
+    las que hacen que los CLIs pasen por el proxy y salen de la instalacion;
+    estas dicen a que panel reportar y salen del enrolamiento, que es una
+    decision aparte y se puede cambiar sin reinstalar nada.
+    """
+
+    for nombre, valor in valores.items():
+        subprocess.run(["setx", nombre, valor], capture_output=True, text=True)
+
+
+def borrar_variables(nombres) -> None:
+    winreg = _registry()
+    with winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE
+    ) as clave:
+        for nombre in nombres:
             try:
                 winreg.DeleteValue(clave, nombre)
             except FileNotFoundError:
@@ -495,8 +606,21 @@ def install(port: int, mitmdump: str | None = None) -> list[str]:
     # instalar dejaba el navegador apuntando a 127.0.0.1 sin que nada estuviera
     # levantado, o sea a la persona SIN INTERNET, y sin ninguna pista de por que.
     # El orden no es un detalle de estilo: es el invariante.
-    set_env_vars(port)
-    hechos.append("Variables de entorno configuradas para los CLIs")
+    # El bundle va ANTES que las variables y las condiciona. El orden es el
+    # mismo invariante que el del proxy unas lineas mas arriba: `SSL_CERT_FILE`
+    # apuntando a un archivo que no existe --o que existe a medias-- no degrada
+    # a Aegis, deja al equipo entero sin poder validar un solo certificado. Se
+    # prefiere quedarse sin interceptar los CLIs antes que eso.
+    if escribir_ca_bundle():
+        hechos.append(f"Bundle de CAs (publicas + Aegis) escrito en {CA_BUNDLE}")
+        set_env_vars(port)
+        hechos.append("Variables de entorno configuradas para los CLIs")
+    else:
+        hechos.append(
+            "NO se escribio el bundle de CAs, asi que NO se tocaron las variables "
+            "de entorno: los CLIs quedan sin interceptar. Apuntar SSL_CERT_FILE a "
+            "un bundle incompleto romperia todo el trafico HTTPS del equipo."
+        )
     if registrar_en_programas():
         hechos.append("Aegis aparece en 'Agregar o quitar programas'")
     if registrar_arranque(port):
@@ -547,6 +671,12 @@ def uninstall() -> list[str]:
         hechos.append("CA retirada del almacen del usuario")
     clear_env_vars()
     hechos.append("Variables de entorno eliminadas")
+    from .. import enrolar
+
+    enrolar.olvidar()
+    hechos.append("Equipo desconectado del panel de la empresa")
+    if borrar_ca_bundle():
+        hechos.append("Bundle de CAs eliminado")
     if quitar_arranque():
         hechos.append("Arranque automatico quitado")
     if quitar_de_programas():

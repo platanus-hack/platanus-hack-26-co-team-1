@@ -1,6 +1,7 @@
 """Un solo punto de entrada, que es lo que se empaqueta como Aegis.exe.
 
     aegis instalar      CA + proxy + variables + arranque automatico, y arranca
+    aegis enrolar CODIGO  conecta este equipo al panel de tu empresa
     aegis panel         abre el panel local: metricas y el interruptor
     aegis prender       vuelve a interceptar (no reinstala nada)
     aegis apagar        deja de interceptar (no desinstala nada)
@@ -136,6 +137,20 @@ def _estado(puerto: int) -> int:
     # escribio esto. "Configurado" y "protegido" no son lo mismo y hasta ahora se
     # veian iguales.
     protegido = estado["escuchando"] and estado["apunta_a_aegis"] and estado["ca_confiada"]
+
+    from . import enrolar as _e
+
+    conexion = _e.estado()
+    print()
+    if conexion["conectado"]:
+        print(f"  Reporta al panel: {conexion['panel']}")
+    elif conexion["a_medias"]:
+        # Este estado existe y es el peor de los tres: manda eventos que el
+        # panel rechaza uno por uno, en silencio, y desde afuera se ve igual
+        # que "nadie usa IA".
+        print("  ATENCION: la conexion al panel quedo a medias. Corre `aegis enrolar`.")
+    else:
+        print("  No reporta a ningun panel. Con un codigo: `aegis enrolar CODIGO`.")
     print()
     if protegido:
         print("  Aegis esta protegiendo este equipo.")
@@ -219,6 +234,40 @@ def _demo(puerto: int) -> int:
     return run.main() or 0
 
 
+def _enrolar(puerto: int) -> int:
+    """Conecta este equipo al panel de una empresa, con el codigo que le dieron.
+
+    Va aparte de `instalar` a proposito: instalar decide si este equipo esta
+    protegido, y enrolar decide a quien le reporta. Mezclarlas obligaria a
+    desinstalar para cambiar de panel.
+    """
+
+    from . import enrolar
+
+    codigo = " ".join(sys.argv[2:]).strip() if len(sys.argv) > 2 else ""
+    if not codigo and sys.stdin and sys.stdin.isatty():
+        print("  Pega el codigo que te dio tu empresa (AEGIS-XXXX-XXXX).")
+        try:
+            codigo = input("  Codigo: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            codigo = ""
+    if not codigo:
+        print("  Falta el codigo:  aegis enrolar AEGIS-XXXX-XXXX")
+        return 2
+
+    ok, resultado = enrolar.canjear(codigo)
+    if not ok:
+        print(f"  {resultado}")
+        return 1
+
+    enrolar.guardar(resultado)
+    print(f"  Listo: este equipo ahora reporta a la empresa '{resultado['tenant']}'.")
+    print(f"  Panel: {resultado['backend_url']}")
+    print("  Lo que sale de aca sigue siendo solo el aviso, nunca el contenido.")
+    return 0
+
+
+
 def _inicio(puerto: int) -> int:
     """Lo que pasa al hacer DOBLE CLIC en Aegis.exe, que es como se abre esto.
 
@@ -266,7 +315,38 @@ def _inicio(puerto: int) -> int:
         print("  No se toco nada. Cuando quieras: aegis instalar")
         return 0
     print()
-    return _instalar(puerto)
+    codigo = _instalar(puerto)
+    if codigo == 0:
+        _ofrecer_enrolar()
+    return codigo
+
+
+def _ofrecer_enrolar() -> None:
+    """Se pregunta al final de instalar, cuando el codigo esta a mano.
+
+    Antes no se preguntaba nunca, asi que el agente quedaba protegiendo y sin
+    reportar -- y nadie se enteraba, porque no falla: simplemente no aparece.
+    """
+
+    from . import enrolar
+
+    if enrolar.estado()["conectado"]:
+        return
+    print()
+    print("  Si tu empresa te dio un codigo, pegalo aca para que tu panel vea")
+    print("  la actividad de este equipo. Podes hacerlo despues con `aegis enrolar`.")
+    try:
+        codigo = input("  Codigo (Enter para saltar): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        codigo = ""
+    if codigo:
+        ok, resultado = enrolar.canjear(codigo)
+        if ok:
+            enrolar.guardar(resultado)
+            print(f"  Conectado a '{resultado['tenant']}'.")
+        else:
+            print(f"  {resultado}")
+            print("  Podes reintentarlo cuando quieras: aegis enrolar CODIGO")
 
 
 
@@ -351,6 +431,7 @@ ACCIONES: dict[str, str] = {
     "estado": "_estado",
     "status": "_estado",
     "inicio": "_inicio",
+    "enrolar": "_enrolar",
     "panel": "_panel",
     "prender": "_prender",
     "encender": "_prender",

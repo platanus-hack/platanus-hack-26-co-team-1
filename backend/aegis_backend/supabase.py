@@ -59,6 +59,7 @@ TIMEOUT = 6
 APAGADO = "AEGIS_SUPABASE_DISABLED"
 TABLA_EVENTOS = "aegis_eventos"
 TABLA_POLITICAS = "aegis_politicas"
+TABLA_ENROLAMIENTO = "aegis_enrolamiento"
 
 
 def _url() -> str:
@@ -280,3 +281,33 @@ def leer_politicas() -> dict | None:
     if filas is not None:
         politicas = {f["tenant"]: f.get("datos") or {} for f in filas if f.get("tenant")}
     return politicas
+
+
+# -- enrolamiento -------------------------------------------------------------
+#
+# El codigo que ata un equipo a una empresa. No es contenido de nadie y no lleva
+# datos personales: es un pasaje. Se guarda entero -- no hasheado -- porque el
+# admin que lo genero tiene que poder volver a leerlo para pasarselo a alguien,
+# y quien tiene sesion en el panel ya puede hacer mas que canjearlo.
+
+
+def guardar_enrolamiento(fila: dict) -> bool:
+    respuesta = _pedir(
+        "POST",
+        TABLA_ENROLAMIENTO,
+        [fila],
+        {"Prefer": "resolution=merge-duplicates,return=minimal"},
+    )
+    return respuesta is not None
+
+
+def leer_enrolamiento(codigo: str) -> dict | None:
+    filas = _pedir("GET", f"{TABLA_ENROLAMIENTO}?codigo=eq.{codigo}&select=*")
+    return filas[0] if filas else None
+
+
+def leer_enrolamientos(tenant: str) -> list[dict] | None:
+    return _pedir(
+        "GET",
+        f"{TABLA_ENROLAMIENTO}?tenant=eq.{tenant}&select=*&order=creado_en.desc",
+    )

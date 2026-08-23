@@ -7,7 +7,9 @@ lea el estado real sin modificarlo, y que install y uninstall sean simetricos.
 """
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aegis_agent.install import firewall, windows
@@ -74,6 +76,111 @@ class TestVariables(unittest.TestCase):
         variables = windows.env_vars(8899)
         self.assertTrue(variables["NODE_EXTRA_CA_CERTS"].endswith(".pem"))
 
+    def test_las_que_reemplazan_el_almacen_usan_el_bundle(self):
+        """La regresion que rompio el equipo entero, no solo a Aegis.
+
+        `SSL_CERT_FILE` y `REQUESTS_CA_BUNDLE` no agregan nuestra CA: reemplazan
+        todas. Apuntadas al .pem pelado, el equipo pasa a confiar en UNA sola CA
+        y cualquier host que no pase por el proxy --banca, gobierno, o un pypi
+        excluido por otra herramienta-- falla con UnknownIssuer. Eso no rompe
+        Aegis: rompe cada pip y cada npm de la maquina.
+        """
+
+        variables = windows.env_vars(8899)
+        for nombre in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+            with self.subTest(variable=nombre):
+                self.assertEqual(variables[nombre], str(windows.CA_BUNDLE))
+                self.assertNotEqual(variables[nombre], str(windows.CA_PEM))
+
+    def test_las_que_agregan_siguen_con_el_pem_pelado(self):
+        """El reverso: pasarles el bundle tampoco seria gratis.
+
+        Node y Codex AGREGAN el archivo a lo que ya confian. Si ademas leyeran
+        solo el primer certificado, darles el bundle les haria agregar una raiz
+        publica en vez de la nuestra y la interceptacion dejaria de validar.
+        Cada variable con la semantica que le toca.
+        """
+
+        variables = windows.env_vars(8899)
+        for nombre in ("NODE_EXTRA_CA_CERTS", "CODEX_CA_CERTIFICATE"):
+            with self.subTest(variable=nombre):
+                self.assertEqual(variables[nombre], str(windows.CA_PEM))
+
+
+class TestBundleDeCAs(unittest.TestCase):
+    """El bundle tiene que tener las dos mitades. Siempre, o ninguna."""
+
+    def _entorno_falso(self, carpeta, con_ca_de_aegis=True):
+        directorio = Path(carpeta)
+        ca_pem = directorio / "mitmproxy-ca-cert.pem"
+        if con_ca_de_aegis:
+            ca_pem.write_text("-----BEGIN CERTIFICATE-----\\nAEGIS\\n-----END CERTIFICATE-----", encoding="utf-8")
+        return directorio, ca_pem, directorio / "mitmproxy-ca-bundle.pem"
+
+    def test_el_bundle_junta_las_publicas_con_la_de_aegis(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            directorio, ca_pem, bundle = self._entorno_falso(carpeta)
+            with patch.object(windows, "MITM_CA_DIR", directorio), \
+                 patch.object(windows, "CA_PEM", ca_pem), \
+                 patch.object(windows, "CA_BUNDLE", bundle), \
+                 patch.object(windows, "_raices_publicas", return_value=["-----BEGIN CERTIFICATE-----\\nPUBLICA\\n-----END CERTIFICATE-----"]):
+                self.assertTrue(windows.escribir_ca_bundle())
+            contenido = bundle.read_text(encoding="utf-8")
+            self.assertIn("PUBLICA", contenido)
+            self.assertIn("AEGIS", contenido)
+
+    def test_sin_raices_publicas_no_escribe_nada(self):
+        """Un bundle a medias es peor que ninguno: mejor no tocar el disco."""
+
+        with tempfile.TemporaryDirectory() as carpeta:
+            directorio, ca_pem, bundle = self._entorno_falso(carpeta)
+            with patch.object(windows, "MITM_CA_DIR", directorio), \
+                 patch.object(windows, "CA_PEM", ca_pem), \
+                 patch.object(windows, "CA_BUNDLE", bundle), \
+                 patch.object(windows, "_raices_publicas", return_value=[]):
+                self.assertFalse(windows.escribir_ca_bundle())
+            self.assertFalse(bundle.exists())
+
+    def test_sin_la_ca_de_aegis_tampoco_escribe(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            directorio, ca_pem, bundle = self._entorno_falso(carpeta, con_ca_de_aegis=False)
+            with patch.object(windows, "MITM_CA_DIR", directorio), \
+                 patch.object(windows, "CA_PEM", ca_pem), \
+                 patch.object(windows, "CA_BUNDLE", bundle), \
+                 patch.object(windows, "_raices_publicas", return_value=["-----BEGIN CERTIFICATE-----\\nPUBLICA\\n-----END CERTIFICATE-----"]):
+                self.assertFalse(windows.escribir_ca_bundle())
+            self.assertFalse(bundle.exists())
+
+    def test_las_raices_publicas_no_vienen_vacias(self):
+        """Si esto falla, el instalador no va a poder escribir ningun bundle."""
+
+        self.assertTrue(windows._raices_publicas())
+
+    def test_si_el_bundle_falla_no_se_tocan_las_variables(self):
+        """El invariante: antes sin interceptar los CLIs que sin HTTPS."""
+
+        with patch.object(windows, "ensure_ca", return_value=True), \
+             patch.object(windows, "trust_ca", return_value=True), \
+             patch.object(windows, "escribir_ca_bundle", return_value=False), \
+             patch.object(windows, "registrar_arranque", return_value=True), \
+             patch.object(windows, "registrar_en_programas", return_value=True), \
+             patch.object(windows, "set_env_vars") as poner:
+            hechos = windows.install(8899)
+        poner.assert_not_called()
+        self.assertTrue(any("NO se escribio el bundle" in hecho for hecho in hechos))
+
+    def test_desinstalar_saca_el_bundle_que_instalar_dejo(self):
+        with patch.object(windows, "write_proxy_settings"), \
+             patch.object(windows, "untrust_ca", return_value=False), \
+             patch.object(windows, "clear_env_vars"), \
+             patch.object(windows, "quitar_arranque", return_value=False), \
+             patch.object(windows, "quitar_de_programas", return_value=False), \
+             patch.object(windows, "borrar_ca_bundle", return_value=True) as borrar, \
+             patch.object(firewall, "reglas_puestas", return_value=[]):
+            hechos = windows.uninstall()
+        borrar.assert_called_once()
+        self.assertTrue(any("Bundle de CAs eliminado" in hecho for hecho in hechos))
+
 
 @unittest.skipUnless(ES_WINDOWS, "el instalador es especifico de Windows")
 class TestEstadoReal(unittest.TestCase):
@@ -112,6 +219,7 @@ class TestSeEncuentraParaDesinstalar(unittest.TestCase):
 
         with patch.object(windows, "ensure_ca", return_value=True), \
              patch.object(windows, "trust_ca", return_value=True), \
+             patch.object(windows, "escribir_ca_bundle", return_value=True), \
              patch.object(windows, "set_env_vars"), \
              patch.object(windows, "registrar_arranque", return_value=True), \
              patch.object(windows, "registrar_en_programas", return_value=True) as registrar:
