@@ -2,9 +2,18 @@ Aegis se pone entre tu computadora y los servicios de IA —ChatGPT, Claude, Cop
 
 Cuando encuentra algo, te lo explica antes de que salga.
 
+## Cuál descargar
+
+| | Peso | Qué detecta |
+|---|---|---|
+| **`Aegis-windows.zip`** | 103 MB | Credenciales, documentos, tarjetas, capturas de pantalla. Es el que querés para probar. |
+| `Aegis-windows-completo.zip` | 1,2 GB | Todo lo anterior **más el modelo local**, que es lo único que ve los datos de empresa: *"el margen con Alpina quedó en 4%"*. Las reglas ven 0 de 14 de esos casos; el modelo es lo que los cubre. |
+
+El completo trae el modelo adentro y viene prendido: no descarga nada en el primer uso.
+
 ## Para instalarlo
 
-1. Descargá `Aegis-windows.zip` y descomprimilo donde quieras.
+1. Descargá el zip y descomprimilo donde quieras.
 2. Doble clic en **`Instalar Aegis.bat`**.
 3. Windows te va a pedir permiso para confiar en el certificado de Aegis. Hay que **aceptar**: sin eso, cada sitio seguro te muestra una advertencia.
 4. Si tu empresa te dio un código, pegalo cuando te lo pida. Ese equipo empieza a reportar a su panel.
