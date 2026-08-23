@@ -289,6 +289,128 @@ def autenticar(usuario: str, contrasena: str) -> dict | None:
     return valida
 
 
+# -- el equipo de una empresa ------------------------------------------------
+#
+# Hasta aca existia UNA cuenta por empresa: la que crea el registro. El rol se
+# emitia y se guardaba, pero no habia forma de crear una segunda, asi que
+# `LECTOR` era inalcanzable y la unica cuenta posible era administradora. Un rol
+# que no se puede asignar no es un permiso, es un campo.
+
+LARGO_MINIMO_DE_CONTRASENA = 8
+
+
+def del_equipo(tenant: str) -> list[dict]:
+    """Las cuentas de una empresa, sin nada con lo que se pueda entrar.
+
+    Nunca salen `hash` ni `sal`. No es paranoia: el hash de scrypt es caro de
+    romper pero no imposible, y una lista de hashes en una respuesta JSON es
+    una lista de hashes en el historial del navegador, en los logs de un proxy
+    y en cualquier extension que lea la pagina.
+    """
+
+    filas = None
+    if supabase.configurado():
+        filas = supabase._pedir("GET", f"{TABLA}?tenant=eq.{tenant}&select=*")
+    if filas is None:
+        filas = [f for f in _memoria.values() if f.get("tenant") == tenant]
+    return sorted(
+        ({"usuario": f["usuario"], "rol": rol_de(f)} for f in filas),
+        key=lambda f: f["usuario"],
+    )
+
+
+def sumar_al_equipo(tenant: str, usuario: str, contrasena: str, rol: str) -> dict | None:
+    """Una cuenta nueva para esta empresa. None si no se puede.
+
+    Un solo motivo de rechazo, y hay una razon de seguridad concreta detras de
+    que el usuario ya exista sea uno de ellos: el usuario es la clave de la
+    tabla y `guardar` hace upsert. Sin este chequeo, el admin de una empresa
+    escribe el nombre de un usuario de OTRA y le pisa la contrasena y el tenant
+    -- se queda con su cuenta. Es la unica forma de cruzar la frontera entre
+    empresas que quedaba abierta, y aparece justo al agregar esta pantalla.
+    """
+
+    limpio = (usuario or "").strip().lower()
+    valido = (
+        bool(limpio)
+        and len(contrasena or "") >= LARGO_MINIMO_DE_CONTRASENA
+        and rol in (ADMIN, LECTOR)
+        and buscar(limpio) is None
+    )
+    if not valido:
+        return None
+
+    fila = guardar(limpio, contrasena, tenant, rol)
+    return {"usuario": fila["usuario"], "rol": fila["rol"]}
+
+
+def _es_de(usuario: str, tenant: str) -> dict | None:
+    """La cuenta, solo si de verdad es de esta empresa.
+
+    Todo lo que cambia una cuenta pasa por aca. El tenant sale de la sesion y la
+    cuenta se busca por nombre, asi que sin esta comparacion el admin de una
+    empresa cambia el rol o borra la cuenta de otra escribiendo su usuario.
+    """
+
+    cuenta = buscar(usuario)
+    return cuenta if cuenta and cuenta.get("tenant") == tenant else None
+
+
+def _quedan_admins(tenant: str, sin: str) -> bool:
+    """Si la empresa sigue teniendo quien la administre sacando a `sin`."""
+
+    return any(
+        c["usuario"] != sin and c["rol"] == ADMIN for c in del_equipo(tenant)
+    )
+
+
+def cambiar_rol(tenant: str, usuario: str, rol: str) -> dict | None:
+    """El rol de alguien del equipo. None si no se puede.
+
+    No deja quitar el ultimo admin. Sin eso, la empresa se queda sin nadie que
+    pueda cambiar nada --ni siquiera deshacerlo-- y la unica salida es que
+    alguien entre a la base a mano.
+    """
+
+    limpio = (usuario or "").strip().lower()
+    cuenta = _es_de(limpio, tenant)
+    permitido = (
+        cuenta is not None
+        and rol in (ADMIN, LECTOR)
+        and (rol == ADMIN or _quedan_admins(tenant, limpio))
+    )
+    if not permitido:
+        return None
+
+    fila = {**cuenta, "rol": rol}
+    if supabase.configurado():
+        supabase._pedir(
+            "POST",
+            TABLA,
+            [fila],
+            {"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+    _memoria[limpio] = fila
+    return {"usuario": limpio, "rol": rol}
+
+
+def sacar_del_equipo(tenant: str, usuario: str) -> bool:
+    """Da de baja una cuenta. False si no se puede.
+
+    Tampoco deja sacar al ultimo admin, por lo mismo que `cambiar_rol`.
+    """
+
+    limpio = (usuario or "").strip().lower()
+    cuenta = _es_de(limpio, tenant)
+    if cuenta is None or not _quedan_admins(tenant, limpio):
+        return False
+
+    if supabase.configurado():
+        supabase._pedir("DELETE", f"{TABLA}?usuario=eq.{limpio}")
+    _memoria.pop(limpio, None)
+    return True
+
+
 def sembrar_si_no_hay(usuario: str, contrasena: str, tenant: str) -> bool:
     """Crea la cuenta inicial si todavia no existe. True si la creo.
 

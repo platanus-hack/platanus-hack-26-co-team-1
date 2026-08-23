@@ -129,14 +129,59 @@ _descartes_por_latencia = 0
 _latencias_ms: list[float] = []
 
 
-def habilitado() -> bool:
-    """El modelo es opcional y se prende explicitamente.
+def _empaquetado_adentro() -> str:
+    """La carpeta del modelo dentro del ejecutable, si este paquete la trae.
 
-    Arrancar descargando medio giga la primera vez que alguien abre un chat seria
-    una forma rara de presentarse.
+    El instalador completo copia los pesos adentro para que el primer uso NO
+    dispare una descarga de 1.102 MB desde Hugging Face. Un paquete que se llama
+    completo y en el primer envio se baja un giga no es completo: es el liviano
+    con una sorpresa.
     """
 
-    return os.environ.get("AEGIS_T2", "").strip().lower() in ("1", "true", "si", "on")
+    import sys
+
+    base = getattr(sys, "_MEIPASS", "")
+    if base:
+        carpeta = os.path.join(base, "modelo")
+        if os.path.isdir(carpeta):
+            return carpeta
+    return ""
+
+
+def _de_donde_cargar() -> str:
+    """La carpeta local si el paquete la trae; si no, el nombre en Hugging Face.
+
+    En ese orden y no al reves: preguntar primero por la red convierte un
+    arranque sin internet en un agente sin T2, cuando los pesos estaban ahi al
+    lado.
+    """
+
+    return _empaquetado_adentro() or os.environ.get(
+        "AEGIS_T2_MODELO", MODELO_POR_DEFECTO
+    )
+
+
+
+def habilitado() -> bool:
+    """Si T2 corre. Prendido solo cuando el modelo ya esta en el equipo.
+
+    En el paquete LIVIANO hay que prenderlo a mano, y es lo correcto: sin los
+    pesos, encenderlo dispararia una descarga de 1.102 MB la primera vez que
+    alguien abre un chat, que es una forma rara de presentarse.
+
+    En el paquete COMPLETO viene prendido, porque el modelo ya viajo adentro.
+    Quien se bajo 1,3 GB para tener T2 no deberia tener que averiguar despues
+    que ademas hay que activarlo con una variable de entorno: eso convierte un
+    clic en una busqueda en la documentacion.
+
+    AEGIS_T2=0 lo apaga igual, para poder medir con y sin modelo en la misma
+    maquina.
+    """
+
+    pedido = os.environ.get("AEGIS_T2", "").strip().lower()
+    if pedido in ("0", "false", "no", "off"):
+        return False
+    return pedido in ("1", "true", "si", "on") or bool(_empaquetado_adentro())
 
 
 def disponible() -> bool:
@@ -159,7 +204,7 @@ def cargar(nombre: str = "") -> object | None:
                 from gliner import GLiNER
 
                 _modelo = GLiNER.from_pretrained(
-                    nombre or os.environ.get("AEGIS_T2_MODELO", MODELO_POR_DEFECTO)
+                    nombre or _de_donde_cargar()
                 )
             except Exception:
                 # Falta el paquete, no hay red, el modelo no existe: en todos los

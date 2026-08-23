@@ -290,7 +290,16 @@ class TestSonTresRolesYNoDos(PanelLevantado):
 
     # Las lecturas de empresa: admin y lector si, colaborador no.
 
-    LECTURAS = ("/v1/colaboradores", "/v1/inventario", "/v1/tenant", "/api/metrics")
+    LECTURAS = (
+        "/v1/colaboradores",
+        "/v1/inventario",
+        "/v1/tenant",
+        "/api/metrics",
+        # Quien entra al panel y con que permiso. Un lector lo ve -- necesita
+        # saber a quien pedirle lo que el no puede hacer -- y un colaborador no:
+        # es el mapa de a quien conviene atacar.
+        "/v1/usuarios",
+    )
 
     def test_el_admin_lee_el_panel(self):
         token = self.entrar("jefa", "clave-larga-1")

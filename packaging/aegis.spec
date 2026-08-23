@@ -21,6 +21,7 @@ resto del paquete junto. Queda como complemento para quien lo quiera, y el agent
 protege igual sin el: hay tests que lo verifican.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -84,10 +85,29 @@ ocultos = [
 
 # Lo que NO va. Cada uno con su motivo, porque una lista de exclusiones sin
 # explicacion es lo primero que alguien deshace sin saber que rompe.
-excluidos = [
-    "torch",           # 442 MB, solo lo necesita T2, que es opcional por diseno
+# El paquete COMPLETO lleva T2 adentro. Se pide con AEGIS_COMPLETO=1.
+#
+# Existen los dos porque el modelo pesa mas que todo el resto junto -- torch son
+# 432 MB, transformers 93 y los pesos 1.102 -- y la mayoria de la gente quiere
+# probar el producto antes de decidir si le paga esa descarga. El liviano
+# protege igual con T1, el diccionario y el OCR; el completo agrega lo unico que
+# ve los datos de empresa, que no tienen formato.
+#
+# Se intento evitarlo exportando el modelo a ONNX, que habria dejado el paquete
+# chico porque onnxruntime ya viaja por el OCR. No alcanza: `gliner/model.py`
+# importa torch y transformers a nivel de MODULO, asi que sin ese arbol el
+# modelo no se carga ni en ONNX. Y correr el ONNX a mano -- sin gliner -- obliga
+# a reimplementar el armado de spans y el decodificado, donde un desajuste sutil
+# no falla: detecta cero, en silencio. Queda anotado para hacerlo bien.
+COMPLETO = os.environ.get("AEGIS_COMPLETO", "").strip() in ("1", "true", "si")
+
+_solo_en_el_liviano = [
+    "torch",           # 432 MB, solo lo necesita T2
     "gliner",          # idem
     "transformers",    # idem
+]
+
+excluidos = ([] if COMPLETO else list(_solo_en_el_liviano)) + [
     "playwright",      # solo los tests de navegador
     "tkinter",
     "matplotlib",
@@ -95,6 +115,24 @@ excluidos = [
     "pytest",
     "unittest",        # el paquete no corre tests
 ]
+
+# Los pesos del modelo, cuando el paquete es el completo.
+#
+# No alcanza con meter torch: `from_pretrained` se baja 1.102 MB de Hugging Face
+# la primera vez, y un "instalador completo" que en el primer uso descarga un
+# giga no es completo. Se copia el snapshot entero adentro y el agente lo busca
+# ahi antes que en ningun otro lado (ver detect/model.py).
+if COMPLETO:
+    _hf = Path.home() / ".cache/huggingface/hub/models--urchade--gliner_multi-v2.1"
+    _snaps = sorted(_hf.glob("snapshots/*")) if _hf.exists() else []
+    if _snaps:
+        for _f in _snaps[-1].rglob("*"):
+            if _f.is_file():
+                datos.append((str(_f.resolve()), str(Path("modelo") / _f.parent.relative_to(_snaps[-1]))))
+        print(f"paquete COMPLETO: {len(datos)} archivos de datos, modelo incluido")
+    else:
+        print("AVISO: AEGIS_COMPLETO pedido pero el modelo no esta en la cache de HF")
+
 
 a = Analysis(
     # El envoltorio, NO el modulo del paquete. PyInstaller corre su script de
