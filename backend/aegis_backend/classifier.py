@@ -199,8 +199,14 @@ def _ask(ask_model, domain: str, evidencia: Evidence) -> dict | None:
     return respuesta
 
 
-def anthropic_model():
-    """Cliente real, solo si hay API key en el entorno. Si no, devuelve None."""
+def anthropic_model(max_tokens: int = 300):
+    """Cliente real, solo si hay API key en el entorno. Si no, devuelve None.
+
+    `max_tokens` por defecto alcanza para clasificar un dominio o escribir una
+    leccion (un par de oraciones). Quien pide algo mas largo -como los insights
+    del panel, que son varios items- pide su propio cliente con un limite mayor;
+    la key se sigue leyendo del mismo lugar.
+    """
 
     # No solo del entorno: ver secretos.py, poner ANTHROPIC_API_KEY como
     # variable de usuario le cambia la autenticacion a los CLI de IA de esa
@@ -217,7 +223,7 @@ def anthropic_model():
             cuerpo = json.dumps(
                 {
                     "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 300,
+                    "max_tokens": max_tokens,
                     "messages": [{"role": "user", "content": prompt}],
                 }
             ).encode()

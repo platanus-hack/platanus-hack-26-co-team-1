@@ -26,19 +26,20 @@ import urllib.request
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "agent"))
 sys.path.insert(0, str(RAIZ / "backend"))
 
 from aegis_agent.panel.demo_data import semana_simulada  # noqa: E402
-from aegis_agent.panel.metrics import compute, repeat_offenders  # noqa: E402
+from aegis_agent.panel.metrics import compute, filter_by_range, repeat_offenders  # noqa: E402
 from aegis_agent.panel.render import render  # noqa: E402
 from aegis_backend import (  # noqa: E402
     cuentas,
     directorio,
     enrolamiento,
+    insights,
     intentos,
     rutas,
     supabase,
@@ -292,7 +293,16 @@ _BASE = Path(DATA_DIR) if DATA_DIR else RAIZ
 DOMINIOS = DomainStore(_BASE / "aegis-domains.json")
 POLITICAS = PolicyStore(_BASE / "aegis-policies.json")
 MODELO = anthropic_model()
+# Los insights piden un JSON con varios items -mas largo que un veredicto de
+# dominio o una leccion-, asi que llevan su propio limite de tokens. Misma key,
+# mismo `secretos.py` por debajo.
+MODELO_INSIGHTS = anthropic_model(max_tokens=1800)
 _LECCIONES: dict[tuple, dict] = {}
+# Cache de insights por contenido (ver `insights.clave_de_cache`) y no por
+# tenant: dos empresas con la misma foto agregada de la semana -algo que va a
+# pasar seguido en una semana tranquila, donde la foto es "todo en cero"-
+# reciben el mismo texto en vez de pagarlo dos veces.
+_INSIGHTS: dict[str, dict] = {}
 
 
 def _tenant_de(ruta: str, prefijo: str) -> str:
@@ -424,6 +434,64 @@ class Handler(BaseHTTPRequestHandler):
 
         self._json(429, {"error": "demasiados intentos, esperá unos minutos"})
 
+    def _es_admin(self, sesion: dict | None) -> bool:
+        return sesion is not None and cuentas.puede_escribir(sesion)
+
+    def _puede_mirar(self, sesion: dict | None) -> bool:
+        """Quien puede ver el panel de la empresa, aunque no pueda cambiarlo.
+
+        MIRAR Y ESCRIBIR NO SON LA MISMA PUERTA, y este archivo llego a tener
+        una sola. Las cuentas de colaborador y el rol `lector` nacieron en dos
+        ramas distintas, y cada una resolvio "no es admin" a su manera: la de
+        colaboradores cerro TODA lectura de empresa, que es correcto para un
+        colaborador y deja afuera a un lector -- una cuenta que existe
+        justamente para mirar y no tocar. Al juntarlas, `lector` se comia un 403
+        en su unica funcion.
+
+        Asi que son tres roles y no dos:
+
+            admin        escribe y mira
+            lector       mira, no escribe
+            colaborador  ni una cosa ni la otra: solo lo suyo
+
+        `/v1/mi-actividad` y `/v1/password` siguen siendo de cualquier cuenta
+        sobre si misma, que es lo que le queda a un colaborador.
+        """
+
+        return sesion is not None and cuentas.rol_de(sesion) in (
+            cuentas.ADMIN,
+            cuentas.LECTOR,
+        )
+
+    def _rechazar_no_puede_mirar(self, sesion: dict | None) -> None:
+        """El 401/403 de las lecturas de empresa. Ver _puede_mirar."""
+
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            self._json(403, {"error": "esta cuenta no ve el panel de la empresa"})
+
+    def _rechazar_no_admin(self, sesion: dict | None) -> None:
+        """401 si no habia sesion, 403 si la habia pero no era de administracion.
+
+        La distincion importa: a una cuenta de colaborador que entro bien y
+        pidio una pantalla que no es la suya no se le puede decir "sesion
+        requerida" -la tiene-, eso confundiria a cualquiera que este debugueando
+        por que su cuenta valida no puede entrar a un lugar.
+
+        Existe porque hasta aca cualquier cuenta autenticada -inclusive una de
+        colaborador, que ahora existen de verdad- podia leer `/api/metrics` de
+        toda la empresa o reescribir la politica: todo lo que llegaba hasta aca
+        miraba que hubiera sesion, nunca que rol tuviera. `/v1/mi-actividad` y
+        `/v1/password` son las excepciones a proposito: esas dos son de
+        cualquier cuenta sobre si misma.
+        """
+
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            self._json(403, {"error": "esta cuenta no tiene permiso de administracion"})
+
     def _cuerpo(self) -> dict | None:
         largo = int(self.headers.get("Content-Length", "0") or 0)
         try:
@@ -452,6 +520,8 @@ class Handler(BaseHTTPRequestHandler):
         exactas = {
             "/api/metrics": self._metricas,
             "/v1/metrics": self._metricas,
+            "/api/insights": self._insights,
+            "/v1/insights": self._insights,
             "/v1/health": self._salud,
             "/v1/policy": self._politica_por_defecto,
             "/v1/stats": self._estadisticas,
@@ -459,6 +529,7 @@ class Handler(BaseHTTPRequestHandler):
             "/v1/inventario": self._listar_inventario,
             "/v1/tenant": self._leer_tenant,
             "/v1/enrolamiento": self._listar_codigos,
+            "/v1/mi-actividad": self._mi_actividad,
             "/descargar": self._descargar,
         }
 
@@ -495,16 +566,31 @@ class Handler(BaseHTTPRequestHandler):
         )
         self._responder(200, cuerpo.encode("utf-8"), "text/html; charset=utf-8")
 
+    def _registrados_del_rango(self, tenant: str) -> list[dict]:
+        """Los eventos del tenant, acotados al `desde`/`hasta` del pedido.
+
+        Comun a `/api/metrics` y `/api/insights`: los dos tienen que estar
+        mirando la misma ventana, o el resumen pedagogico hablaria de una semana
+        distinta a la que muestran los numeros de al lado.
+        """
+
+        parametros = parse_qs(urlsplit(self.path).query)
+        desde = parametros.get("desde", [""])[0]
+        hasta = parametros.get("hasta", [""])[0]
+        return filter_by_range(eventos(tenant), desde, hasta)
+
     def _metricas(self) -> None:
         from dataclasses import asdict
 
         sesion = self._sesion()
-        if sesion is None:
-            self._json(401, {"error": "sesion requerida"})
+        if not self._puede_mirar(sesion):
+            self._rechazar_no_puede_mirar(sesion)
         else:
             # `sesion["tenant"]` y no un parametro del pedido: es lo unico que
-            # impide que una empresa lea el panel de otra.
-            registrados = eventos(sesion["tenant"])
+            # impide que una empresa lea el panel de otra. `desde`/`hasta` si
+            # vienen del pedido -son el rango que eligio quien mira el panel,
+            # no un dato que decida a que empresa le pertenecen los eventos.
+            registrados = self._registrados_del_rango(sesion["tenant"])
             calculadas = compute(registrados)
             self._json(
                 200,
@@ -521,6 +607,18 @@ class Handler(BaseHTTPRequestHandler):
                     "tenant": sesion["tenant"],
                 },
             )
+
+    def _insights(self) -> None:
+        """El resumen pedagogico -riesgo, adopcion, estrategias- de la misma
+        ventana que `/api/metrics`. Nunca ve una persona: ver `insights.py`."""
+
+        sesion = self._sesion()
+        if not self._puede_mirar(sesion):
+            self._rechazar_no_puede_mirar(sesion)
+        else:
+            registrados = self._registrados_del_rango(sesion["tenant"])
+            resultado = insights.generar(compute(registrados), MODELO_INSIGHTS, _INSIGHTS)
+            self._json(200, resultado)
 
     def _salud(self) -> None:
         """Vive o no vive. Nada mas, y eso es a proposito.
@@ -579,8 +677,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _listar_colaboradores(self) -> None:
         sesion = self._sesion()
-        if sesion is None:
-            self._json(401, {"error": "sesion requerida"})
+        if not self._puede_mirar(sesion):
+            self._rechazar_no_puede_mirar(sesion)
         else:
             tenant = sesion["tenant"]
             # Los intentos salen de los eventos y no de una columna: guardarlos
@@ -596,10 +694,47 @@ class Handler(BaseHTTPRequestHandler):
             ]
             self._json(200, {"colaboradores": gente, "tenant": tenant})
 
-    def _listar_inventario(self) -> None:
+    def _mi_actividad(self) -> None:
+        """Lo que UNA persona intento enviar, para que ella misma lo vea.
+
+        No es `/api/metrics` con un filtro: ese endpoint es del admin y cuenta
+        agregados de toda la empresa. Este es del colaborador y cuenta SUS
+        propios intentos -por eso el usuario sale de la sesion y no de un
+        parametro, igual que el tenant en todo lo demas-. Los campos que
+        devuelve son los mismos que ya redacto el agente antes de subir el
+        evento (ver ADR 0003): nada de esto es mas sensible de lo que la
+        persona ya vio en su propia pantalla cuando el envio se corto.
+        """
+
         sesion = self._sesion()
         if sesion is None:
             self._json(401, {"error": "sesion requerida"})
+        else:
+            propios = [
+                e
+                for e in eventos(sesion["tenant"])
+                if (e.get("actor") or {}).get("user_id") == sesion["usuario"]
+            ]
+            propios.sort(key=lambda e: e.get("occurred_at", ""), reverse=True)
+            entradas = [
+                {
+                    "occurred_at": e.get("occurred_at"),
+                    "process": (e.get("destination") or {}).get("process"),
+                    "domain": (e.get("destination") or {}).get("domain"),
+                    "classification": (e.get("destination") or {}).get("classification"),
+                    "action": e.get("action"),
+                    "rule_id": (e.get("detection") or {}).get("rule_id"),
+                    "category": (e.get("detection") or {}).get("category"),
+                    "severity": (e.get("detection") or {}).get("severity"),
+                }
+                for e in propios[:100]
+            ]
+            self._json(200, {"actividad": entradas, "usuario": sesion["usuario"]})
+
+    def _listar_inventario(self) -> None:
+        sesion = self._sesion()
+        if not self._puede_mirar(sesion):
+            self._rechazar_no_puede_mirar(sesion)
         else:
             tenant = sesion["tenant"]
             # Antes de listar, mirar que hay corriendo de verdad: cada evento
@@ -610,8 +745,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _leer_tenant(self) -> None:
         sesion = self._sesion()
-        if sesion is None:
-            self._json(401, {"error": "sesion requerida"})
+        if not self._puede_mirar(sesion):
+            self._rechazar_no_puede_mirar(sesion)
         else:
             datos = directorio.tenant(sesion["tenant"])
             self._json(200, datos or {"tenant": sesion["tenant"], "areas": []})
@@ -646,11 +781,19 @@ class Handler(BaseHTTPRequestHandler):
             )
 
     def _listar_codigos(self) -> None:
-        """Los codigos de la empresa de quien pregunta. De ninguna otra."""
+        """Los codigos de la empresa de quien pregunta. De ninguna otra.
+
+        Pedia sesion y nada mas, y eso alcanzaba cuando los unicos roles eran
+        admin y lector: los dos son cuentas de la empresa mirando a la empresa.
+        Con las cuentas de COLABORADOR --que existen desde que se junto la rama
+        de auth-- ya no alcanza: un codigo de enrolamiento suma un equipo al
+        panel, asi que la lista de codigos vivos es la lista de formas de meter
+        una maquina adentro. No es una pantalla mas del panel.
+        """
 
         sesion = self._sesion()
-        if sesion is None:
-            self._json(401, {"error": "sesion requerida"})
+        if not self._puede_mirar(sesion):
+            self._rechazar_no_puede_mirar(sesion)
         else:
             self._json(200, {"codigos": enrolamiento.listar(sesion["tenant"])})
 
@@ -859,6 +1002,10 @@ class Handler(BaseHTTPRequestHandler):
                 # Entrar bien limpia la cuenta: si no, quien se equivoca cuatro
                 # veces y acierta a la quinta arrastra el castigo cinco minutos.
                 intentos.olvidar(*marcas)
+                # `rol_de` y no `cuenta.get("rol", "admin")`: el default de esa
+                # segunda forma es ABIERTO, y una fila vieja sin la columna
+                # -o una cuenta creada antes de que el rol existiera- salia
+                # administradora. Es la razon de ser de rol_de (ver cuentas.py).
                 rol = cuentas.rol_de(cuenta)
                 self._json(
                     200,
@@ -869,6 +1016,11 @@ class Handler(BaseHTTPRequestHandler):
                         "usuario": cuenta["usuario"],
                         "tenant": cuenta["tenant"],
                         "rol": rol,
+                        # true solo para la cuenta que acaba de crear un admin
+                        # con una temporal: el front frena en onboarding hasta
+                        # que la persona elija la suya, en vez de dejarla seguir
+                        # con la que le entregaron por otro canal.
+                        "debe_cambiar_password": bool(cuenta.get("debe_cambiar")),
                     },
                 )
 
@@ -894,8 +1046,8 @@ class Handler(BaseHTTPRequestHandler):
         """
 
         sesion = self._sesion()
-        if sesion is None:
-            self._json(401, {"error": "sesion requerida"})
+        if not self._es_admin(sesion):
+            self._rechazar_no_admin(sesion)
         else:
             if not cuentas.puede_escribir(sesion):
                 self._json(403, {"error": "tu cuenta puede mirar, no cambiar"})
@@ -910,10 +1062,24 @@ class Handler(BaseHTTPRequestHandler):
         Las filas invalidas se descartan y no cancelan al resto. Subir un CSV de
         cincuenta personas y que falle entero porque a una le falta el usuario
         es peor que dar de alta cuarenta y nueve y decir cuantas faltaron.
+
+        El directorio (`aegis_colaboradores`) y las cuentas con contrasena
+        (`aegis_cuentas`) son dos tablas separadas -una es "quien es", la otra
+        "quien puede entrar"-, pero el alta las junta: sin esto, "Colaboradores"
+        agregaba gente al panel que no podia loguearse en ningun lado, y
+        `/colaborador/login` no tenia con que cuentas comparar.
         """
 
         pedidas = datos.get("colaboradores") or [datos]
         guardadas = directorio.guardar_colaboradores(tenant, pedidas)
+        for fila in guardadas:
+            # Solo si TODAVIA no puede entrar: re-subir el mismo CSV para
+            # corregir un cargo no puede resetear la contrasena que la
+            # persona ya cambio.
+            if cuentas.buscar(fila["usuario"]) is None:
+                temporal = cuentas.generar_password_temporal()
+                cuentas.guardar(fila["usuario"], temporal, tenant, rol="colaborador", debe_cambiar=True)
+                fila["password_temporal"] = temporal
         self._json(
             200,
             {
@@ -938,42 +1104,68 @@ class Handler(BaseHTTPRequestHandler):
         ruta = _ruta_pedida(self.path)
         sesion = self._sesion()
 
-        if sesion is None:
-            self._json(401, {"error": "sesion requerida"})
+        if not self._es_admin(sesion):
+            self._rechazar_no_admin(sesion)
         else:
             if ruta.startswith("/v1/colaboradores/"):
                 usuario = _tenant_de(ruta, "/v1/colaboradores/")
                 directorio.borrar_colaborador(sesion["tenant"], usuario)
+                # Las dos tablas o ninguna: ver la nota en cuentas.borrar(). Se
+                # mira el rol antes de tocar la cuenta -y no se borra si es
+                # "admin"- por si el usuario coincidiera con el de otra cuenta
+                # que no tiene nada que ver con este directorio.
+                cuenta = cuentas.buscar(usuario)
+                if cuenta is not None and cuenta.get("rol") == "colaborador":
+                    cuentas.borrar(usuario)
                 self._json(200, {"borrado": usuario})
             else:
                 self._json(404, {"error": "ruta desconocida"})
 
     def do_PUT(self) -> None:  # noqa: N802
-        """La politica que escribe el panel. Es el unico PUT del servicio.
+        """Las dos escrituras que no son POST: la politica y la contrasena propia.
 
-        Sin esto, la pantalla de Politicas era un formulario que no salia de la
-        memoria del navegador: se llenaba, se guardaba, y al recargar volvia a
-        estar como antes.
-
-        Escribir SI pide sesion, y sobre el tenant de la sesion: la politica
-        incluye el diccionario de terminos de la empresa, asi que dejar que un
-        pedido sin token elija sobre que empresa escribe seria dejar que
-        cualquiera desarme las reglas de cualquiera.
+        Escribir SI pide sesion en las dos. La politica sobre el tenant de la
+        sesion -incluye el diccionario de terminos de la empresa, asi que dejar
+        que un pedido sin token elija sobre que empresa escribe seria dejar que
+        cualquiera desarme las reglas de cualquiera-. La contrasena sobre el
+        USUARIO de la sesion: nadie cambia la de otro por esta via, ni siquiera
+        un admin (para eso esta reemplazar a la persona en "Colaboradores").
         """
 
         ruta = _ruta_pedida(self.path)
         datos = self._cuerpo()
 
-        if not ruta.startswith("/v1/policy/"):
-            self._json(404, {"error": "ruta desconocida"})
-        else:
+        if ruta.startswith("/v1/policy/"):
             sesion = self._sesion()
-            if sesion is None:
-                self._json(401, {"error": "sesion requerida"})
+            if not self._es_admin(sesion):
+                self._rechazar_no_admin(sesion)
             elif datos is None:
                 self._json(400, {"error": "cuerpo invalido"})
             else:
                 self._json(200, POLITICAS.put(sesion["tenant"], datos))
+        else:
+            if ruta == "/v1/password":
+                self._cambiar_password(datos)
+            else:
+                self._json(404, {"error": "ruta desconocida"})
+
+    def _cambiar_password(self, datos: dict | None) -> None:
+        sesion = self._sesion()
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        elif datos is None:
+            self._json(400, {"error": "cuerpo invalido"})
+        else:
+            actual = str(datos.get("actual", ""))
+            nueva = str(datos.get("nueva", ""))
+            if len(nueva) < 8:
+                # La misma regla que cualquier alta: menos de 8 no es una
+                # contrasena, es una temporal disfrazada de definitiva.
+                self._json(400, {"error": "la contraseña nueva necesita al menos 8 caracteres"})
+            elif not cuentas.cambiar_password(sesion["usuario"], actual, nueva):
+                self._json(401, {"error": "la contraseña actual no coincide"})
+            else:
+                self._json(200, {"ok": True})
 
     def log_message(self, *args) -> None:
         """Silencio: un log de accesos guardaria que dominios mira cada cliente."""

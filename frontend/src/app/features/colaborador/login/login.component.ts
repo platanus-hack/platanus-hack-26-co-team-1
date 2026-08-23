@@ -41,9 +41,22 @@ export class LoginComponent {
     if (fallo) {
       this.error.set(fallo);
     } else {
-      // Al panel: quien entra con una cuenta de administración viene a ver los
-      // datos de su empresa, no a instalar el agente otra vez.
-      this.router.navigateByUrl('/admin/panel');
+      const sesion = this.sesion.sesion();
+      if (sesion?.rol === 'colaborador') {
+        if (sesion.debe_cambiar_password) {
+          // Solo en memoria, y solo para este paso: onboarding la usa para no
+          // hacerle re-tipear la contraseña que acaba de escribir hace un
+          // segundo, y la borra apenas la usa. Nunca se persiste.
+          this.sesion.contrasenaRecien.set(this.password);
+          this.router.navigateByUrl('/colaborador/onboarding');
+        } else {
+          this.router.navigateByUrl('/colaborador/actividad');
+        }
+      } else {
+        // Al panel: quien entra con una cuenta de administración viene a ver
+        // los datos de su empresa, no a instalar el agente otra vez.
+        this.router.navigateByUrl('/admin/panel');
+      }
     }
   }
 

@@ -259,3 +259,89 @@ class TestMirarNoEsCambiar(PanelLevantado):
         }
         token = self.entrar("huerfana", "clave-larga-3")
         self.assertEqual(self.pedir("POST", "/v1/tenant", {}, token=token)[0], 403)
+
+
+class TestSonTresRolesYNoDos(PanelLevantado):
+    """Mirar el panel de la empresa y ser admin no son lo mismo.
+
+    Salio de juntar dos ramas que inventaron un rol cada una sin verse:
+
+      - `lector` nacio para MIRAR y no tocar, y la puerta que lo hacia posible
+        era que las lecturas solo pedian sesion.
+      - `colaborador` nacio despues, del otro lado, y cerro TODA lectura de
+        empresa detras de "es admin". Correcto para un colaborador -- sus
+        eventos son suyos y los de la empresa no son asunto suyo -- y encima
+        de `lector`, que se quedo sin su unica funcion.
+
+    Las dos decisiones estaban bien argumentadas y ninguna estaba mal escrita.
+    El merge las junto sin conflicto de texto, porque tocaban lineas distintas,
+    y el resultado era un rol que solo podia recibir 403. Por eso este archivo
+    prueba los tres roles contra la misma puerta: es la unica forma de que la
+    proxima rama que invente un cuarto rol se entere de que hay otros tres.
+    """
+
+    def setUp(self):
+        super().setUp()
+        cuentas._memoria.clear()
+        self.addCleanup(cuentas._memoria.clear)
+        cuentas.guardar("jefa", "clave-larga-1", "acme", rol=cuentas.ADMIN)
+        cuentas.guardar("mirona", "clave-larga-2", "acme", rol=cuentas.LECTOR)
+        cuentas.guardar("curioso", "clave-larga-3", "acme", rol="colaborador")
+
+    # Las lecturas de empresa: admin y lector si, colaborador no.
+
+    LECTURAS = ("/v1/colaboradores", "/v1/inventario", "/v1/tenant", "/api/metrics")
+
+    def test_el_admin_lee_el_panel(self):
+        token = self.entrar("jefa", "clave-larga-1")
+        for ruta in self.LECTURAS:
+            with self.subTest(ruta=ruta):
+                self.assertEqual(self.pedir("GET", ruta, token=token)[0], 200)
+
+    def test_el_lector_lee_el_panel(self):
+        """Es su unica funcion. Si esto da 403, el rol no existe."""
+
+        token = self.entrar("mirona", "clave-larga-2")
+        for ruta in self.LECTURAS:
+            with self.subTest(ruta=ruta):
+                self.assertEqual(self.pedir("GET", ruta, token=token)[0], 200)
+
+    def test_el_colaborador_no_lee_el_panel(self):
+        """403 y no 401: la sesion es buena, lo que no alcanza es el rol.
+
+        La diferencia no es cosmetica. A quien entro bien y recibe "sesion
+        requerida" no le queda ninguna pista de que su cuenta es valida y la
+        pantalla no es suya.
+        """
+
+        token = self.entrar("curioso", "clave-larga-3")
+        for ruta in self.LECTURAS:
+            with self.subTest(ruta=ruta):
+                self.assertEqual(self.pedir("GET", ruta, token=token)[0], 403)
+
+    def test_el_colaborador_no_ve_los_codigos_de_enrolamiento(self):
+        """La lista de codigos vivos es la lista de formas de sumar un equipo.
+
+        Esta puerta solo pedia sesion, y estaba bien mientras las unicas cuentas
+        eran de la empresa mirando a la empresa. Las cuentas de colaborador la
+        dejaron abierta sin que ningun test se pusiera rojo.
+        """
+
+        token = self.entrar("curioso", "clave-larga-3")
+        self.assertEqual(self.pedir("GET", "/v1/enrolamiento", token=token)[0], 403)
+
+    def test_el_lector_si_ve_los_codigos(self):
+        token = self.entrar("mirona", "clave-larga-2")
+        self.assertEqual(self.pedir("GET", "/v1/enrolamiento", token=token)[0], 200)
+
+    def test_el_colaborador_si_ve_lo_suyo(self):
+        """Lo que le queda, y es a proposito: sus propios intentos."""
+
+        token = self.entrar("curioso", "clave-larga-3")
+        self.assertEqual(self.pedir("GET", "/v1/mi-actividad", token=token)[0], 200)
+
+    def test_el_colaborador_tampoco_escribe(self):
+        token = self.entrar("curioso", "clave-larga-3")
+        for ruta in ("/v1/enrolamiento", "/v1/colaboradores", "/v1/tenant"):
+            with self.subTest(ruta=ruta):
+                self.assertEqual(self.pedir("POST", ruta, {}, token=token)[0], 403)

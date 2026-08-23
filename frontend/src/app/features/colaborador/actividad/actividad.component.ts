@@ -1,19 +1,25 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { BadgeComponent, BadgeTone } from '../../../shared/ui/badge/badge.component';
 import { LogoComponent } from '../../../shared/ui/logo/logo.component';
 import { TabsComponent, TabItem } from '../../../shared/ui/tabs/tabs.component';
+import { ActividadService, EntradaActividad } from '../../../shared/data/actividad.service';
+import { nombreDeRegla, NOMBRE_DE_PROCESO } from '../../../shared/data/metricas.service';
+import { SesionService } from '../../../shared/data/sesion.service';
 
-type Accion = 'Bloqueado' | 'Advertido' | 'Permitido';
+/** Los tres grupos que ve la persona; el contrato del agente distingue cuatro
+ * acciones (`blocked`, `redacted`, `warned`, `allowed`) porque el motor
+ * necesita esa precisión, pero acá `blocked` y `redacted` cuentan igual: las
+ * dos son "esto no salió". */
+type AccionTab = 'todos' | 'blocked' | 'warned' | 'allowed';
 
-interface EntradaActividad {
-  fecha: string;
-  herramienta: string;
-  accion: Accion;
-  motivo: string;
-  explicacion: string;
-}
+const ETIQUETA_ACCION: Record<string, { label: string; tone: BadgeTone; grupo: AccionTab }> = {
+  blocked: { label: 'Bloqueado', tone: 'red', grupo: 'blocked' },
+  redacted: { label: 'Bloqueado', tone: 'red', grupo: 'blocked' },
+  warned: { label: 'Advertido', tone: 'amber', grupo: 'warned' },
+  allowed: { label: 'Permitido', tone: 'neutral', grupo: 'allowed' },
+};
 
 /** "Mi actividad": el propio colaborador ve sus intentos y el porqué, en tono pedagógico. */
 @Component({
@@ -22,63 +28,59 @@ interface EntradaActividad {
   imports: [CommonModule, RouterLink, BadgeComponent, LogoComponent, TabsComponent],
   templateUrl: './actividad.component.html',
 })
-export class ActividadComponent {
+export class ActividadComponent implements OnInit {
+  private readonly servicio = inject(ActividadService);
+  protected readonly sesionSvc = inject(SesionService);
+
+  readonly cargando = this.servicio.cargando;
+  readonly cargada = this.servicio.cargada;
+
+  ngOnInit(): void {
+    void this.servicio.cargar();
+  }
+
   readonly tabs: TabItem[] = [
     { id: 'todos', label: 'Todos' },
-    { id: 'Bloqueado', label: 'Bloqueados' },
-    { id: 'Advertido', label: 'Advertidos' },
-    { id: 'Permitido', label: 'Con log' },
+    { id: 'blocked', label: 'Bloqueados' },
+    { id: 'warned', label: 'Advertidos' },
+    { id: 'allowed', label: 'Con log' },
   ];
   activeTab = 'todos';
 
-  readonly temas = ['Reportería financiera', 'Análisis de datos', 'Redacción de correos'];
-
-  readonly entradas: EntradaActividad[] = [
-    {
-      fecha: '20 ago, 2026 · 11:42',
-      herramienta: 'ChatGPT',
-      accion: 'Bloqueado',
-      motivo: 'API keys',
-      explicacion: 'El mensaje incluía una clave de API activa. Estas claves dan acceso directo a sistemas de la empresa (si se filtran, cualquiera con esa clave puede actuar como si fuera el servicio, sin que quede un registro fácil de rastrear).',
-    },
-    {
-      fecha: '18 ago, 2026 · 09:15',
-      herramienta: 'ChatGPT',
-      accion: 'Bloqueado',
-      motivo: 'Bases de datos',
-      explicacion: 'Se detectó una cadena de conexión a una base de datos de producción. Compartirla, aunque sea sin intención, expone credenciales y la ubicación exacta de datos sensibles de clientes.',
-    },
-    {
-      fecha: '12 ago, 2026 · 16:03',
-      herramienta: 'Claude',
-      accion: 'Advertido',
-      motivo: 'Lista de clientes',
-      explicacion: 'Mencionaste nombres de clientes en tu consulta. No se bloqueó porque el contexto parecía interno, pero esta información es confidencial (evita incluir nombres reales al pedir ayuda a una IA externa).',
-    },
-    {
-      fecha: '05 ago, 2026 · 14:30',
-      herramienta: 'ChatGPT',
-      accion: 'Bloqueado',
-      motivo: 'Credenciales',
-      explicacion: 'El texto incluía un usuario y contraseña en texto plano. Aunque sea de un ambiente de prueba, compartir credenciales entrena a la IA con datos que no deberían salir de la empresa.',
-    },
-    {
-      fecha: '01 ago, 2026 · 10:12',
-      herramienta: 'Claude Code',
-      accion: 'Permitido',
-      motivo: 'Código fuente (con log)',
-      explicacion: 'Compartiste un fragmento de código interno. No disparó ninguna regla de bloqueo, pero queda registrado porque tu área maneja código propietario (es solo un registro, no una advertencia).',
-    },
-  ];
-
   get filtradas(): EntradaActividad[] {
-    if (this.activeTab === 'todos') return this.entradas;
-    return this.entradas.filter((e) => e.accion === this.activeTab);
+    const todas = this.servicio.entradas();
+    return this.activeTab === 'todos'
+      ? todas
+      : todas.filter((e) => this.grupoDe(e.action) === this.activeTab);
   }
 
-  tone(accion: Accion): BadgeTone {
-    if (accion === 'Bloqueado') return 'red';
-    if (accion === 'Advertido') return 'amber';
-    return 'neutral';
+  private grupoDe(action: string): AccionTab {
+    return ETIQUETA_ACCION[action]?.grupo ?? 'allowed';
+  }
+
+  etiqueta(action: string): string {
+    return ETIQUETA_ACCION[action]?.label ?? action;
+  }
+
+  tone(action: string): BadgeTone {
+    return ETIQUETA_ACCION[action]?.tone ?? 'neutral';
+  }
+
+  herramienta(e: EntradaActividad): string {
+    return (e.process && NOMBRE_DE_PROCESO[e.process]) || e.process || 'Sin atribuir';
+  }
+
+  motivo(e: EntradaActividad): string {
+    return e.rule_id ? nombreDeRegla(e.rule_id) : 'Sin detección específica';
+  }
+
+  fecha(iso: string): string {
+    const fecha = new Date(iso);
+    if (Number.isNaN(fecha.getTime())) return iso;
+    return fecha.toLocaleString('es', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  salir(): void {
+    this.sesionSvc.salir();
   }
 }

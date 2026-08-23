@@ -221,7 +221,9 @@ def del_encabezado(encabezado: str | None, ahora: float | None = None) -> dict |
 _memoria: dict[str, dict] = {}
 
 
-def guardar(usuario: str, contrasena: str, tenant: str, rol: str = "admin") -> dict:
+def guardar(
+    usuario: str, contrasena: str, tenant: str, rol: str = "admin", debe_cambiar: bool = False
+) -> dict:
     hash_, sal = hashear(contrasena)
     fila = {
         "usuario": usuario.strip().lower(),
@@ -229,6 +231,10 @@ def guardar(usuario: str, contrasena: str, tenant: str, rol: str = "admin") -> d
         "rol": rol,
         "hash": hash_,
         "sal": sal,
+        # True solo para la cuenta que acaba de crear el admin con una
+        # contrasena temporal: la pantalla de onboarding la lee para saber si
+        # tiene que frenar el primer ingreso hasta que la persona elija la suya.
+        "debe_cambiar": debe_cambiar,
     }
     if supabase.configurado():
         supabase._pedir(
@@ -239,6 +245,24 @@ def guardar(usuario: str, contrasena: str, tenant: str, rol: str = "admin") -> d
         )
     _memoria[fila["usuario"]] = fila
     return fila
+
+
+def borrar(usuario: str) -> None:
+    """Saca la cuenta: ya no puede loguearse con ninguna contrasena.
+
+    Existe para que borrar a alguien de "Colaboradores" borre las dos cosas.
+    Sin esto, sacar a una persona del directorio la sacaba de la vista del
+    admin y la dejaba con acceso igual: el directorio y las cuentas viven en
+    tablas separadas (ver directorio.py), pero dar de baja tiene que dar de
+    baja las dos, o no dio de baja nada.
+    """
+
+    clave = (usuario or "").strip().lower()
+    if supabase.configurado():
+        supabase._pedir(
+            "DELETE", f"{TABLA}?usuario=eq.{clave}", None, {"Prefer": "return=minimal"}
+        )
+    _memoria.pop(clave, None)
 
 
 def buscar(usuario: str) -> dict | None:
@@ -286,3 +310,34 @@ def cuenta_inicial() -> tuple[str, str, str]:
         secretos.cargar("AEGIS_ADMIN_PASSWORD") or "admin",
         os.environ.get("AEGIS_TENANT", "acme"),
     )
+
+
+# Sin 0/O/1/l/I: una temporal que alguien tiene que poder leer en voz alta o
+# escribir a mano sin dudar si es una ele o un uno.
+_ALFABETO_TEMPORAL = "abcdefghjkmnpqrstuvwxyz23456789"
+
+
+def generar_password_temporal() -> str:
+    """Una contrasena de un solo uso, para la cuenta que arma el admin.
+
+    Se devuelve en texto plano una sola vez -en la respuesta del alta- porque
+    despues de hashearla no hay forma de recuperarla, ni para nosotros.
+    """
+
+    grupos = ("".join(secrets.choice(_ALFABETO_TEMPORAL) for _ in range(4)) for _ in range(3))
+    return "-".join(grupos)
+
+
+def cambiar_password(usuario: str, actual: str, nueva: str) -> bool:
+    """Cambia la contrasena si la actual es correcta. True si la cambio.
+
+    Pide la actual -no solo el token- por la misma razon que cualquier cambio
+    de contrasena la pide: un token robado de una sesion abierta no alcanza
+    para secuestrar la cuenta entera.
+    """
+
+    cuenta = autenticar(usuario, actual)
+    cambiada = cuenta is not None and bool(nueva)
+    if cambiada:
+        guardar(cuenta["usuario"], nueva, cuenta["tenant"], cuenta.get("rol", "admin"))
+    return cambiada

@@ -41,6 +41,31 @@ class Metrics:
         return (self.blocked / self.total * 100) if self.total else 0.0
 
 
+def filter_by_range(events: list[dict], since: str = "", until: str = "") -> list[dict]:
+    """Los eventos con `occurred_at` dentro de [since, until].
+
+    Compara como texto y no parsea fechas: un timestamp UTC en ISO8601 ordena
+    igual como texto que como fecha, el mismo truco que ya usa la sincronizacion
+    de dominios (`desde` en `backend/aegis_backend/app.py`). Sin ningun limite,
+    devuelve todo tal cual - "sin filtro" tiene que significar exactamente eso.
+
+    Un evento sin `occurred_at` no pasa un filtro con `since`: no hay forma de
+    saber si cae en el rango, y meterlo adentro falsearia el conteo.
+    """
+
+    if not since and not until:
+        return events
+    resultado = []
+    for event in events:
+        ocurrido = event.get("occurred_at", "")
+        if since and ocurrido < since:
+            continue
+        if until and ocurrido > until:
+            continue
+        resultado.append(event)
+    return resultado
+
+
 def load_events(queue: Path) -> list[dict]:
     if not queue.exists():
         events = []

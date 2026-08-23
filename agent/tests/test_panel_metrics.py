@@ -7,7 +7,12 @@ contenido, porque el contenido nunca llego al evento.
 import json
 import unittest
 
-from aegis_agent.panel.metrics import REPEAT_THRESHOLD, compute, repeat_offenders
+from aegis_agent.panel.metrics import (
+    REPEAT_THRESHOLD,
+    compute,
+    filter_by_range,
+    repeat_offenders,
+)
 
 
 def evento(
@@ -157,6 +162,47 @@ class TestReincidencia(unittest.TestCase):
             evento(user="u_ana", rule="jwt"),
         ]
         self.assertEqual(repeat_offenders(eventos), {})
+
+
+class TestFiltroDeRango(unittest.TestCase):
+    def test_sin_limites_devuelve_todo(self):
+        eventos = [evento(hora="2026-08-18T09"), evento(hora="2026-08-22T14")]
+        self.assertEqual(filter_by_range(eventos), eventos)
+
+    def test_desde_deja_afuera_lo_anterior(self):
+        viejo = evento(hora="2026-08-18T09")
+        nuevo = evento(hora="2026-08-22T14")
+        resultado = filter_by_range([viejo, nuevo], since="2026-08-20T00:00:00Z")
+        self.assertEqual(resultado, [nuevo])
+
+    def test_hasta_deja_afuera_lo_posterior(self):
+        viejo = evento(hora="2026-08-18T09")
+        nuevo = evento(hora="2026-08-22T14")
+        resultado = filter_by_range([viejo, nuevo], until="2026-08-20T00:00:00Z")
+        self.assertEqual(resultado, [viejo])
+
+    def test_desde_y_hasta_juntos_acotan_los_dos_lados(self):
+        antes = evento(hora="2026-08-15T09")
+        adentro = evento(hora="2026-08-19T09")
+        despues = evento(hora="2026-08-25T09")
+        resultado = filter_by_range(
+            [antes, adentro, despues],
+            since="2026-08-18T00:00:00Z",
+            until="2026-08-20T00:00:00Z",
+        )
+        self.assertEqual(resultado, [adentro])
+
+    def test_el_limite_es_inclusivo(self):
+        # Quien elige "desde el lunes" espera ver el evento del lunes mismo.
+        limite = evento(hora="2026-08-20T00")
+        resultado = filter_by_range([limite], since="2026-08-20T00:00:00Z")
+        self.assertEqual(resultado, [limite])
+
+    def test_un_evento_sin_fecha_no_pasa_un_filtro_con_desde(self):
+        sin_fecha = evento()
+        sin_fecha["occurred_at"] = ""
+        resultado = filter_by_range([sin_fecha], since="2026-08-01T00:00:00Z")
+        self.assertEqual(resultado, [])
 
 
 class TestPrivacidad(unittest.TestCase):

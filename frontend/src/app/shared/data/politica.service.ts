@@ -9,18 +9,37 @@ import { SesionService } from './sesion.service';
  * La cañería estaba de los dos lados desde hace rato —`Policy.a_dict()`,
  * `policy_store`, `PUT /v1/policy/{tenant}`— y faltaba justo el cable.
  *
- * Dos cosas que conviene tener presentes al tocar esto:
+ * Tres cosas que conviene tener presentes al tocar esto:
  *
- * 1. **Se manda la política entera, nunca un campo suelto.** El backend fusiona
- *    contra la que ya existe, así que un `PUT` parcial no borra nada; pero
- *    mandar todo hace que lo que se ve en pantalla y lo que queda guardado sean
- *    lo mismo, sin depender de esa fusión.
+ * 1. **Se manda la política entera, nunca un campo suelto.** `PolicyStore.put`
+ *    (`backend/aegis_backend/store.py`) NO fusiona: guarda el dict que llega
+ *    tal cual, reemplazando el anterior entero. La fusión contra los defaults
+ *    (`Policy.desde_dict(datos, base=...)`) pasa del lado del agente, al leer
+ *    -no acá-, así que un campo que esta interfaz no conozca se pierde en el
+ *    primer guardado que haga cualquiera desde esta pantalla, no solo en el
+ *    que lo tocó. Por eso `Politica` tiene que declarar TODOS los campos de
+ *    `Policy.a_dict()`, tengan o no un control propio en la UI.
  *
  * 2. **`company_terms` es la lista más sensible que tiene la empresa**: nombres
  *    de clientes, proyectos sin anunciar, dominios internos. Viaja por acá
  *    porque es parte de la política, y por eso la pantalla que la edita está
  *    detrás de la sesión igual que todo lo demás.
+ *
+ * 3. **`forbidden_terms` no es `company_terms` con otro nombre.** Producen
+ *    hallazgos distintos con perillas distintas -`empresa_*` con
+ *    `company_terms_action`, `termino_prohibido` con `block_categories`/
+ *    `warn_categories` vía `forbidden_terms_category`- y el motor los mantiene
+ *    separados a propósito (ver `detect/ruleset.py`). No hay que fundirlos acá.
  */
+
+/** Una regla propia de la empresa. La regex se compila en `detect/ruleset.py`:
+ * si es inválida, el motor la descarta sola sin romper nada. */
+export interface ReglaPersonalizada {
+  id: string;
+  pattern: string;
+  category: string;
+  severity: string;
+}
 
 export interface Politica {
   tenant_id?: string;
@@ -33,6 +52,39 @@ export interface Politica {
   company_terms: Record<string, string>;
   company_terms_action: string;
   injection_action: string;
+  /**
+   * Qué categorías de una regla de FORMATO (T1: AWS key, tarjeta, contraseña…)
+   * cortan el envío. Lo que no esté en ninguna de las dos listas deja pasar.
+   */
+  block_categories: string[];
+  warn_categories: string[];
+  /**
+   * Reglas T1 apagadas por id. Es la otra forma de decir lo mismo que
+   * `rule_actions[id] === 'off'` -el motor une las dos-, y viaja acá sin
+   * control propio en la pantalla para que guardar la política no borre lo
+   * que se haya apagado por otra vía (por ejemplo, la API).
+   */
+  disabled_rules: string[];
+  /**
+   * Términos literales prohibidos: un textarea, una categoría compartida para
+   * todos. No es lo mismo que `company_terms` -esa produce un hallazgo por
+   * término, con su propia etiqueta y su propia perilla-, así que viven
+   * aparte aunque las dos vengan del mismo lugar de la pantalla.
+   */
+  forbidden_terms: string[];
+  forbidden_terms_category: string;
+  /** Reglas regex propias de la empresa. */
+  custom_rules: ReglaPersonalizada[];
+  /** Qué etiquetas busca el modelo local (T2) cuando lee texto sin forma fija. */
+  model_labels: string[];
+  /**
+   * Qué categorías y qué etiquetas del modelo tienen autoridad para CORTAR.
+   * Lo que el modelo encuentra y no está acá solo advierte: un hallazgo
+   * probabilístico no puede frenar con la misma autoridad que una regla de
+   * formato.
+   */
+  model_block_categories: string[];
+  model_block_labels: string[];
   /**
    * Si se lee el texto de las imágenes que salen del equipo.
    *
@@ -79,6 +131,15 @@ const VACIA: Politica = {
   company_terms: {},
   company_terms_action: 'block',
   injection_action: 'warn',
+  block_categories: ['internal_data', 'secret'],
+  warn_categories: ['pii'],
+  disabled_rules: [],
+  forbidden_terms: [],
+  forbidden_terms_category: 'internal_data',
+  custom_rules: [],
+  model_labels: [],
+  model_block_categories: ['internal_data', 'secret'],
+  model_block_labels: [],
   ocr_enabled: false,
   ocr_action: 'warn',
   blind_spot_action: 'warn',

@@ -139,6 +139,86 @@ class TestElApiSigueDondeEstaba(ServicioVivo):
         # serializa, el panel se queda sin el numero mas visible.
         self.assertIn("block_rate", datos["metrics"])
 
+    def test_las_metricas_aceptan_un_rango_de_fechas(self):
+        # La semana simulada (`demo_data.py`) cae toda entre el 18 y el 22 de
+        # agosto de 2026: un `desde` posterior a eso tiene que dejar el panel
+        # en cero, sin que el fallback a la maqueta lo tape.
+        sys.path.insert(0, str(REPO / "backend"))
+        from aegis_backend import cuentas
+
+        token = cuentas.emitir("admin", "acme", "admin")
+        conexion = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=10)
+        try:
+            conexion.request(
+                "GET",
+                "/api/metrics?desde=2030-01-01T00:00:00Z",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            respuesta = conexion.getresponse()
+            estado, cuerpo = respuesta.status, respuesta.read()
+        finally:
+            conexion.close()
+
+        self.assertEqual(estado, 200)
+        datos = json.loads(cuerpo)
+        self.assertEqual(datos["metrics"]["total"], 0)
+        self.assertEqual(datos["eventos"], 0)
+
+    def test_los_insights_no_se_sirven_sin_sesion(self):
+        estado, _ = self.pedir("/api/insights")
+        self.assertEqual(estado, 401)
+
+    def test_los_insights_con_sesion(self):
+        # `MODELO_INSIGHTS` se pisa a `None` a proposito: el test no puede
+        # depender de si quien lo corre tiene `ANTHROPIC_API_KEY` puesta, ni
+        # pagar una llamada real cada vez que corre la suite.
+        sys.path.insert(0, str(REPO / "backend"))
+        from aegis_backend import cuentas
+
+        token = cuentas.emitir("admin", "acme", "admin")
+        with patch.object(servicio, "MODELO_INSIGHTS", None):
+            conexion = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=10)
+            try:
+                conexion.request("GET", "/api/insights", headers={"Authorization": f"Bearer {token}"})
+                respuesta = conexion.getresponse()
+                estado, cuerpo = respuesta.status, respuesta.read()
+            finally:
+                conexion.close()
+
+        self.assertEqual(estado, 200)
+        datos = json.loads(cuerpo)
+        self.assertEqual(datos["generado_por"], "estatico")
+        self.assertTrue(datos["resumen"])
+        self.assertTrue(datos["insights"])
+        self.assertTrue(datos["estrategias"])
+
+    def test_los_insights_respetan_el_mismo_rango_que_las_metricas(self):
+        sys.path.insert(0, str(REPO / "backend"))
+        from aegis_backend import cuentas, insights as insights_mod
+
+        token = cuentas.emitir("admin", "acme", "admin")
+        with patch.object(servicio, "MODELO_INSIGHTS", None):
+            conexion = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=10)
+            try:
+                conexion.request(
+                    "GET",
+                    "/api/insights?desde=2030-01-01T00:00:00Z",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                respuesta = conexion.getresponse()
+                estado, cuerpo = respuesta.status, respuesta.read()
+            finally:
+                conexion.close()
+
+        self.assertEqual(estado, 200)
+        datos = json.loads(cuerpo)
+        # Un rango en el futuro no tiene eventos: tiene que caer en el
+        # respaldo de "semana en cero" y no fingir un riesgo inventado.
+        self.assertEqual(
+            {k: v for k, v in datos.items() if k != "generado_por"},
+            insights_mod.RESPALDO_SIN_DATOS,
+        )
+
     def test_el_panel_en_html_sigue_accesible(self):
         # Es el respaldo cuando no hay build, y sirve para ver las metricas
         # crudas sin depender de que el front compile.

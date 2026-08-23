@@ -105,8 +105,12 @@ const NOMBRE_DE_REGLA: Record<string, string> = {
  * El agente normaliza a un identificador estable (`procesos.py`) para que la
  * política sea portable entre sistemas operativos; acá se deshace sólo para
  * mostrarlo. La política sigue hablando de `claude-code`, no de "Claude Code".
+ *
+ * Exportado: es el mismo vocabulario que usa "Mi actividad"
+ * (`actividad.service.ts`) para traducir sus propios eventos, y dos mapas
+ * distintos para el mismo `process` se desincronizan solos con el tiempo.
  */
-const NOMBRE_DE_PROCESO: Record<string, string> = {
+export const NOMBRE_DE_PROCESO: Record<string, string> = {
   'claude-code': 'Claude Code',
   'chatgpt-app': 'ChatGPT (app)',
   browser: 'Navegador',
@@ -118,8 +122,11 @@ const NOMBRE_DE_PROCESO: Record<string, string> = {
   desconocido: 'Sin atribuir',
 };
 
-/** `modelo:empresa` y `empresa_cliente` son familias, no reglas sueltas. */
-function nombreDeRegla(reglaId: string): string {
+/**
+ * `modelo:empresa` y `empresa_cliente` son familias, no reglas sueltas.
+ * Exportada por la misma razón que `NOMBRE_DE_PROCESO`: la reusa "Mi actividad".
+ */
+export function nombreDeRegla(reglaId: string): string {
   let nombre = NOMBRE_DE_REGLA[reglaId];
   if (!nombre) {
     if (reglaId.startsWith('modelo:')) {
@@ -143,12 +150,22 @@ export class MetricasService {
   /** true cuando el API rechazo la sesion: sirve para mandar al login. */
   readonly sinSesion = signal(false);
 
-  async cargar(): Promise<void> {
+  /**
+   * @param rango Ventana de tiempo en ISO8601 UTC. Sin nada, trae todo lo que
+   *   haya. Esto SI va en la llamada -a diferencia del tenant- porque es una
+   *   preferencia de quien mira el panel, no un dato que decida a que empresa
+   *   pertenecen los eventos.
+   */
+  async cargar(rango?: { desde?: string; hasta?: string }): Promise<void> {
     try {
+      const parametros = new URLSearchParams();
+      if (rango?.desde) parametros.set('desde', rango.desde);
+      if (rango?.hasta) parametros.set('hasta', rango.hasta);
+      const query = parametros.toString();
       // El token va en la cabecera y el tenant NO va en ningun lado: lo saca el
       // servidor de adentro del token firmado. Si fuera un parametro de esta
       // llamada, cualquiera pediria los datos de otra empresa desde la consola.
-      const respuesta = await fetch('/api/metrics', {
+      const respuesta = await fetch(`/api/metrics${query ? '?' + query : ''}`, {
         headers: { Accept: 'application/json', ...this.sesion.cabeceras() },
       });
       this.sinSesion.set(respuesta.status === 401);
@@ -156,8 +173,9 @@ export class MetricasService {
         this.metricas.set(this.traducir(await respuesta.json()));
       }
     } catch {
-      // Sin API queda la maqueta. Un panel sin datos reales sigue siendo un
-      // panel; uno que revienta al abrirlo, no.
+      // Sin API queda lo que ya habia (la maqueta, si era la primera carga). Un
+      // panel sin datos reales sigue siendo un panel; uno que revienta al
+      // abrirlo, no.
     }
   }
 
@@ -183,25 +201,27 @@ export class MetricasService {
         })),
       // El segundo numero de by_area son los criticos, que es lo que hace
       // vulnerable a un area: no cuanto usa la IA, sino cuanto se le escapa.
-      areasVulnerables: porArea.length
-        ? porArea.map(([nombre, , criticos]) => ({ nombre, valor: criticos }))
-        : MAQUETA.areasVulnerables,
+      //
+      // Ya no cae a MAQUETA cuando esta vacio: antes "vacio" solo pasaba sin
+      // agente conectado, pero con el filtro de rango un area sin incidentes
+      // ESTA semana es un resultado real, y tapar eso con Contabilidad/Ventas
+      // inventados mentiria justo cuando el filtro funciona.
+      areasVulnerables: porArea.map(([nombre, , criticos]) => ({ nombre, valor: criticos })),
       // El primer número de by_area es el uso total y el segundo lo crítico:
       // el mismo dato responde "quién usa más IA" y "a quién se le escapa más",
       // que son preguntas distintas y estaban las dos inventadas.
-      areasUsoIa: porArea.length
-        ? porArea.map(([nombre, total]) => ({ nombre, valor: total }))
-        : MAQUETA.areasUsoIa,
-      herramientas: (m.by_process ?? []).length
-        ? (m.by_process ?? [])
-            .slice(0, 6)
-            .map(([proceso, veces]: [string, number]) => ({
-              nombre: NOMBRE_DE_PROCESO[proceso] ?? proceso,
-              valor: veces,
-            }))
-        : MAQUETA.herramientas,
+      areasUsoIa: porArea.map(([nombre, total]) => ({ nombre, valor: total })),
+      herramientas: (m.by_process ?? [])
+        .slice(0, 6)
+        .map(([proceso, veces]: [string, number]) => ({
+          nombre: NOMBRE_DE_PROCESO[proceso] ?? proceso,
+          valor: veces,
+        })),
       shadowAi: (m.shadow_domains ?? []).slice(0, 8),
-      enVivo: (m.total ?? 0) > 0,
+      // Esto vino de una respuesta real del API, aunque el rango elegido no
+      // tenga ningun evento adentro: "en vivo y sin nada que mostrar" no es lo
+      // mismo que "no hay API", y antes se confundian los dos casos.
+      enVivo: true,
     };
   }
 }

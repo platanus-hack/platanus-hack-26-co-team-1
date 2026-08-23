@@ -20,6 +20,8 @@ export interface Sesion {
   usuario: string;
   tenant: string;
   rol: string;
+  /** true solo para una cuenta de colaborador recien creada con una temporal. */
+  debe_cambiar_password?: boolean;
 }
 
 const CLAVE = 'aegis.sesion';
@@ -32,6 +34,16 @@ export class SesionService {
   readonly autenticado = computed(() => this.actual() !== null);
   readonly usuario = computed(() => this.actual()?.usuario ?? '');
   readonly tenant = computed(() => this.actual()?.tenant ?? '');
+  readonly rol = computed(() => this.actual()?.rol ?? '');
+
+  /**
+   * La contraseña recién tipeada, SOLO mientras dura la navegación al
+   * onboarding obligatorio. Nunca se persiste -ni en localStorage ni en la
+   * URL-, así que un refresh de página la pierde a propósito: la pantalla de
+   * onboarding vuelve a pedirla en ese caso, en vez de dejarla dando vueltas
+   * en un lugar donde podría sobrevivir más de lo que hace falta.
+   */
+  readonly contrasenaRecien = signal('');
 
   /** Las credenciales, o un mensaje de por que no. */
   async entrar(usuario: string, password: string): Promise<string | null> {
@@ -69,6 +81,35 @@ export class SesionService {
     // quedaba con `rol` undefined hasta volver a entrar por el login.
     this.actual.set({ token, tenant, usuario, rol });
     this.guardar({ token, tenant, usuario, rol });
+  }
+
+  /** Cambia la propia contraseña. Devuelve un mensaje de error, o null si salió bien. */
+  async cambiarPassword(actual: string, nueva: string): Promise<string | null> {
+    let error: string | null = 'No se pudo conectar con el servidor.';
+    try {
+      const respuesta = await fetch('/v1/password', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...this.cabeceras() },
+        body: JSON.stringify({ actual, nueva }),
+      });
+      if (respuesta.ok) {
+        error = null;
+        // La sesión ya no tiene que frenar en onboarding la próxima vez.
+        const previa = this.actual();
+        if (previa) {
+          const actualizada = { ...previa, debe_cambiar_password: false };
+          this.actual.set(actualizada);
+          this.guardar(actualizada);
+        }
+        this.contrasenaRecien.set('');
+      } else {
+        const datos = await respuesta.json().catch(() => null);
+        error = datos?.error ?? 'No se pudo cambiar la contraseña.';
+      }
+    } catch {
+      // Queda el mensaje de conexion.
+    }
+    return error;
   }
 
   salir(): void {

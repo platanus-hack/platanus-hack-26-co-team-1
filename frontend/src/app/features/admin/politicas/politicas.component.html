@@ -281,6 +281,30 @@
   @if (activeTab === 'dlp') {
     <div class="mt-6 flex flex-col gap-8">
       <section>
+        <h2 class="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Qué categoría corta, y cuál sólo avisa</h2>
+        <p class="mb-4 max-w-2xl text-sm text-aegis-dim">
+          Rige a las reglas de formato de abajo cuando no tienen una acción propia. Es la regla general de la empresa;
+          una regla concreta -por defecto o personalizada- puede pedir lo contrario, y esa excepción manda.
+        </p>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          @for (c of categoriasDlp; track c.valor) {
+            <div class="aegis-card p-4">
+              <p class="text-sm font-medium text-aegis-text">{{ c.etiqueta }}</p>
+              <select
+                class="aegis-select mt-2 w-full py-1.5 text-xs"
+                [ngModel]="accionDeCategoria(c.valor)"
+                (ngModelChange)="cambiarAccionDeCategoria(c.valor, $event)"
+              >
+                @for (o of opcionesCategoria; track o.valor) {
+                  <option [value]="o.valor">{{ o.etiqueta }}</option>
+                }
+              </select>
+            </div>
+          }
+        </div>
+      </section>
+
+      <section>
         <div class="mb-3 flex items-center gap-2">
           <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Reglas por defecto</h2>
           <span class="font-display text-[11px] text-aegis-faint">no eliminables</span>
@@ -300,28 +324,82 @@
       </section>
 
       <section>
-        <h2 class="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Reglas de negocio personalizadas</h2>
-        <div class="mb-4 flex gap-2">
-          <input class="aegis-input" type="text" placeholder='Describe la regla en lenguaje natural, ej. "no revelar la lista de clientes"' [(ngModel)]="nuevaRegla" (keydown.enter)="agregarRegla()" />
-          <button type="button" class="aegis-btn-primary shrink-0" (click)="agregarRegla()">Crear regla</button>
+        <h2 class="mb-1 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Reglas propias, con su propio patrón</h2>
+        <p class="mb-4 max-w-2xl text-sm text-aegis-dim">
+          Un ticket interno (<code>TKT-\d&#123;6&#125;</code>), un formato de contrato, cualquier dato con una forma
+          reconocible que sea propia de esta empresa. El patrón corre igual que una regla de fábrica: si no compila,
+          el motor la descarta sola y el resto sigue protegiendo.
+        </p>
+        <div class="mb-4 grid grid-cols-1 gap-2.5 rounded-lg border border-aegis-border bg-aegis-surface2 p-4 sm:grid-cols-[1fr_1fr_auto_auto_auto]">
+          <input class="aegis-input py-1.5 text-xs" type="text" placeholder="Nombre (ej. ticket interno)" [(ngModel)]="nuevaReglaNombre" />
+          <input class="aegis-input py-1.5 font-mono text-xs" type="text" placeholder="Patrón regex, ej. TKT-\d&#123;6&#125;" [(ngModel)]="nuevaReglaPatron" (keydown.enter)="agregarReglaPersonalizada()" />
+          <select class="aegis-select py-1.5 text-xs" [(ngModel)]="nuevaReglaCategoria">
+            @for (c of categoriasRegla; track c.valor) {
+              <option [value]="c.valor">{{ c.etiqueta }}</option>
+            }
+          </select>
+          <select class="aegis-select py-1.5 text-xs" [(ngModel)]="nuevaReglaSeveridad">
+            @for (s of severidadesRegla; track s.valor) {
+              <option [value]="s.valor">{{ s.etiqueta }}</option>
+            }
+          </select>
+          <button type="button" class="aegis-btn-primary px-3 py-1.5 text-xs" (click)="agregarReglaPersonalizada()">Crear regla</button>
         </div>
+        @if (errorNuevaReglaPersonalizada) {
+          <p class="mb-4 rounded-lg border border-aegis-red/25 bg-aegis-red/[0.06] px-3 py-2 text-sm text-aegis-red">{{ errorNuevaReglaPersonalizada }}</p>
+        }
         <div class="flex flex-col gap-3">
-          @for (r of reglasCustom; track r.nombre) {
+          @for (r of reglasPersonalizadas; track r.id) {
             <div class="aegis-card flex items-start justify-between gap-4 p-5" [class.opacity-50]="!r.activa">
-              <div>
-                <p class="text-sm font-medium text-aegis-text">{{ r.nombre }}</p>
-                <p class="mt-2 rounded-md bg-aegis-surface2 px-2.5 py-1.5 font-display text-xs text-aegis-faint">Ej. dispararía con: {{ r.ejemplo }}</p>
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-aegis-text">{{ r.id }}</p>
+                <p class="mt-2 truncate rounded-md bg-aegis-surface2 px-2.5 py-1.5 font-mono text-xs text-aegis-faint">{{ r.pattern }}</p>
+                <p class="mt-1.5 font-display text-[11px] uppercase tracking-wide text-aegis-faint">{{ r.category }} · {{ r.severity }}</p>
               </div>
               <div class="flex shrink-0 items-center gap-2">
-                <select class="aegis-select w-32 py-1.5 text-xs" [(ngModel)]="r.accion">
+                <select
+                  class="aegis-select w-32 py-1.5 text-xs"
+                  [ngModel]="r.accion"
+                  (ngModelChange)="cambiarAccionReglaPersonalizada(r.id, $event)"
+                >
                   <option>Bloquear</option>
                   <option>Advertir</option>
-                  <option>Registrar</option>
                 </select>
-                <button type="button" class="aegis-btn-ghost px-2" (click)="r.activa = !r.activa">{{ r.activa ? 'Desactivar' : 'Activar' }}</button>
+                <button type="button" class="aegis-btn-ghost px-2" (click)="alternarReglaPersonalizada(r.id)">{{ r.activa ? 'Desactivar' : 'Activar' }}</button>
+                <button type="button" class="text-aegis-faint transition hover:text-aegis-red" (click)="quitarReglaPersonalizada(r.id)" aria-label="Eliminar {{ r.id }}">
+                  <svg viewBox="0 0 12 12" class="h-3 w-3"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                </button>
               </div>
             </div>
+          } @empty {
+            <p class="text-sm text-aegis-faint">Todavía no hay reglas propias. Sin ellas, Aegis protege igual con las de fábrica.</p>
           }
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mb-1 font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Términos prohibidos</h2>
+        <p class="mb-4 max-w-2xl text-sm text-aegis-dim">
+          Uno por línea. A diferencia del diccionario de la empresa, acá no hay una etiqueta por término: todos
+          comparten la misma categoría, y esa categoría decide arriba si corta o sólo avisa.
+        </p>
+        <textarea
+          class="aegis-input min-h-28 w-full font-mono text-xs"
+          placeholder="proyecto orion&#10;fusión con acme corp"
+          [ngModel]="terminosProhibidosTexto"
+          (ngModelChange)="guardarTerminosProhibidos($event)"
+        ></textarea>
+        <div class="mt-3 max-w-xs">
+          <label class="aegis-label">Categoría de estos términos</label>
+          <select
+            class="aegis-select mt-1.5 w-full"
+            [ngModel]="politica().forbidden_terms_category"
+            (ngModelChange)="cambiarCategoriaTerminosProhibidos($event)"
+          >
+            @for (c of categoriasRegla; track c.valor) {
+              <option [value]="c.valor">{{ c.etiqueta }}</option>
+            }
+          </select>
         </div>
       </section>
     </div>
@@ -397,6 +475,52 @@
               <span class="w-12 text-right font-display text-sm text-aegis-text">{{ politica().model_threshold }}</span>
             </div>
             <p class="mt-1.5 text-xs text-aegis-faint">Más bajo detecta más y molesta más. Más alto deja pasar.</p>
+          </div>
+
+          <div class="border-t border-aegis-border pt-4">
+            <label class="aegis-label">Qué categorías del modelo tienen autoridad para cortar</label>
+            <p class="mt-1 text-xs text-aegis-faint">Lo que el modelo encuentra en una categoría sin marcar sólo avisa, nunca corta.</p>
+            <div class="mt-2.5 flex flex-wrap gap-2">
+              @for (c of categoriasDlp; track c.valor) {
+                <button
+                  type="button"
+                  class="rounded-full border px-3 py-1.5 font-display text-xs transition-colors"
+                  [class.border-aegis-accent]="autorizaModeloEnCategoria(c.valor)"
+                  [class.bg-aegis-accent]="autorizaModeloEnCategoria(c.valor)"
+                  [class.text-white]="autorizaModeloEnCategoria(c.valor)"
+                  [class.border-aegis-border]="!autorizaModeloEnCategoria(c.valor)"
+                  [class.text-aegis-dim]="!autorizaModeloEnCategoria(c.valor)"
+                  (click)="alternarAutoridadModeloEnCategoria(c.valor)"
+                >{{ c.etiqueta }}</button>
+              }
+            </div>
+          </div>
+
+          <div class="border-t border-aegis-border pt-4">
+            <label class="aegis-label">Qué busca el modelo</label>
+            <p class="mt-1 text-xs text-aegis-faint">
+              Etiquetas libres -nombre de cliente, número de empleado, lo que sea que este equipo escriba sin una
+              forma fija-. Un clic en una etiqueta le da autoridad para cortar; sin marcar, sólo avisa.
+            </p>
+            <div class="mt-2.5 flex flex-wrap gap-2">
+              @for (e of politica().model_labels; track e) {
+                <span
+                  [class]="'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-display text-xs transition-colors ' +
+                    (tieneAutoridadParaCortar(e) ? 'border-aegis-red/25 bg-aegis-red/[0.06] text-aegis-red' : 'border-aegis-border text-aegis-dim')"
+                >
+                  <button type="button" (click)="alternarAutoridadDeEtiqueta(e)" [attr.aria-label]="(tieneAutoridadParaCortar(e) ? 'Quitar' : 'Dar') + ' autoridad para cortar a ' + e">{{ e }}</button>
+                  <button type="button" class="opacity-60 transition hover:opacity-100" (click)="quitarEtiquetaModelo(e)" aria-label="Dejar de buscar {{ e }}">
+                    <svg viewBox="0 0 12 12" class="h-2.5 w-2.5"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                  </button>
+                </span>
+              } @empty {
+                <p class="text-sm text-aegis-faint">Sin etiquetas propias, el modelo sigue buscando con las que trae por defecto.</p>
+              }
+            </div>
+            <div class="mt-3 flex gap-2">
+              <input class="aegis-input" type="text" placeholder="nombre de cliente" [(ngModel)]="nuevaEtiquetaModelo" (keydown.enter)="agregarEtiquetaModelo()" />
+              <button type="button" class="aegis-btn-secondary shrink-0" (click)="agregarEtiquetaModelo()">Agregar</button>
+            </div>
           </div>
         </div>
       </div>

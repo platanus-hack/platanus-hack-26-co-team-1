@@ -25,6 +25,7 @@ interface NavItem {
 export class AdminShellComponent {
   readonly nav: NavItem[] = [
     { path: '/admin/panel', label: 'Panel general', icon: 'chart' },
+    { path: '/admin/lectura', label: 'Lectura de la semana', icon: 'bulb' },
     { path: '/admin/colaboradores', label: 'Colaboradores', icon: 'users' },
     { path: '/admin/politicas', label: 'Políticas', icon: 'shield' },
     { path: '/admin/inventario', label: 'Agent Inventory', icon: 'radar' },
