@@ -1,0 +1,125 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@font-face {
+  font-family: 'Switzer';
+  src: url('/fonts/switzer-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Switzer';
+  src: url('/fonts/switzer-500.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Switzer';
+  src: url('/fonts/switzer-600.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Switzer';
+  src: url('/fonts/switzer-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  height: 100%;
+}
+
+body {
+  @apply bg-aegis-bg text-aegis-text font-sans antialiased;
+  letter-spacing: -0.011em;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  @apply font-display;
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: rgba(14, 95, 168, 0.16);
+  color: #22221d;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #f8f6f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #ddd8c9;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cfc9b8;
+}
+
+/* Clases compartidas (en @layer components) para que las utilidades de
+   Tailwind (ej. text-aegis-accent aplicada junto a .aegis-label) siempre
+   puedan sobreescribirlas, sin depender del orden en el HTML. */
+@layer components {
+  .aegis-card {
+    @apply rounded-2xl border border-aegis-border bg-aegis-surface shadow-panel;
+  }
+
+  .aegis-label {
+    @apply font-display text-[11px] font-medium uppercase tracking-[0.13em] text-aegis-faint;
+  }
+
+  .aegis-input {
+    @apply w-full rounded-lg border border-aegis-border bg-aegis-surface2 px-3.5 py-2.5 text-sm text-aegis-text placeholder:text-aegis-faint outline-none transition focus:border-aegis-accent/50 focus:bg-aegis-surface focus:ring-2 focus:ring-aegis-accent/15;
+  }
+
+  .aegis-select {
+    @apply aegis-input appearance-none bg-no-repeat;
+  }
+
+  .aegis-btn-primary {
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-lg bg-aegis-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-aegis-accentdeep active:brightness-95 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .aegis-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-aegis-border bg-aegis-surface px-4 py-2.5 text-sm font-medium text-aegis-text transition hover:border-aegis-borderlight hover:bg-aegis-surface2;
+  }
+
+  .aegis-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-aegis-dim transition hover:text-aegis-text;
+  }
+
+  /* Barrido especular al pasar el mouse (nod a "specular button"). */
+  .aegis-btn-primary::after,
+  .aegis-shine::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -60%;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(115deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    transform: skewX(-18deg);
+    transition: left 0.65s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .aegis-btn-primary:hover::after,
+  .aegis-shine:hover::after {
+    left: 130%;
+  }
+
+  /* Barrido especular reutilizable para botones sin radio (landing). */
+  .aegis-shine {
+    position: relative;
+    overflow: hidden;
+  }
+}

@@ -1,0 +1,46 @@
+# Blueprint de Aegis. Un solo servicio sirve el front y el API.
+#
+# Van juntos a proposito: separados hacen falta dos servicios, una URL para cada
+# uno y CORS en el medio, y todo eso para que dos piezas del mismo producto se
+# hablen. El sitio estatico que hubo un rato quedo obsoleto en cuanto el panel
+# paso a mostrar datos de verdad, porque para eso necesita el API al lado.
+services:
+  - type: web
+    name: aegis-panel
+    runtime: python
+    plan: free
+    branch: main
+    # Node esta disponible en el runtime de Python de Render, asi que el front
+    # se compila aca mismo y el servicio sirve el resultado desde disco.
+    #
+    # npm install y no npm ci: el package-lock.json quedo desincronizado con el
+    # package.json (le faltan @emnapi/core y @emnapi/runtime) y `npm ci` se
+    # niega a instalar. Cuando el lock se actualice, esto deberia volver a
+    # `npm ci`, que es lo unico que da builds reproducibles.
+    buildCommand: |
+      pip install -r requirements.txt
+      cd frontend && npm install && npm run build
+    startCommand: python web/app.py
+    # Render reinicia el servicio si esta ruta deja de responder. Es barata: no
+    # toca el almacen mas alla de contar lo que ya esta cargado.
+    healthCheckPath: /v1/health
+    envVars:
+      - key: AEGIS_TENANT
+        value: acme
+      # La base. Sin estas dos el servicio arranca igual y guarda en memoria,
+      # que es lo que hacia antes: el plan gratuito de Render no tiene disco, y
+      # cada redespliegue -o cada vez que la instancia se duerme por inactividad-
+      # se llevaba los eventos. La semana simulada tapaba el hueco.
+      #
+      # sync: false y no un valor: la service_role se carga a mano en el panel de
+      # Render y no vive en el repositorio. Con ella se lee el diccionario de
+      # terminos de la empresa, que es la lista mas sensible del sistema.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      # Clasificar dominios y escribir lecciones. Tambien a mano.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Con un plan de pago se monta un disco y se apunta AEGIS_DATA_DIR ahi
+      # para que los eventos sobrevivan a los reinicios aun sin Supabase.

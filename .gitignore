@@ -1,0 +1,56 @@
+# Dependencias
+node_modules/
+.pnp/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Build
+dist/
+build/
+target/
+*.tsbuildinfo
+
+# Entorno y secretos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!docs/**/*.pem
+
+# CA local generada por el instalador (nunca se commitea)
+certs/
+aegis-ca.*
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# Cola local de eventos y caches (nunca se commitean: son navegacion real)
+agent/tests/e2e/panel.png
+aegis-events.jsonl
+aegis-domains-cache.json
+aegis-domains.json
+# La politica que escribe el panel: es de la empresa que corre esto, no del repo.
+aegis-policies.json
+
+
+# Datos del panel desplegado, si se corre local
+eventos.jsonl
+aegis-lessons-cache.json
+
+# El build del front: se genera en cada despliegue, no se versiona.
+frontend/node_modules
+frontend/dist
+
+# Windows crea esta carpeta literal cuando algo resuelve %SystemDrive% sin
+# expandir: son sus caches de iconos, aparecen al correr la suite y no son del
+# proyecto. Se colaron en un commit una vez.
+%SystemDrive%/
+
+# El paquete descargable, que arma packaging/build_windows.py
+/build/

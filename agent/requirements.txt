@@ -1,0 +1,8 @@
+# El motor de deteccion no necesita nada de esto: corre con la biblioteca
+# estandar. Estas dependencias son del proxy, del sensor y de los tests de
+# navegador.
+mitmproxy>=11
+playwright>=1.40
+# Lee la tabla de conexiones del sistema para el sensor de puntos ciegos. Es
+# opcional de verdad: sin psutil el sensor no funciona y el agente si.
+psutil>=5.9

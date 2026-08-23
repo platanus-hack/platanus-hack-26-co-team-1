@@ -1,0 +1,105 @@
+<header class="relative flex flex-wrap items-start justify-between gap-4 overflow-hidden border-b border-aegis-border bg-aegis-surface px-4 py-8 sm:px-8">
+  <div class="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-aegis-accent/10 blur-3xl"></div>
+  <div class="relative">
+    <a routerLink="/admin/panel" class="mb-2 inline-flex items-center gap-1 font-display text-xs text-aegis-faint transition-colors hover:text-aegis-text">
+      <svg viewBox="0 0 20 20" fill="none" class="h-3.5 w-3.5"><path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Volver al panel general
+    </a>
+    <p class="aegis-label">Lectura pedagógica</p>
+    <h1 class="mt-1 font-display text-2xl font-semibold text-aegis-text">Lectura de la semana</h1>
+    <p class="mt-1 max-w-xl text-sm text-aegis-dim">
+      Todas las observaciones y estrategias de esta ventana, organizadas para leer con calma. La idea no es vigilar: es que el equipo entienda el patrón antes de que se repita.
+    </p>
+  </div>
+  @if (rangoEtiqueta) {
+    <span class="relative shrink-0 rounded-full border border-aegis-border bg-aegis-surface2 px-3 py-1.5 font-display text-xs text-aegis-dim">Mostrando: {{ rangoEtiqueta }}</span>
+  }
+</header>
+
+<main class="flex-1 px-4 py-6 sm:px-8">
+  @if (cargando() && !resumen()) {
+    <div class="aegis-card p-8 text-center text-sm text-aegis-faint">Leyendo el patrón de esta ventana…</div>
+  } @else if (!resumen()) {
+    <div class="aegis-card p-8 text-center text-sm text-aegis-faint">Todavía no hay una lectura para mostrar.</div>
+  } @else {
+    <!-- Resumen: la frase que resume todo, para quien solo tiene diez segundos. -->
+    <div class="aegis-card mb-6 flex items-start gap-3 border-aegis-accent/20 bg-aegis-accent/[0.04] p-6">
+      <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+        <svg viewBox="0 0 20 20" fill="none" class="h-4.5 w-4.5"><path d="M10 2.5a5.5 5.5 0 0 0-3 10.1c.4.3.6.7.6 1.2v.7h4.8v-.7c0-.5.2-.9.6-1.2A5.5 5.5 0 0 0 10 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8.2 17h3.6M8.7 14.5h2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </span>
+      <div class="flex-1">
+        <p class="text-base text-aegis-text">{{ resumen()!.resumen }}</p>
+        @if (resumen()!.generado_por === 'estatico') {
+          <p class="mt-2 font-display text-[11px] uppercase tracking-wide text-aegis-faint">Guía general — el modelo no está disponible ahora mismo, esto no es un análisis de estos datos puntuales.</p>
+        }
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <!-- Observaciones, agrupadas por tipo: riesgo primero (pide atencion mas
+           pronto), adopcion despues (es informativo, no una alarma). -->
+      <section class="flex flex-col gap-4">
+        <h2 class="aegis-label">Lo que muestran los datos</h2>
+
+        @if (riesgos().length) {
+          <div class="flex flex-col gap-3">
+            <h3 class="flex items-center gap-2 font-display text-xs font-semibold uppercase tracking-wide text-aegis-red">
+              <span class="h-1.5 w-1.5 rounded-full bg-aegis-red"></span>
+              Comportamiento de riesgo
+            </h3>
+            @for (i of riesgos(); track i.titulo) {
+              <div class="aegis-card p-4">
+                <div class="mb-1.5 flex items-start justify-between gap-2">
+                  <p class="text-sm font-medium text-aegis-text">{{ i.titulo }}</p>
+                  <app-badge tone="red">riesgo</app-badge>
+                </div>
+                <p class="text-sm text-aegis-dim">{{ i.detalle }}</p>
+                @if (i.foco) {
+                  <p class="mt-2 font-display text-xs text-aegis-faint">Foco: {{ i.foco }}</p>
+                }
+              </div>
+            }
+          </div>
+        }
+
+        @if (adopcion().length) {
+          <div class="flex flex-col gap-3">
+            <h3 class="flex items-center gap-2 font-display text-xs font-semibold uppercase tracking-wide text-aegis-accent">
+              <span class="h-1.5 w-1.5 rounded-full bg-aegis-accent"></span>
+              Familiaridad y adopción
+            </h3>
+            @for (i of adopcion(); track i.titulo) {
+              <div class="aegis-card p-4">
+                <div class="mb-1.5 flex items-start justify-between gap-2">
+                  <p class="text-sm font-medium text-aegis-text">{{ i.titulo }}</p>
+                  <app-badge tone="accent">adopción</app-badge>
+                </div>
+                <p class="text-sm text-aegis-dim">{{ i.detalle }}</p>
+                @if (i.foco) {
+                  <p class="mt-2 font-display text-xs text-aegis-faint">Foco: {{ i.foco }}</p>
+                }
+              </div>
+            }
+          </div>
+        }
+      </section>
+
+      <!-- Estrategias: se presentan como pasos a seguir, no como una lista mas. -->
+      <section class="flex flex-col gap-3">
+        <h2 class="aegis-label">Qué podemos hacer</h2>
+        @for (e of resumen()!.estrategias; track e.titulo; let indice = $index) {
+          <div class="aegis-card flex gap-3 p-4">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-aegis-accent/10 font-display text-xs font-semibold text-aegis-accent">{{ indice + 1 }}</span>
+            <div>
+              <p class="text-sm font-medium text-aegis-text">{{ e.titulo }}</p>
+              <p class="mt-1 text-sm text-aegis-dim">{{ e.detalle }}</p>
+              @if (e.publico) {
+                <p class="mt-2 font-display text-xs text-aegis-faint">Para: {{ e.publico }}</p>
+              }
+            </div>
+          </div>
+        }
+      </section>
+    </div>
+  }
+</main>

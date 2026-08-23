@@ -1,0 +1,111 @@
+<header class="relative overflow-hidden border-b border-aegis-border bg-aegis-surface px-4 py-8 sm:px-8">
+  <div class="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-aegis-accent/10 blur-3xl"></div>
+  <div class="pointer-events-none absolute -right-4 top-8 h-40 w-40 rounded-full bg-aegis-highlight/10 blur-3xl"></div>
+  <div class="relative">
+    <p class="aegis-label">Descubrimiento</p>
+    <h1 class="mt-1 font-display text-2xl font-semibold text-aegis-text">Agent Inventory</h1>
+    <p class="mt-1.5 max-w-2xl text-sm text-aegis-dim">Mapea cada agente, servidor MCP y skill en uso a través de toda la flota de la empresa (aprobado o no).</p>
+  </div>
+</header>
+
+<main class="flex-1 px-4 py-6 sm:px-8">
+  <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+    <app-stat-tile label="Agentes detectados" [value]="totalAgentes.toString()"></app-stat-tile>
+    <app-stat-tile label="Servidores MCP conectados" [value]="totalMcp.toString()"></app-stat-tile>
+    <app-stat-tile label="Skills en uso" [value]="totalSkills.toString()"></app-stat-tile>
+    <app-stat-tile label="Sin aprobar" [value]="totalSinAprobar.toString()" trend="requiere revisión" [trendUp]="totalSinAprobar > 0"></app-stat-tile>
+  </div>
+
+  <div class="mt-6 aegis-card overflow-hidden">
+    <div class="flex items-center gap-2.5 border-b border-aegis-border px-6 py-4">
+      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+        <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><rect x="3" y="4" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7 17h6M10 14v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </span>
+      <div>
+        <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Agentes</h2>
+        <p class="mt-0.5 text-sm text-aegis-dim">CLIs, IDEs y apps de escritorio con acceso a IA detectados en la flota.</p>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm">
+        <thead>
+          <tr class="aegis-label border-b border-aegis-border">
+            <th class="px-6 py-3 font-medium">Agente</th>
+            <th class="px-6 py-3 font-medium">Tipo</th>
+            <th class="px-6 py-3 font-medium">Colaboradores</th>
+            <th class="px-6 py-3 font-medium">Última actividad</th>
+            <th class="px-6 py-3 font-medium">Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (a of agentesMostrados; track a.nombre) {
+            <tr class="border-b border-aegis-border/60 transition-colors last:border-0 hover:bg-aegis-surface2/60">
+              <td class="px-6 py-3.5 font-medium text-aegis-text">{{ a.nombre }}</td>
+              <td class="px-6 py-3.5 text-aegis-dim">{{ a.tipo }}</td>
+              <td class="px-6 py-3.5"><app-avatar-stack [names]="a.colaboradores"></app-avatar-stack></td>
+              <td class="px-6 py-3.5 text-aegis-dim">{{ a.ultimaActividad }}</td>
+              <td class="px-6 py-3.5"><app-badge [tone]="toneDe(a.estado)">{{ labelDe(a.estado) }}</app-badge></td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
+    <div class="aegis-card overflow-hidden">
+      <div class="flex items-center gap-2.5 border-b border-aegis-border px-6 py-4">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1.4"/><circle cx="14" cy="14" r="2.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 7l4 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </span>
+        <div>
+          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Servidores MCP</h2>
+          <p class="mt-0.5 text-sm text-aegis-dim">A qué pueden acceder los agentes conectados a través de MCP.</p>
+        </div>
+      </div>
+      <div class="flex flex-col divide-y divide-aegis-border/70">
+        @for (m of servidoresMcp; track m.nombre) {
+          <div class="flex flex-col gap-2.5 px-6 py-4">
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0">
+                <p class="font-display text-sm font-medium text-aegis-text">{{ m.nombre }}</p>
+                <p class="mt-1 text-sm text-aegis-dim">{{ m.alcance }}</p>
+              </div>
+              <app-badge [tone]="toneDe(m.estado)">{{ labelDe(m.estado) }}</app-badge>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <app-avatar-stack [names]="m.colaboradores"></app-avatar-stack>
+              <p class="font-display text-[11px] uppercase tracking-wide text-aegis-faint">{{ m.agentes.join(' · ') }}</p>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="aegis-card overflow-hidden">
+      <div class="flex items-center gap-2.5 border-b border-aegis-border px-6 py-4">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><path d="M10 2l1.6 4.6L16 8l-4.4 1.4L10 14l-1.6-4.6L4 8l4.4-1.4L10 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        </span>
+        <div>
+          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Skills</h2>
+          <p class="mt-0.5 text-sm text-aegis-dim">Capacidades y herramientas que los agentes tienen habilitadas.</p>
+        </div>
+      </div>
+      <div class="flex flex-col divide-y divide-aegis-border/70">
+        @for (s of skills; track s.nombre) {
+          <div class="flex items-center justify-between gap-4 px-6 py-3.5">
+            <div class="min-w-0">
+              <p class="font-display text-sm font-medium text-aegis-text">{{ s.nombre }}</p>
+              <p class="mt-1 font-display text-[11px] uppercase tracking-wide text-aegis-faint">{{ s.agente }}</p>
+            </div>
+            <div class="flex shrink-0 items-center gap-3">
+              <app-avatar-stack [names]="s.colaboradores"></app-avatar-stack>
+              <app-badge [tone]="toneDe(s.estado)">{{ labelDe(s.estado) }}</app-badge>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+</main>

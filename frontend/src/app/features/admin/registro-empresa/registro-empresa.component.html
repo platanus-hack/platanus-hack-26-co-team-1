@@ -1,0 +1,130 @@
+<div class="min-h-screen bg-aegis-bg lg:flex">
+  <div
+    class="relative flex flex-col justify-center overflow-hidden px-8 py-10 lg:w-[380px] lg:shrink-0 lg:px-10 lg:py-12"
+    style="background: linear-gradient(165deg, #0e5fa8 0%, #0a4879 100%)"
+  >
+    <app-gradient-waves></app-gradient-waves>
+
+    <div class="absolute left-8 top-10 z-10 lg:left-10 lg:top-12">
+      <a routerLink="/colaborador/landing"><app-logo [light]="true"></app-logo></a>
+    </div>
+
+    <div class="relative z-10">
+      <span class="aegis-label text-white/60">Paso {{ step + 1 }} de {{ steps.length }}</span>
+      <h1 class="mt-3 text-3xl font-semibold leading-[1.1] tracking-[-0.02em] text-white">{{ stepTitles[step] }}</h1>
+      <p class="mt-3 text-sm leading-relaxed text-white/70">{{ stepDescriptions[step] }}</p>
+    </div>
+
+    <div class="absolute bottom-10 left-8 right-8 z-10 lg:bottom-12 lg:left-10 lg:right-10">
+      <app-vertical-stepper [steps]="steps" [activeIndex]="step"></app-vertical-stepper>
+    </div>
+  </div>
+
+  <div class="flex flex-1 flex-col justify-center px-6 py-12 sm:px-10 lg:px-16 lg:py-16">
+    <div class="mx-auto w-full max-w-2xl">
+      @if (step === 0) {
+        <div class="mb-8 flex items-center gap-3 border-b border-aegis-border pb-3">
+          <span class="font-display text-sm font-semibold text-aegis-accent">01</span>
+          <h2 class="text-base font-semibold text-aegis-text">Datos de la empresa</h2>
+        </div>
+
+        <div class="flex flex-col gap-5">
+          <div>
+            <label class="aegis-label">Nombre de la empresa</label>
+            <input class="aegis-input mt-1.5" type="text" placeholder="Vertice Consulting" [(ngModel)]="empresa.nombre" />
+          </div>
+          <div>
+            <label class="aegis-label">Descripción de la empresa</label>
+            <textarea class="aegis-input mt-1.5 min-h-24 resize-none" placeholder="A qué se dedica la empresa (esto ayuda a sugerir reglas de protección de datos relevantes)." [(ngModel)]="empresa.descripcion"></textarea>
+          </div>
+          <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <div>
+              <label class="aegis-label">Sector / industria</label>
+              <select class="aegis-select mt-1.5" [(ngModel)]="empresa.sector">
+                <option value="" disabled selected>Selecciona un sector</option>
+                @for (s of sectores; track s) {
+                  <option [value]="s">{{ s }}</option>
+                }
+              </select>
+            </div>
+            <div>
+              <label class="aegis-label">Tamaño de la empresa</label>
+              <select class="aegis-select mt-1.5" [(ngModel)]="empresa.tamano">
+                <option value="" disabled selected>N.º de colaboradores</option>
+                @for (t of tamanos; track t) {
+                  <option [value]="t">{{ t }}</option>
+                }
+              </select>
+            </div>
+          </div>
+        </div>
+      }
+
+      @if (step === 1) {
+        <div class="mb-8 flex items-center gap-3 border-b border-aegis-border pb-3">
+          <span class="font-display text-sm font-semibold text-aegis-accent">02</span>
+          <h2 class="text-base font-semibold text-aegis-text">Áreas / departamentos</h2>
+        </div>
+
+        <div class="flex flex-col gap-5">
+          <div class="flex flex-wrap gap-2">
+            @for (area of areas; track area) {
+              <span class="inline-flex items-center gap-2 rounded-full border border-aegis-border bg-aegis-surface2 py-1.5 pl-3.5 pr-2 text-sm text-aegis-text">
+                {{ area }}
+                <button type="button" class="flex h-4 w-4 items-center justify-center rounded-full text-aegis-faint hover:text-aegis-red" (click)="quitarArea(area)">
+                  <svg viewBox="0 0 12 12" class="h-3 w-3" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                </button>
+              </span>
+            }
+          </div>
+          <div class="flex gap-2">
+            <input class="aegis-input" type="text" placeholder="Añadir área (ej. Legal)" [(ngModel)]="nuevaArea" (keydown.enter)="agregarArea()" />
+            <button type="button" class="aegis-btn-secondary shrink-0" (click)="agregarArea()">Añadir</button>
+          </div>
+        </div>
+      }
+
+      @if (step === 2) {
+        <div class="mb-8 flex items-center gap-3 border-b border-aegis-border pb-3">
+          <span class="font-display text-sm font-semibold text-aegis-accent">03</span>
+          <h2 class="text-base font-semibold text-aegis-text">Cuenta del administrador</h2>
+        </div>
+
+        <div class="flex flex-col gap-5">
+          <div>
+            <label class="aegis-label">Nombre completo</label>
+            <input class="aegis-input mt-1.5" type="text" placeholder="Ariadne Rossi" [(ngModel)]="admin.nombre" />
+          </div>
+          <div>
+            <label class="aegis-label">Email corporativo</label>
+            <input class="aegis-input mt-1.5" type="email" placeholder="ariadne@vertice.com" [(ngModel)]="admin.email" />
+          </div>
+          <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <div>
+              <label class="aegis-label">Contraseña</label>
+              <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="admin.password" />
+            </div>
+            <div>
+              <label class="aegis-label">Confirmar contraseña</label>
+              <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="admin.confirmar" />
+            </div>
+          </div>
+        </div>
+      }
+
+      <div class="mt-10 flex items-center justify-between border-t border-aegis-border pt-6">
+        @if (step > 0) {
+          <button type="button" class="aegis-btn-ghost" (click)="back()">← Atrás</button>
+        } @else {
+          <span></span>
+        }
+
+        @if (step < steps.length - 1) {
+          <button type="button" class="aegis-btn-primary" (click)="next()">Continuar ↗</button>
+        } @else {
+          <button type="button" class="aegis-btn-primary" (click)="crearCuenta()">Crear cuenta de empresa ↗</button>
+        }
+      </div>
+    </div>
+  </div>
+</div>
