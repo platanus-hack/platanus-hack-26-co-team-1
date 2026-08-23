@@ -95,6 +95,40 @@ echo.
 pause
 """
 
+# El paso que faltaba, y sin el la mitad del producto no existe.
+#
+# Instalar deja el equipo PROTEGIDO. Enrolar decide A QUIEN LE REPORTA. Son dos
+# cosas distintas a proposito (ver aegis_agent/enrolar.py), pero hasta aca el
+# paquete solo ofrecia la primera: cuatro .bat, ninguno para enrolar, y el LEEME
+# sin mencionar la palabra. La persona hacia doble clic, quedaba protegida, y no
+# le hablaba a ningun panel. La empresa veia su panel vacio y concluia que nadie
+# usa IA -- exactamente la falla que enrolar.py documenta como su razon de ser.
+# El comando existia desde el principio; lo que faltaba era el doble clic.
+#
+# No se pide el codigo con `set /p`: se llama al exe sin argumento y el propio
+# comando lo pide (cli.py lo hace cuando stdin es una consola). Asi el texto que
+# lee la persona vive en un solo lugar, y no hay que pelear con el escapado de
+# batch para una cadena que la gente va a pegar con guiones.
+ENROLAR_BAT = """@echo off
+chcp 65001 > nul
+title Conectar Aegis con tu empresa
+echo.
+echo   Vas a conectar este equipo con el panel de tu empresa.
+echo.
+echo   Necesitas el codigo que te dieron: son cuatro letras o numeros,
+echo   un guion, y otros cuatro. Algo como AEGIS-4K7M-9PQR.
+echo.
+echo   Esto NO instala ni cambia nada de tu equipo, y no manda nada de lo
+echo   que escribis: solo deja anotado a que panel avisar.
+echo.
+"%~dp0Aegis.exe" enrolar
+echo.
+echo   ----------------------------------------------------------------
+"%~dp0Aegis.exe" estado
+echo.
+pause
+"""
+
 LEEME = """AEGIS
 =====
 
@@ -117,6 +151,26 @@ PARA INSTALARLO
 
 Para ver como esta: "Estado de Aegis.bat"
 Para sacarlo:       "Desinstalar Aegis.bat"
+
+
+PARA CONECTARLO CON TU EMPRESA
+------------------------------
+
+Instalarlo te protege a vos. Conectarlo es lo que hace que tu empresa vea que
+esta pasando --sin ver nunca lo que escribis-- y lo que le permite mandarte su
+propia configuracion: que considera sensible, que sitios tiene aprobados.
+
+  1. Pedile el codigo a quien administra Aegis en tu empresa. Son cuatro
+     letras o numeros, un guion, y otros cuatro: AEGIS-4K7M-9PQR.
+  2. Doble clic en "Conectar con mi empresa.bat" y pegalo.
+
+Son dos pasos separados a proposito. Instalar decide si este equipo esta
+protegido; conectar decide a quien le reporta. Podes hacerlos en cualquier
+orden, y volver a conectar te cambia de empresa sin desinstalar nada.
+
+Si no lo conectas, Aegis igual te protege: bloquea, avisa y te explica. Lo que
+no pasa es que nadie mas se entere, ni que te llegue la configuracion de tu
+empresa.
 
 
 EL PANEL
@@ -220,6 +274,7 @@ def agregar_lanzadores() -> None:
     (CARPETA / "Instalar Aegis.bat").write_text(INSTALAR_BAT, encoding="utf-8")
     (CARPETA / "Desinstalar Aegis.bat").write_text(DESINSTALAR_BAT, encoding="utf-8")
     (CARPETA / "Estado de Aegis.bat").write_text(ESTADO_BAT, encoding="utf-8")
+    (CARPETA / "Conectar con mi empresa.bat").write_text(ENROLAR_BAT, encoding="utf-8")
     (CARPETA / "Panel de Aegis.bat").write_text(PANEL_BAT, encoding="utf-8")
     (CARPETA / "LEEME.txt").write_text(LEEME, encoding="utf-8")
 

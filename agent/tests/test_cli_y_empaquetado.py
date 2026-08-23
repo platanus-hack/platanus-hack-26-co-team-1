@@ -388,6 +388,7 @@ class TestLoQueRecibeQuienDescarga(unittest.TestCase):
             "Instalar Aegis.bat": self.build.INSTALAR_BAT,
             "Desinstalar Aegis.bat": self.build.DESINSTALAR_BAT,
             "Estado de Aegis.bat": self.build.ESTADO_BAT,
+            "Conectar con mi empresa.bat": self.build.ENROLAR_BAT,
             "Panel de Aegis.bat": self.build.PANEL_BAT,
         }
 
