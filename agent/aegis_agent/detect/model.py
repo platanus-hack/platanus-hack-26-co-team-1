@@ -14,9 +14,14 @@ from .types import Finding
 #
 # Tres cosas que gobiernan este archivo:
 #
-#   1. No es un LLM. Es un extractor de entidades de ~50M de parametros que corre
-#      en CPU. Un LLM local serian gigabytes y segundos, y esto esta en el camino
-#      critico de cada envio.
+#   1. No es un LLM. Es un extractor de entidades de 289M de parametros que
+#      corre en CPU. Un LLM local serian gigabytes y segundos, y esto esta en el
+#      camino critico de cada envio.
+#      El numero se conto de los pesos (288.949.504), no se leyo de la tarjeta
+#      del modelo: aca decia ~50M, casi seis veces menos. No era una curiosidad
+#      -- sostenia la afirmacion de que esto se puede instalar en el equipo de
+#      cada empleado, que es la que decide si el producto existe. Ver
+#      docs/MODELO-LOCAL.md.
 #   2. Solo corre cuando T1 no encontro nada. Si ya hay una credencial detectada,
 #      gastar 150 ms mas no cambia la decision.
 #   3. Si no esta instalado, el agente funciona igual. Nunca es un requisito.

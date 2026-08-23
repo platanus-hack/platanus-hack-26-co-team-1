@@ -38,7 +38,7 @@ Tres capas, y cada una cubre lo que la anterior no puede:
 | Capa | Qué ve | Medido |
 |---|---|---|
 | 28 reglas deterministas | Lo que tiene **formato**: llaves, tarjetas, cédulas | 8/8 credenciales, **0 falsos positivos** en 54 frases de trabajo normal |
-| Modelo local (~50M, CPU) | Lo que tiene **sentido**: "el margen con Alpina quedó en 4%" | Las reglas ven **0 de 14** de estos casos. El modelo es lo único que los ve |
+| Modelo local (289M, CPU) | Lo que tiene **sentido**: "el margen con Alpina quedó en 4%" | Las reglas ven **0 de 14** de estos casos. El modelo es lo único que los ve |
 | Diccionario de la empresa | Lo que **solo esa empresa** sabe que es suyo | Ningún detector genérico puede tenerlo |
 
 Más OCR para capturas de pantalla — nadie transcribe la nómina, le saca una
