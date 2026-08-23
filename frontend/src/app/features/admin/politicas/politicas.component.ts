@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { TabsComponent, TabItem } from '../../../shared/ui/tabs/tabs.component';
 import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
 import { colorForName } from '../../../shared/utils/color-hash';
-import { PoliticaService } from '../../../shared/data/politica.service';
+import { PoliticaService, ReglaPersonalizada } from '../../../shared/data/politica.service';
 import { DirectorioService } from '../../../shared/data/directorio.service';
 
 interface Herramienta {
@@ -30,7 +30,7 @@ interface Excepcion {
   alcances: string[];
 }
 
-/** Configuración de políticas: tabs internos (herramientas, DLP, asignación). */
+/** Configuración de políticas: tabs internos (herramientas, DLP, diccionario, detección). */
 @Component({
   selector: 'app-politicas',
   standalone: true,
@@ -88,19 +88,42 @@ export class PoliticasComponent implements OnInit {
       ...h,
       permitida: p.approved_ai.length ? p.approved_ai.includes(dominioDe(h.nombre)) : h.permitida,
     }));
-    [...this.reglasDefault, ...this.reglasCustom].forEach((r) => {
+    this.reglasDefault.forEach((r) => {
       const accion = p.rule_actions[reglaId(r.nombre)];
       if (accion) {
         r.activa = accion !== 'off';
         r.accion = accion === 'block' ? 'Bloquear' : accion === 'warn' ? 'Advertir' : r.accion;
       }
     });
+    // Las reglas personalizadas no tienen un molde fijo como las de arriba:
+    // salen enteras de `custom_rules`, y su estado (activa/bloquea/avisa) sale
+    // de `rule_actions` por el mismo id -es la misma perilla que usa una regla
+    // de fábrica, el motor no distingue una de otra.
+    this.reglasPersonalizadas = p.custom_rules.map((r) => {
+      const accion = p.rule_actions[r.id];
+      return {
+        ...r,
+        activa: accion !== 'off',
+        accion: accion === 'warn' ? 'Advertir' : 'Bloquear',
+      };
+    });
+  }
+
+  /**
+   * Mezcla entradas nuevas sobre el `rule_actions` YA guardado, en vez de
+   * reemplazarlo entero. Sin esto, guardar desde "Reglas por defecto" borraba
+   * cualquier entrada de una regla personalizada (y viceversa): dos controles
+   * de la misma pantalla se pisaban entre sí porque cada uno mandaba su
+   * propio recorte del mismo diccionario.
+   */
+  private conRuleActions(entradas: Record<string, string>): Record<string, string> {
+    return { ...this.politica().rule_actions, ...entradas };
   }
 
   /** Y de vuelta: lo que muestra la pantalla es lo que se guarda. */
   private async persistir(): Promise<void> {
     const reglas: Record<string, string> = {};
-    [...this.reglasDefault, ...this.reglasCustom].forEach((r) => {
+    this.reglasDefault.forEach((r) => {
       reglas[reglaId(r.nombre)] = !r.activa
         ? 'off'
         : r.accion === 'Bloquear'
@@ -118,7 +141,7 @@ export class PoliticasComponent implements OnInit {
     await this.servicio.guardar({
       approved_ai: this.herramientas.filter((h) => h.permitida).map((h) => dominioDe(h.nombre)),
       blocked_domains: this.urlsBloqueadas,
-      rule_actions: reglas,
+      rule_actions: this.conRuleActions(reglas),
       company_terms: terminos,
       corporate_accounts: this.cuentas,
     });
@@ -182,12 +205,15 @@ export class PoliticasComponent implements OnInit {
     void this.persistir();
   }
 
+  // "Asignación" (excepciones por persona/área) oculta por ahora: las reglas
+  // quedan generales para todo el equipo. El tab y su HTML siguen abajo sin
+  // tocar -es un `@if` que ya nadie puede alcanzar por acá-, listos para
+  // reactivarse el día que haga falta excepciones puntuales otra vez.
   readonly tabs: TabItem[] = [
     { id: 'herramientas', label: 'Herramientas y URLs' },
     { id: 'dlp', label: 'Reglas de DLP' },
     { id: 'diccionario', label: 'Diccionario de la empresa' },
     { id: 'avanzado', label: 'Detección' },
-    { id: 'asignacion', label: 'Asignación' },
   ];
   activeTab = 'herramientas';
 
@@ -300,22 +326,197 @@ export class PoliticasComponent implements OnInit {
     { nombre: 'Bases de datos', descripcion: 'Cadenas de conexión y dumps de bases de datos.', ejemplo: 'postgres://user:pass@db.vertice.com:5432/prod', accion: 'Bloquear', activa: true, fija: true },
   ];
 
-  reglasCustom: ReglaDlp[] = [
-    { nombre: 'Estrategia de negocio', descripcion: 'No compartir información de estrategia de negocio.', ejemplo: '"Nuestro plan es adquirir a nuestro competidor en Q1..."', accion: 'Bloquear', activa: true, fija: false },
-    { nombre: 'Campañas activas', descripcion: 'No mencionar campañas o eventos activos.', ejemplo: '"Lanzamos la campaña de Black Friday el día..."', accion: 'Advertir', activa: true, fija: false },
-    { nombre: 'Lista de clientes', descripcion: 'No revelar la lista de clientes de la empresa.', ejemplo: '"Nuestros principales clientes son Acme, Globex..."', accion: 'Registrar', activa: false, fija: false },
+  // --- Reglas propias de la empresa: regex real, no una descripción ---------
+  //
+  // Esto era decoración: "crear regla" agregaba una tarjeta con una
+  // descripción en lenguaje natural que nunca llegaba al motor, porque el
+  // motor no interpreta lenguaje natural -interpreta `custom_rules`, que es
+  // un patrón regex compilado en `detect/ruleset.py`-. Ahora la tarjeta ES la
+  // regla: el patrón que se guarda es el mismo que corre.
+  reglasPersonalizadas: (ReglaPersonalizada & { activa: boolean; accion: AccionRegla })[] = [];
+
+  readonly categoriasRegla = [
+    { valor: 'secret', etiqueta: 'Secreto' },
+    { valor: 'internal_data', etiqueta: 'Dato interno' },
+    { valor: 'pii', etiqueta: 'Dato personal' },
+  ];
+  readonly severidadesRegla = [
+    { valor: 'critical', etiqueta: 'Crítica' },
+    { valor: 'high', etiqueta: 'Alta' },
+    { valor: 'medium', etiqueta: 'Media' },
+    { valor: 'low', etiqueta: 'Baja' },
   ];
 
-  nuevaRegla = '';
+  nuevaReglaNombre = '';
+  nuevaReglaPatron = '';
+  nuevaReglaCategoria = 'internal_data';
+  nuevaReglaSeveridad = 'high';
+  errorNuevaReglaPersonalizada = '';
 
-  agregarRegla(): void {
-    const texto = this.nuevaRegla.trim();
-    if (!texto) return;
-    this.reglasCustom = [
-      { nombre: texto, descripcion: texto, ejemplo: 'Se generará automáticamente a partir de la descripción.', accion: 'Advertir', activa: true, fija: false },
-      ...this.reglasCustom,
+  agregarReglaPersonalizada(): void {
+    const id = this.nuevaReglaNombre.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const patron = this.nuevaReglaPatron.trim();
+    this.errorNuevaReglaPersonalizada = '';
+
+    if (!id || !patron) {
+      this.errorNuevaReglaPersonalizada = 'Hace falta un nombre y un patrón.';
+      return;
+    }
+    if (this.reglasPersonalizadas.some((r) => r.id === id)) {
+      this.errorNuevaReglaPersonalizada = 'Ya existe una regla con ese nombre.';
+      return;
+    }
+    try {
+      // El motor también descarta sola una regex inválida al compilar (ver
+      // `detect/ruleset.py`), pero avisar acá evita guardar algo que nunca
+      // va a correr y que nadie se va a dar cuenta que no corre.
+      new RegExp(patron);
+    } catch {
+      this.errorNuevaReglaPersonalizada = 'Esa expresión regular no es válida.';
+      return;
+    }
+
+    this.reglasPersonalizadas = [
+      {
+        id,
+        pattern: patron,
+        category: this.nuevaReglaCategoria,
+        severity: this.nuevaReglaSeveridad,
+        activa: true,
+        accion: 'Bloquear',
+      },
+      ...this.reglasPersonalizadas,
     ];
-    this.nuevaRegla = '';
+    this.nuevaReglaNombre = '';
+    this.nuevaReglaPatron = '';
+    void this.persistirReglasPersonalizadas();
+  }
+
+  quitarReglaPersonalizada(id: string): void {
+    this.reglasPersonalizadas = this.reglasPersonalizadas.filter((r) => r.id !== id);
+    void this.persistirReglasPersonalizadas();
+  }
+
+  async alternarReglaPersonalizada(id: string): Promise<void> {
+    this.reglasPersonalizadas = this.reglasPersonalizadas.map((r) =>
+      r.id === id ? { ...r, activa: !r.activa } : r,
+    );
+    await this.persistirReglasPersonalizadas();
+  }
+
+  async cambiarAccionReglaPersonalizada(id: string, accion: AccionRegla): Promise<void> {
+    this.reglasPersonalizadas = this.reglasPersonalizadas.map((r) => (r.id === id ? { ...r, accion } : r));
+    await this.persistirReglasPersonalizadas();
+  }
+
+  private async persistirReglasPersonalizadas(): Promise<void> {
+    const custom_rules: ReglaPersonalizada[] = this.reglasPersonalizadas.map((r) => ({
+      id: r.id,
+      pattern: r.pattern,
+      category: r.category,
+      severity: r.severity,
+    }));
+    const reglas: Record<string, string> = {};
+    this.reglasPersonalizadas.forEach((r) => {
+      reglas[r.id] = !r.activa ? 'off' : r.accion === 'Bloquear' ? 'block' : 'warn';
+    });
+    await this.servicio.guardar({ custom_rules, rule_actions: this.conRuleActions(reglas) });
+  }
+
+  // --- Que categoria de regla de FORMATO corta, y cual solo avisa -----------
+  //
+  // Existía en la política desde el principio (`block_categories`,
+  // `warn_categories`) y no tenía ningún control: decidía siempre lo mismo
+  // por defecto, y para cambiarlo había que editar el JSON a mano.
+  readonly categoriasDlp = [
+    { valor: 'secret', etiqueta: 'Secretos y credenciales' },
+    { valor: 'internal_data', etiqueta: 'Datos internos' },
+    { valor: 'pii', etiqueta: 'Datos personales' },
+  ];
+  readonly opcionesCategoria = [
+    { valor: 'block', etiqueta: 'Bloquear el envío' },
+    { valor: 'warn', etiqueta: 'Sólo avisar' },
+    { valor: 'allow', etiqueta: 'Dejar pasar' },
+  ];
+
+  accionDeCategoria(categoria: string): string {
+    if (this.politica().block_categories.includes(categoria)) return 'block';
+    if (this.politica().warn_categories.includes(categoria)) return 'warn';
+    return 'allow';
+  }
+
+  async cambiarAccionDeCategoria(categoria: string, accion: string): Promise<void> {
+    const block_categories = this.politica().block_categories.filter((c) => c !== categoria);
+    const warn_categories = this.politica().warn_categories.filter((c) => c !== categoria);
+    if (accion === 'block') block_categories.push(categoria);
+    if (accion === 'warn') warn_categories.push(categoria);
+    await this.servicio.guardar({ block_categories, warn_categories });
+  }
+
+  // --- Terminos prohibidos: un textarea, una categoria compartida -----------
+  //
+  // No es `company_terms` con otro nombre: produce un hallazgo distinto
+  // (`termino_prohibido`) que decide por categoría y no por término. Ver la
+  // nota en `politica.service.ts`.
+  get terminosProhibidosTexto(): string {
+    return this.politica().forbidden_terms.join('\n');
+  }
+
+  async guardarTerminosProhibidos(texto: string): Promise<void> {
+    const forbidden_terms = texto
+      .split('\n')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    await this.servicio.guardar({ forbidden_terms });
+  }
+
+  async cambiarCategoriaTerminosProhibidos(categoria: string): Promise<void> {
+    await this.servicio.guardar({ forbidden_terms_category: categoria });
+  }
+
+  // --- Lo que busca el modelo local, y que autoridad tiene ------------------
+  //
+  // El modelo (T2) es la tercera detección probabilística del sistema. Por
+  // defecto sólo avisa; estas tres perillas le dan más autoridad, categoría
+  // por categoría y etiqueta por etiqueta, a la empresa que confíe en él.
+  nuevaEtiquetaModelo = '';
+
+  agregarEtiquetaModelo(): void {
+    const etiqueta = this.nuevaEtiquetaModelo.trim();
+    if (!etiqueta || this.politica().model_labels.includes(etiqueta)) return;
+    this.nuevaEtiquetaModelo = '';
+    void this.servicio.guardar({ model_labels: [...this.politica().model_labels, etiqueta] });
+  }
+
+  quitarEtiquetaModelo(etiqueta: string): void {
+    void this.servicio.guardar({
+      model_labels: this.politica().model_labels.filter((e) => e !== etiqueta),
+      // Una etiqueta que se saca de lo que el modelo busca no puede seguir
+      // con autoridad para cortar un envío que ya no va a encontrar.
+      model_block_labels: this.politica().model_block_labels.filter((e) => e !== etiqueta),
+    });
+  }
+
+  tieneAutoridadParaCortar(etiqueta: string): boolean {
+    return this.politica().model_block_labels.includes(etiqueta);
+  }
+
+  async alternarAutoridadDeEtiqueta(etiqueta: string): Promise<void> {
+    const model_block_labels = this.tieneAutoridadParaCortar(etiqueta)
+      ? this.politica().model_block_labels.filter((e) => e !== etiqueta)
+      : [...this.politica().model_block_labels, etiqueta];
+    await this.servicio.guardar({ model_block_labels });
+  }
+
+  autorizaModeloEnCategoria(categoria: string): boolean {
+    return this.politica().model_block_categories.includes(categoria);
+  }
+
+  async alternarAutoridadModeloEnCategoria(categoria: string): Promise<void> {
+    const model_block_categories = this.autorizaModeloEnCategoria(categoria)
+      ? this.politica().model_block_categories.filter((c) => c !== categoria)
+      : [...this.politica().model_block_categories, categoria];
+    await this.servicio.guardar({ model_block_categories });
   }
 
   readonly areas = ['Marketing', 'Contabilidad', 'RR.HH.', 'Ingeniería', 'Legal'];
