@@ -74,6 +74,19 @@ echo.
 pause
 """
 
+PANEL_BAT = """@echo off
+chcp 65001 > nul
+title Panel de Aegis
+echo.
+echo   Abriendo el panel de Aegis en tu navegador.
+echo   Ahi ves lo que Aegis reviso y podes prenderlo o apagarlo.
+echo.
+echo   Esta ventana tiene que quedar abierta mientras uses el panel.
+echo   Cerrala (o Ctrl+C) para cerrarlo. Aegis sigue funcionando igual.
+echo.
+"%~dp0Aegis.exe" panel
+"""
+
 ESTADO_BAT = """@echo off
 chcp 65001 > nul
 title Estado de Aegis
@@ -106,6 +119,18 @@ Para ver como esta: "Estado de Aegis.bat"
 Para sacarlo:       "Desinstalar Aegis.bat"
 
 
+EL PANEL
+--------
+
+Doble clic en "Panel de Aegis.bat" y se abre en tu navegador. Ahi ves que
+reviso Aegis --que tipo de dato se intento enviar y hacia donde, nunca el
+dato-- y arriba de todo hay un interruptor para prenderlo y apagarlo.
+
+Apagarlo NO lo desinstala: deja de revisar el trafico y nada mas, asi que
+volver a prenderlo es instantaneo. Sirve para probar si algo se rompe por
+culpa de Aegis, o para mostrar la diferencia entre tenerlo y no tenerlo.
+
+
 LO QUE AEGIS *NO* HACE
 ----------------------
 
@@ -135,7 +160,9 @@ LO OPCIONAL
 -----------
 
   * Leer el texto de las capturas de pantalla ya viene incluido, pero apagado,
-    porque tarda unos segundos. Se prende con la variable AEGIS_OCR=1.
+    porque tarda unos dos segundos por imagen. Se prende desde el panel, en
+    Deteccion. Sirve para lo que nadie transcribe a mano: la foto de una
+    pantalla con una contrasena o una cedula.
 
   * El modelo local que detecta datos sin formato (nombres de clientes, cifras
     de contratos) NO viene en este paquete: necesita 442 MB de dependencias.
@@ -193,6 +220,7 @@ def agregar_lanzadores() -> None:
     (CARPETA / "Instalar Aegis.bat").write_text(INSTALAR_BAT, encoding="utf-8")
     (CARPETA / "Desinstalar Aegis.bat").write_text(DESINSTALAR_BAT, encoding="utf-8")
     (CARPETA / "Estado de Aegis.bat").write_text(ESTADO_BAT, encoding="utf-8")
+    (CARPETA / "Panel de Aegis.bat").write_text(PANEL_BAT, encoding="utf-8")
     (CARPETA / "LEEME.txt").write_text(LEEME, encoding="utf-8")
 
 
@@ -224,7 +252,7 @@ def probar() -> bool:
             print(f"  FALLO Aegis.exe {accion}: no aparecio {esperado!r}")
             print("       " + salida.strip().replace("\n", "\n       ")[:600])
             ok = False
-    return ok and _levanta_el_proxy(exe)
+    return ok and _levanta_el_proxy(exe) and _abre_el_panel(exe)
 
 
 def _levanta_el_proxy(exe: Path) -> bool:
@@ -278,6 +306,80 @@ def _levanta_el_proxy(exe: Path) -> bool:
             time.sleep(0.5)
         print("  FALLO Aegis.exe servicio no escucho en 60 s")
         return False
+    finally:
+        proceso.terminate()
+        try:
+            proceso.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proceso.kill()
+
+
+def _abre_el_panel(exe: Path) -> bool:
+    """Que `aegis panel` levante y sirva, no solo que el exe tenga el archivo.
+
+    Es el mismo riesgo que el del proxy y por el mismo motivo: `_panel` importa
+    el servidor DENTRO de la funcion, que es justo el caso donde el analisis
+    estatico de PyInstaller puede no seguir. Un paquete al que le falte
+    `aegis_agent.panel.server` pasa `--help`, pasa `plan`, levanta el proxy, y
+    revienta cuando la persona abre el panel: o sea, en la unica pantalla que va
+    a mirar.
+
+    Ademas se pide una pagina de verdad, no solo que el puerto abra: si el
+    render fallara, el servidor escucharia igual y la persona veria un error 500.
+    """
+
+    import os
+    import socket
+    import time
+    import urllib.error
+    import urllib.request
+
+    puerto = 8918
+    entorno = {**os.environ, "AEGIS_PANEL_PORT": str(puerto), "AEGIS_SENSOR": "0"}
+    proceso = subprocess.Popen(
+        [str(exe), "panel"],
+        env=entorno,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+    )
+
+    def escucha() -> bool:
+        with socket.socket() as s:
+            s.settimeout(0.4)
+            return s.connect_ex(("127.0.0.1", puerto)) == 0
+
+    try:
+        limite = time.time() + 60
+        while time.time() < limite and not escucha():
+            if proceso.poll() is not None:
+                print("  FALLO Aegis.exe panel murio al arrancar:")
+                salida = (proceso.stdout.read() or "").strip()
+                for linea in salida.splitlines()[-25:]:
+                    print(f"       {linea}")
+                return False
+            time.sleep(0.5)
+
+        if not escucha():
+            print("  FALLO Aegis.exe panel no escucho en 60 s")
+            return False
+
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{puerto}/", timeout=10
+            ) as respuesta:
+                html = respuesta.read().decode("utf-8", "replace")
+        except (urllib.error.URLError, OSError) as error:
+            print(f"  FALLO Aegis.exe panel no sirvio la pagina: {error}")
+            return False
+
+        if "id=\"switch\"" not in html:
+            print("  FALLO Aegis.exe panel sirvio una pagina sin el interruptor")
+            return False
+
+        print(f"  OK   Aegis.exe panel sirve el interruptor en {puerto}")
+        return True
     finally:
         proceso.terminate()
         try:

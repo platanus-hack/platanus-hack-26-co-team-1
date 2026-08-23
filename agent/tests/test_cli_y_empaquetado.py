@@ -361,3 +361,69 @@ class TestElServicio(CasoAislado):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLoQueRecibeQuienDescarga(unittest.TestCase):
+    """Los .bat y el LEEME son lo unico que toca una persona que descarga el zip.
+
+    Nada los verificaba. Un lanzador que llama a una accion que no existe se
+    descubre recien cuando alguien hace doble clic -- y ese alguien no tiene
+    forma de saber si le fallo el programa o si hizo algo mal. Es la misma
+    familia que el `aegis demo` roto: codigo de produccion que ningun test toca
+    porque los tests entran por otra puerta.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        from pathlib import Path
+
+        ruta = Path(__file__).resolve().parents[2] / "packaging" / "build_windows.py"
+        spec = importlib.util.spec_from_file_location("build_windows", ruta)
+        cls.build = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.build)
+
+    def _lanzadores(self) -> dict[str, str]:
+        return {
+            "Instalar Aegis.bat": self.build.INSTALAR_BAT,
+            "Desinstalar Aegis.bat": self.build.DESINSTALAR_BAT,
+            "Estado de Aegis.bat": self.build.ESTADO_BAT,
+            "Panel de Aegis.bat": self.build.PANEL_BAT,
+        }
+
+    def test_los_bat_solo_llaman_a_acciones_que_existen(self):
+        """Un .bat que invoca una accion inexistente imprime la ayuda y confunde."""
+
+        import re
+
+        for nombre, contenido in self._lanzadores().items():
+            for accion in re.findall(r'Aegis\.exe"\s+(\w+)', contenido):
+                with self.subTest(lanzador=nombre, accion=accion):
+                    self.assertIn(
+                        accion,
+                        cli.ACCIONES,
+                        f"{nombre} llama a '{accion}', que el CLI no conoce",
+                    )
+
+    def test_se_escriben_todos_los_lanzadores_que_se_definen(self):
+        """Definir un .bat y olvidarse de escribirlo lo deja fuera del zip."""
+
+        import inspect
+
+        fuente = inspect.getsource(self.build.agregar_lanzadores)
+        for nombre in self._lanzadores():
+            with self.subTest(lanzador=nombre):
+                self.assertIn(nombre, fuente)
+
+    def test_el_leeme_nombra_cada_lanzador(self):
+        """Un archivo en la carpeta que el LEEME no explica es un archivo que nadie abre."""
+
+        for nombre in self._lanzadores():
+            with self.subTest(lanzador=nombre):
+                self.assertIn(nombre, self.build.LEEME)
+
+    def test_el_leeme_no_promete_lo_que_ya_no_es_asi(self):
+        """El OCR se prende desde el panel; decir que es una variable de entorno
+        manda a la persona a un lugar donde no hay nada que tocar."""
+
+        self.assertNotIn("AEGIS_OCR=1", self.build.LEEME)

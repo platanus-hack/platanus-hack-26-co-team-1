@@ -63,6 +63,19 @@ ocultos = [
     "aegis_agent.install.firewall",
     "aegis_agent.detect.ocr",
     "aegis_agent.detect.imagenes",
+    # El panel y el interruptor. `aegis panel` los importa DENTRO de la funcion,
+    # que es justo el caso que el analisis estatico puede no seguir -- y el modo
+    # de falla es el que ya documenta pydivert mas arriba: un exe que compila,
+    # pasa `--help` y revienta al usarlo.
+    "aegis_agent.control",
+    "aegis_agent.panel.server",
+    "aegis_agent.panel.render",
+    "aegis_agent.panel.metrics",
+    # Lo que llego con las ultimas features. Van nombrados aunque hoy el
+    # analisis los alcance: la lista es barata y olvidarse uno cuesta un exe
+    # roto que solo se descubre usandolo.
+    "aegis_agent.identidad",
+    "aegis_agent.detect.ruleset",
 ]
 
 # Lo que NO va. Cada uno con su motivo, porque una lista de exclusiones sin
