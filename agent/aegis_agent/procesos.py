@@ -89,7 +89,25 @@ class Proceso:
 
 _tabla: dict[int, int] = {}
 _leida_en: float = 0.0
-_por_pid: dict[int, Proceso] = {}
+# pid -> (proceso, cuando se resolvio). El instante NO es decorativo.
+#
+# LOS PID SE RECICLAN. Windows los reasigna rapido, y un cache de pid a nombre
+# sin vencimiento termina diciendo que el trafico de Cursor lo mando Chrome,
+# porque Chrome tuvo ese pid hace media hora. En un producto cuya senal propia
+# es "que aplicacion abrio esta conexion" -- lo unico que un DLP de navegador
+# no puede ver -- eso no es higiene: es la evidencia mintiendo.
+#
+# `olvidar()` existia para esto y su docstring decia "por si el agente corre
+# muchas horas". No la llamaba nadie fuera de los tests, asi que en un agente de
+# verdad el cache no se vaciaba nunca.
+_por_pid: dict[int, tuple[Proceso, float]] = {}
+
+# Cuanto vale un nombre antes de volver a preguntarlo. Un proceso no se renombra
+# mientras vive, asi que lo unico que acota esta ventana es cada cuanto se
+# recicla un pid. Cinco minutos deja la ventana de error corta y cuesta una
+# consulta a psutil por proceso cada cinco minutos, que no es nada al lado de
+# atribuirle un envio a la aplicacion equivocada.
+VENTANA_DE_NOMBRE = 300
 
 
 def _psutil():
@@ -181,10 +199,12 @@ def del_puerto(puerto: int, ahora: float | None = None) -> Proceso:
     if pid is None:
         proceso = Proceso()
     else:
-        if pid not in _por_pid:
+        recordado = _por_pid.get(pid)
+        if recordado is None or ahora - recordado[1] > VENTANA_DE_NOMBRE:
             nombre, ruta = _nombre_util(pid)
-            _por_pid[pid] = Proceso(nombre=nombre, ruta=ruta, pid=pid)
-        proceso = _por_pid[pid]
+            recordado = (Proceso(nombre=nombre, ruta=ruta, pid=pid), ahora)
+            _por_pid[pid] = recordado
+        proceso = recordado[0]
     return proceso
 
 

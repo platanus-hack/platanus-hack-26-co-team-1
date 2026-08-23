@@ -19,6 +19,7 @@ todavia no existe.
 """
 
 import unittest
+from unittest.mock import patch
 
 from aegis_agent import procesos
 from aegis_agent.detect.types import Finding
@@ -219,3 +220,51 @@ class TestElNombreCanonico(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestElPidRecicladoNoMienteParaSiempre(unittest.TestCase):
+    """Los pid se reciclan, y el cache de nombres no vencia nunca.
+
+    Windows reasigna pid rapido. Sin vencimiento, el cache termina diciendo que
+    el trafico de Cursor lo mando Chrome porque Chrome tuvo ese pid hace media
+    hora. En un producto cuya senal propia es "que aplicacion abrio esta
+    conexion" -- lo unico que un DLP de navegador no puede ver -- eso no es un
+    detalle de higiene: es la evidencia mintiendo.
+
+    `olvidar()` existia justo para esto y su docstring decia "por si el agente
+    corre muchas horas". No la llamaba nadie fuera de los tests.
+    """
+
+    def setUp(self):
+        procesos.olvidar()
+        self.addCleanup(procesos.olvidar)
+
+    def _con_pid(self, nombre):
+        return patch.object(procesos, "_nombre_util", return_value=(nombre, f"C:/{nombre}"))
+
+    def test_dentro_de_la_ventana_no_se_vuelve_a_preguntar(self):
+        """El cache tiene que seguir siendo un cache: una consulta, no mil."""
+
+        with patch.object(procesos, "_tabla", {5000: 4242}), \
+             patch.object(procesos, "_refrescar_tabla", lambda *_: None), \
+             patch.object(procesos, "_leida_en", 1_000_000), \
+             self._con_pid("chrome.exe") as consultar:
+            procesos.del_puerto(5000, ahora=1_000_000)
+            procesos.del_puerto(5000, ahora=1_000_010)
+        self.assertEqual(consultar.call_count, 1)
+
+    def test_pasada_la_ventana_se_vuelve_a_resolver(self):
+        with patch.object(procesos, "_tabla", {5000: 4242}), \
+             patch.object(procesos, "_refrescar_tabla", lambda *_: None), \
+             patch.object(procesos, "_leida_en", 10**9):
+            with self._con_pid("chrome.exe"):
+                primero = procesos.del_puerto(5000, ahora=10**9)
+            # El mismo pid, mucho despues: el sistema ya se lo dio a otro.
+            with self._con_pid("Cursor.exe"):
+                despues = procesos.del_puerto(
+                    5000, ahora=10**9 + procesos.VENTANA_DE_NOMBRE + 1
+                )
+        self.assertEqual(primero.nombre, "chrome.exe")
+        self.assertEqual(
+            despues.nombre, "Cursor.exe", "el cache siguio dando el nombre viejo"
+        )
