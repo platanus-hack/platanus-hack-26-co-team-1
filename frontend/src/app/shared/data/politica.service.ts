@@ -51,6 +51,12 @@ export interface Politica {
   app_actions: Record<string, string>;
   company_terms: Record<string, string>;
   company_terms_action: string;
+  /**
+   * Qué pasa con el diccionario cuando el destino SÍ es una herramienta
+   * aprobada. 'igual' aplica la acción de arriba; 'allow' deja hablar de lo
+   * propio con la herramienta que la empresa eligió.
+   */
+  company_terms_en_aprobada: string;
   injection_action: string;
   /**
    * Qué categorías de una regla de FORMATO (T1: AWS key, tarjeta, contraseña…)
@@ -130,6 +136,7 @@ const VACIA: Politica = {
   app_actions: {},
   company_terms: {},
   company_terms_action: 'block',
+  company_terms_en_aprobada: 'igual',
   injection_action: 'warn',
   block_categories: ['internal_data', 'secret'],
   warn_categories: ['pii'],

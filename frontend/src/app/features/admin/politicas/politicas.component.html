@@ -622,6 +622,24 @@
             es una decisión explícita, no una probabilidad.
           </p>
         </div>
+
+        <div class="mt-5 border-t border-aegis-border pt-4">
+          <label class="aegis-label">En las herramientas que aprobaste</label>
+          <select
+            class="aegis-select mt-1.5 w-full"
+            [ngModel]="politica().company_terms_en_aprobada"
+            (ngModelChange)="cambiarAvanzado('company_terms_en_aprobada', $event)"
+          >
+            <option value="igual">Tratarlas igual que al resto</option>
+            <option value="allow">Dejar hablar de lo propio</option>
+          </select>
+          <p class="mt-1.5 text-xs text-aegis-faint">
+            «Que no salga de la empresa» y «que no salga hacia la herramienta que la empresa eligió y paga» son dos
+            cosas distintas. Si en tu asistente aprobado no se puede nombrar un proyecto interno, la gente apaga el
+            diccionario entero — y con él se van también los destinos donde sí importaba. Una credencial se corta
+            igual, acá y en todos lados.
+          </p>
+        </div>
       </div>
 
 
