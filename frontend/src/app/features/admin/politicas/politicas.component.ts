@@ -9,7 +9,18 @@ import { DirectorioService } from '../../../shared/data/directorio.service';
 import { EnrolamientoService } from '../../../shared/data/enrolamiento.service';
 
 interface Herramienta {
+  /** Lo que lee la persona. Puede nombrar más de un producto. */
   nombre: string;
+  /**
+   * El destino que de verdad se aprueba o se corta.
+   *
+   * Es el dato, y el nombre es la etiqueta — al revés de como estaba. Antes el
+   * dominio se derivaba del nombre con una tabla, y Codex y ChatGPT caían los
+   * dos en `chatgpt.com`: con ChatGPT permitido y Codex bloqueado, el guardado
+   * mandaba `chatgpt.com` igual y el toggle de Codex no hacía nada. La pantalla
+   * decía una cosa y la política guardaba otra, sin ningún aviso.
+   */
+  dominio: string;
   permitida: boolean;
 }
 
@@ -101,7 +112,7 @@ export class PoliticasComponent implements OnInit {
     }));
     this.herramientas = this.herramientas.map((h) => ({
       ...h,
-      permitida: p.approved_ai.length ? p.approved_ai.includes(dominioDe(h.nombre)) : h.permitida,
+      permitida: p.approved_ai.length ? p.approved_ai.includes(h.dominio) : h.permitida,
     }));
     this.reglasDefault.forEach((r) => {
       const accion = p.rule_actions[reglaId(r.nombre)];
@@ -154,7 +165,7 @@ export class PoliticasComponent implements OnInit {
     });
 
     await this.servicio.guardar({
-      approved_ai: this.herramientas.filter((h) => h.permitida).map((h) => dominioDe(h.nombre)),
+      approved_ai: this.herramientas.filter((h) => h.permitida).map((h) => h.dominio),
       blocked_domains: this.urlsBloqueadas,
       rule_actions: this.conRuleActions(reglas),
       company_terms: terminos,
@@ -234,13 +245,20 @@ export class PoliticasComponent implements OnInit {
 
   modoFlexible = false;
 
+  /**
+   * Una fila por DESTINO, no por producto.
+   *
+   * ChatGPT y Codex van juntos porque salen al mismo host: no se pueden
+   * autorizar por separado, y ofrecer dos interruptores para una sola decisión
+   * es prometer un control que no existe. Si algún día Codex tiene su propio
+   * destino, se separa acá y funciona solo.
+   */
   herramientas: Herramienta[] = [
-    { nombre: 'Claude', permitida: true },
-    { nombre: 'ChatGPT', permitida: true },
-    { nombre: 'Claude Code', permitida: true },
-    { nombre: 'Codex', permitida: false },
-    { nombre: 'Gemini', permitida: false },
-    { nombre: 'GitHub Copilot', permitida: true },
+    { nombre: 'Claude', dominio: 'claude.ai', permitida: true },
+    { nombre: 'ChatGPT · Codex', dominio: 'chatgpt.com', permitida: true },
+    { nombre: 'Claude Code', dominio: 'api.anthropic.com', permitida: true },
+    { nombre: 'Gemini', dominio: 'gemini.google.com', permitida: false },
+    { nombre: 'GitHub Copilot', dominio: 'api.githubcopilot.com', permitida: true },
   ];
 
   // URLs que se cortan siempre, más allá de qué herramienta las sirva (ej. deepseek.com, grok.com).
@@ -553,18 +571,6 @@ export class PoliticasComponent implements OnInit {
  * La política habla de dominios porque es lo único que el proxy tiene delante:
  * "Claude" no aparece en ninguna conexión, "claude.ai" sí.
  */
-function dominioDe(nombre: string): string {
-  const dominios: Record<string, string> = {
-    Claude: 'claude.ai',
-    'Claude Code': 'api.anthropic.com',
-    ChatGPT: 'chatgpt.com',
-    Codex: 'chatgpt.com',
-    Gemini: 'gemini.google.com',
-    'GitHub Copilot': 'api.githubcopilot.com',
-  };
-  return dominios[nombre] ?? nombre.toLowerCase().replace(/\s+/g, '');
-}
-
 /** Del nombre que ve la empresa al rule_id que usa el motor. */
 function reglaId(nombre: string): string {
   const reglas: Record<string, string> = {
