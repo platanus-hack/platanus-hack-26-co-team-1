@@ -54,3 +54,10 @@ frontend/dist
 
 # El paquete descargable, que arma packaging/build_windows.py
 /build/
+
+# Informes de auditoria: describen paso a paso como explotar lo que encontraron,
+# con los payloads. Los agujeros se arreglan y se documentan en el commit que
+# los cierra; el informe entero en un repo de equipo es un mapa para el que
+# llegue antes que el fix. Se guardan fuera del repositorio.
+auditoria-*.html
+docs/auditoria-*.html
