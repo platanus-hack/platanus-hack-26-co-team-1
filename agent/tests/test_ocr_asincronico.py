@@ -201,7 +201,13 @@ class TestLaHigieneDelEstado(Base):
 
         with self._leyendo(CON_SECRETO):
             adjuntos.registrar("chatgpt.com", PNG, "", _escanear)
-            with patch.object(adjuntos, "VIDA_MS", 0):
+            # -1 y no 0: la condicion es `> VIDA_MS`, asi que con 0 el test
+            # exige que haya pasado tiempo ESTRICTAMENTE mayor que cero entre
+            # registrar y cobrar. En Windows `time.time()` avanza de a ~15,6 ms,
+            # asi que las dos llamadas caen seguido en el mismo tick, la resta
+            # da 0.0 y `0 > 0` es falso: el pendiente no vence y el test falla.
+            # Medido en main sin tocar nada: 1 de cada 5 corridas.
+            with patch.object(adjuntos, "VIDA_MS", -1):
                 hallazgos, _ = adjuntos.cobrar("chatgpt.com")
 
         self.assertEqual(hallazgos, [])
