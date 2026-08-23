@@ -354,3 +354,78 @@ class TestSonTresRolesYNoDos(PanelLevantado):
         for ruta in ("/v1/enrolamiento", "/v1/colaboradores", "/v1/tenant"):
             with self.subTest(ruta=ruta):
                 self.assertEqual(self.pedir("POST", ruta, {}, token=token)[0], 403)
+
+
+class TestElPanelDiceCuandoInventa(PanelLevantado):
+    """Un panel de actividad inventada se ve igual que uno de actividad real.
+
+    `semana_simulada` existe para que alguien pueda recorrer el producto sin
+    haber conectado un equipo, y eso esta bien. Lo que no puede es callarselo:
+    si el agente deja de reportar --el token vencio, nadie conecto el equipo--
+    la empresa no ve un panel vacio que la haga preguntar, ve una semana normal
+    y se queda tranquila. El generador que existe para ensenar el producto
+    termina tapando que el producto no esta funcionando.
+    """
+
+    def setUp(self):
+        super().setUp()
+        cuentas._memoria.clear()
+        self.addCleanup(cuentas._memoria.clear)
+        cuentas.guardar("admin", "clave-larga-1", "acme")
+        self.token = self.entrar("admin", "clave-larga-1")
+
+    def test_sin_eventos_reales_lo_dice(self):
+        self.servicio._memoria.clear()
+        _, datos = self.pedir("GET", "/api/metrics", token=self.token)
+        self.assertTrue(datos["de_ejemplo"])
+
+    def test_con_un_evento_real_deja_de_decirlo(self):
+        """Basta UNO: la semana simulada solo aparece cuando no hay nada."""
+
+        self.servicio._memoria.clear()
+        self.servicio._memoria.insert(0, {
+            "event_id": "de-verdad-1",
+            "tenant_id": "acme",
+            "action": "blocked",
+            "occurred_at": "2026-08-23T10:00:00Z",
+            "actor": {"user_id": "u_1", "area": "ventas", "role": "employee"},
+            "destination": {"domain": "chatgpt.com", "classification": "ai_unapproved"},
+            "detection": {"rule_id": "aws_access_key_id", "category": "secret",
+                          "severity": "high", "engine": "t1"},
+        })
+        self.addCleanup(self.servicio._memoria.clear)
+        _, datos = self.pedir("GET", "/api/metrics", token=self.token)
+        self.assertFalse(datos["de_ejemplo"])
+
+    def test_el_detalle_de_una_persona_sale_de_SUS_eventos(self):
+        """Y no de una maqueta, que es lo que mostraba esa pantalla."""
+
+        self.servicio._memoria.clear()
+        for i, usuario in enumerate(("u_mia", "u_mia", "u_ajena")):
+            self.servicio._memoria.insert(0, {
+                "event_id": f"e{i}", "tenant_id": "acme", "action": "blocked",
+                "occurred_at": f"2026-08-2{i+1}T10:00:00Z",
+                "actor": {"user_id": usuario, "area": "ventas", "role": "employee"},
+                "destination": {"domain": "chatgpt.com", "classification": "ai_unapproved"},
+                "detection": {"rule_id": "aws_access_key_id", "category": "secret",
+                              "severity": "high", "engine": "t1"},
+            })
+        self.addCleanup(self.servicio._memoria.clear)
+
+        estado, datos = self.pedir(
+            "GET", "/v1/colaborador?usuario=u_mia", token=self.token
+        )
+        self.assertEqual(estado, 200)
+        self.assertEqual(datos["eventos"], 2)
+        self.assertEqual(datos["metrics"]["blocked"], 2)
+        # Lo de la otra persona no se cuela.
+        self.assertTrue(all(u["destino"] == "chatgpt.com" for u in datos["ultimos"]))
+        self.assertEqual(len(datos["ultimos"]), 2)
+
+    def test_el_detalle_pide_sesion(self):
+        self.assertEqual(self.pedir("GET", "/v1/colaborador?usuario=u_mia")[0], 401)
+
+    def test_el_detalle_sin_usuario_no_adivina(self):
+        self.assertEqual(
+            self.pedir("GET", "/v1/colaborador", token=self.token)[0], 400
+        )

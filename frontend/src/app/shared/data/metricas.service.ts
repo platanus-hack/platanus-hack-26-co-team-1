@@ -149,6 +149,15 @@ export class MetricasService {
   readonly metricas = signal<MetricasPanel>(MAQUETA);
   /** true cuando el API rechazo la sesion: sirve para mandar al login. */
   readonly sinSesion = signal(false);
+  /**
+   * true cuando lo que se está mostrando lo inventó el generador de ejemplo.
+   *
+   * Hace falta decirlo porque un panel lleno de actividad inventada se ve
+   * exactamente igual que uno lleno de actividad real. Si el agente dejó de
+   * reportar, la empresa no ve un panel vacío que la haga preguntar: ve una
+   * semana normal y se queda tranquila.
+   */
+  readonly deEjemplo = signal(false);
 
   /**
    * @param rango Ventana de tiempo en ISO8601 UTC. Sin nada, trae todo lo que
@@ -170,7 +179,9 @@ export class MetricasService {
       });
       this.sinSesion.set(respuesta.status === 401);
       if (respuesta.ok) {
-        this.metricas.set(this.traducir(await respuesta.json()));
+        const datos = await respuesta.json();
+        this.deEjemplo.set(datos.de_ejemplo === true);
+        this.metricas.set(this.traducir(datos));
       }
     } catch {
       // Sin API queda lo que ya habia (la maqueta, si era la primera carga). Un

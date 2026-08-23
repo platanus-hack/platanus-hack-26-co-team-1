@@ -266,11 +266,16 @@ export class PoliticasComponent implements OnInit {
   nuevaUrlBloqueada = '';
 
   agregarUrlBloqueada(): void {
-    const url = this.nuevaUrlBloqueada.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const url = soloElDominio(this.nuevaUrlBloqueada);
     if (!url || this.urlsBloqueadas.includes(url)) return;
     this.urlsBloqueadas = [...this.urlsBloqueadas, url];
     this.nuevaUrlBloqueada = '';
     void this.persistir();
+  }
+
+  /** Lo que se va a guardar de verdad, para mostrarlo antes de guardarlo. */
+  get vistaPreviaUrl(): string {
+    return soloElDominio(this.nuevaUrlBloqueada);
   }
 
   quitarUrlBloqueada(url: string): void {
@@ -572,6 +577,37 @@ export class PoliticasComponent implements OnInit {
  * "Claude" no aparece en ninguna conexión, "claude.ai" sí.
  */
 /** Del nombre que ve la empresa al rule_id que usa el motor. */
+/**
+ * El dominio, y sólo el dominio, de lo que sea que hayan escrito.
+ *
+ * El motor compara contra el HOST de cada conexión, así que cualquier cosa que
+ * no sea un host no coincide con nada — y ahí está el problema, porque no
+ * falla: se guarda, se ve en la lista, y no bloquea. El admin queda tranquilo
+ * mirando una regla muerta.
+ *
+ * Los dos casos que aparecen solos, sin que nadie se equivoque:
+ *
+ * - **Pegar la URL entera.** `https://deepseek.com/chat` dejaba
+ *   `deepseek.com/chat`, y ningún host lleva una barra adentro.
+ * - **Escribir el `www.`**, que es lo que se ve en la barra del navegador.
+ *   La coincidencia es por sufijo, así que `www.deepseek.com` bloqueaba
+ *   `www.deepseek.com` y dejaba pasar `deepseek.com` pelado.
+ *
+ * Se quita el `www.` y no otros subdominios a propósito: `www` es la misma
+ * página, mientras que `chat.` o `api.` pueden ser servicios distintos que
+ * alguien podría querer bloquear por separado. Y quitarlo no pierde cobertura,
+ * porque bloquear el dominio raíz ya alcanza a todos sus subdominios.
+ */
+function soloElDominio(entrada: string): string {
+  let texto = (entrada || '').trim().toLowerCase();
+  texto = texto.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
+  texto = texto.split('/')[0].split('?')[0].split('#')[0];
+  texto = texto.split('@').pop() ?? texto;
+  texto = texto.replace(/:\d+$/, '');
+  texto = texto.replace(/^www\./, '');
+  return texto;
+}
+
 function reglaId(nombre: string): string {
   const reglas: Record<string, string> = {
     'API keys': 'aws_access_key_id',

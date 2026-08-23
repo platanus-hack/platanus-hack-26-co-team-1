@@ -27,6 +27,7 @@ function isoLocal(d: Date): string {
 })
 export class PanelGeneralComponent implements OnInit {
   private readonly metricas = inject(MetricasService);
+  readonly deEjemplo = this.metricas.deEjemplo;
   /** Lo que esta viendo el agente. Cae a la maqueta si no hay API. */
   readonly m = this.metricas.metricas;
 

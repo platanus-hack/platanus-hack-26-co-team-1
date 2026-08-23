@@ -77,6 +77,15 @@
             <input class="aegis-input" type="text" placeholder="dominio.com" [(ngModel)]="nuevaUrlBloqueada" (keydown.enter)="agregarUrlBloqueada()" />
             <button type="button" class="aegis-btn-secondary shrink-0" (click)="agregarUrlBloqueada()">Bloquear</button>
           </div>
+          <!-- Se muestra lo que va a quedar guardado y no lo que se escribió:
+               pegar la URL entera o escribir el www. son las dos formas de
+               guardar una regla que no bloquea nada, y las dos se ven bien. -->
+          @if (vistaPreviaUrl && vistaPreviaUrl !== nuevaUrlBloqueada.trim().toLowerCase()) {
+            <p class="mt-2 text-xs text-aegis-faint">
+              Se va a bloquear <span class="font-mono text-aegis-text">{{ vistaPreviaUrl }}</span>
+              y todos sus subdominios.
+            </p>
+          }
         </div>
 
         <div class="aegis-card p-6">

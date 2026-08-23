@@ -231,6 +231,25 @@ def eventos(tenant: str | None = None) -> list[dict]:
     return guardados or semana_simulada()
 
 
+def son_de_ejemplo(eventos_mostrados: list[dict]) -> bool:
+    """Si lo que se esta mostrando lo invento `semana_simulada`.
+
+    Existe porque no decirlo es peligroso, y de una forma sutil: un panel lleno
+    de actividad inventada se ve EXACTAMENTE igual que uno lleno de actividad
+    real. Si el agente deja de reportar --el token vencio, la red se cayo, nadie
+    conecto el equipo-- la empresa no ve un panel vacio que la haria preguntar:
+    ve una semana normal y se queda tranquila.
+
+    O sea que el generador que existe para ensenar el producto puede terminar
+    tapando que el producto no esta funcionando. Se marca por el prefijo del
+    `event_id`, que es lo unico que `semana_simulada` deja y nadie mas usa.
+    """
+
+    return bool(eventos_mostrados) and all(
+        str(e.get("event_id", "")).startswith("demo-") for e in eventos_mostrados
+    )
+
+
 
 # A donde manda el boton de descarga si nadie configuro otra cosa.
 #
@@ -531,6 +550,7 @@ class Handler(BaseHTTPRequestHandler):
             "/v1/enrolamiento": self._listar_codigos,
             "/v1/mi-actividad": self._mi_actividad,
             "/v1/usuarios": self._listar_usuarios,
+            "/v1/colaborador": self._detalle_de_colaborador,
             "/descargar": self._descargar,
         }
 
@@ -616,6 +636,8 @@ class Handler(BaseHTTPRequestHandler):
                     "almacen": almacen(),
                     "eventos": len(registrados),
                     "tenant": sesion["tenant"],
+                    # Que el panel pueda decirlo. Ver `son_de_ejemplo`.
+                    "de_ejemplo": son_de_ejemplo(registrados),
                 },
             )
 
@@ -799,6 +821,78 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "error": "todavia no hay una version publicada para descargar",
                     "como": "definir AEGIS_DESCARGA_URL con el enlace al paquete",
+                },
+            )
+
+    def _detalle_de_colaborador(self) -> None:
+        """Lo que hizo UNA persona, calculado sobre sus propios eventos.
+
+        La pantalla que muestra esto era una maqueta: nombres inventados y una
+        lista de intentos escrita a mano. Para un producto cuyo valor entero es
+        el registro, una pantalla de registro que no viene del registro es lo
+        peor que se puede mostrar -- y no hace falta que alguien la descubra
+        para que haga dano: basta con que la empresa la crea y decida algo.
+
+        Se reusa `compute` y el rango del pedido en vez de calcular aparte, para
+        que los numeros de esta pantalla no puedan contradecir a los del panel
+        general. Cuando eran dos calculos distintos, ese es exactamente el bug
+        que aparece.
+        """
+
+        from dataclasses import asdict
+
+        sesion = self._sesion()
+        usuario = parse_qs(urlsplit(self.path).query).get("usuario", [""])[0].strip()
+
+        if not self._puede_mirar(sesion):
+            self._rechazar_no_puede_mirar(sesion)
+        elif not usuario:
+            self._json(400, {"error": "falta el usuario"})
+        else:
+            # El tenant sale de la SESION y el usuario del pedido: una empresa
+            # puede mirar a los suyos y a nadie mas, aunque adivine un seudonimo.
+            registrados = self._registrados_del_rango(sesion["tenant"])
+            suyos = [
+                e for e in registrados
+                if (e.get("actor") or {}).get("user_id") == usuario
+            ]
+            ficha = next(
+                (
+                    c for c in directorio.colaboradores(sesion["tenant"])
+                    if c.get("usuario") == usuario
+                ),
+                None,
+            )
+            calculadas = compute(suyos)
+            self._json(
+                200,
+                {
+                    "usuario": usuario,
+                    "ficha": ficha,
+                    "metrics": {
+                        **asdict(calculadas),
+                        "block_rate": round(calculadas.block_rate, 1),
+                    },
+                    "eventos": len(suyos),
+                    # Lo ultimo que hizo, ya redactado: el contenido nunca
+                    # estuvo en el evento, asi que aca tampoco puede estar.
+                    "ultimos": [
+                        {
+                            # `occurred_at` y no `ts`: es el nombre del contrato
+                            # de datos, el mismo que usa filter_by_range. Leer
+                            # otro campo devuelve cadenas vacias y una lista que
+                            # se ordena al azar, sin fallar.
+                            "fecha": e.get("occurred_at", ""),
+                            "destino": (e.get("destination") or {}).get("domain", ""),
+                            "regla": (e.get("detection") or {}).get("rule_id", ""),
+                            "accion": e.get("action", ""),
+                        }
+                        for e in sorted(
+                            suyos,
+                            key=lambda e: str(e.get("occurred_at", "")),
+                            reverse=True,
+                        )[:20]
+                    ],
                 },
             )
 
