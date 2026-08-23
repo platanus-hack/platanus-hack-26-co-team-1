@@ -170,6 +170,18 @@ def _rank(finding: Finding) -> tuple[int, float, str]:
     return (_ORDEN_SEVERIDAD[finding.severity], -finding.confidence, finding.rule_id)
 
 
+def ordenar_hallazgos(findings: list[Finding]) -> list[Finding]:
+    """El mismo orden que usa el escaneo: lo peor primero.
+
+    Existe porque quien junta hallazgos de dos escaneos --el del texto y el de
+    una imagen leida aparte, ver `adjuntos.py`-- tiene que poder reordenarlos
+    con el mismo criterio. Concatenar las dos listas deja `findings[0]` en el
+    peor del PRIMER escaneo, y esa es la que decide.
+    """
+
+    return sorted(findings, key=_rank)
+
+
 @dataclass(frozen=True)
 class ScanResult:
     findings: list[Finding]

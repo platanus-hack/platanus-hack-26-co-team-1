@@ -12,6 +12,7 @@ from ..detect import inyeccion, model
 from ..detect.owners import exento
 from ..detect.payload import (
     ScanResult,
+    ordenar_hallazgos,
     scan_payload,
     scan_preview,
     texto_de_respuesta,
@@ -32,6 +33,7 @@ from ..policy_store import cargar as cargar_politica
 from ..policy_store import refrescar_ahora
 from ..procesos import DESCONOCIDO, Proceso, del_puerto
 from ..sensor import SensorDePuntosCiegos
+from .. import adjuntos
 from ..subidas import subida_hacia_una_ia
 from ..signals import SignalCollector
 from . import blockpage
@@ -565,6 +567,8 @@ class Aegis:
         # que hacer con ese envio lo decide unknown_domain_action y no las
         # reglas de una IA confirmada.
         sospechoso = False
+        # Cierto cuando las imagenes de ESTE request ya se estan leyendo aparte.
+        en_segundo_plano = False
 
         if classification == "non_ai":
             preview = body[:PREVIEW_BYTES].decode("utf-8", errors="replace")
@@ -590,6 +594,26 @@ class Aegis:
                 )
                 if origen is not None:
                     classification = "ai_unknown"
+                    # La imagen se lee FUERA de este request. El archivo en el
+                    # blob todavia no es una fuga --nadie lo mira, ningun modelo
+                    # lo leyo-- asi que la proteccion no esta en frenar esto
+                    # sino en frenar el turno que le pide al modelo que lo lea,
+                    # y entre los dos hay una ventana real: la persona todavia
+                    # tiene que escribir y apretar enviar. Ver adjuntos.py.
+                    leidas = adjuntos.registrar(
+                        origen,
+                        body,
+                        preview,
+                        lambda texto: scan_payload(
+                            texto.encode("utf-8"),
+                            terminos=politica.company_terms,
+                            ruleset=conjunto,
+                        ).findings,
+                    )
+                    # Si la lectura se fue al fondo, este request no la paga de
+                    # nuevo: seria hacer el OCR dos veces y encima en el camino
+                    # critico, que es exactamente lo que se vino a sacar.
+                    en_segundo_plano = leidas > 0
                 else:
                     # "allow" es la salida de emergencia: reproduce el embudo de
                     # siempre sin gastar ni el barrido barato. Es lo que le queda
@@ -626,8 +650,23 @@ class Aegis:
                 query,
                 politica.company_terms,
                 conjunto,
-                politica.ocr_enabled,
+                politica.ocr_enabled and not en_segundo_plano,
             )
+            # Lo que se subio antes a este mismo destino y se leyo mientras la
+            # persona escribia. Se cobra ACA --en el turno, no en la subida--
+            # porque es este request el que convierte el archivo en una fuga.
+            if politica.ocr_enabled and not en_segundo_plano:
+                de_adjuntos, sin_terminar = adjuntos.cobrar(host)
+                if de_adjuntos or sin_terminar:
+                    # Reordenado y no concatenado: `worst` es findings[0] y el
+                    # hallazgo de la imagen puede ser peor que el del texto.
+                    # Pegarlo al final lo dejaria fuera de la decision.
+                    juntos = ordenar_hallazgos(result.findings + de_adjuntos)
+                    result = ScanResult(
+                        findings=juntos,
+                        truncated=result.truncated or sin_terminar,
+                        views=result.views,
+                    )
             # Una credencial que viaja hacia su propio dueno no es una fuga: es
             # su uso normal. Claude Code manda su token a api.anthropic.com en
             # cada peticion, y bloquear eso solo logra que la herramienta no
