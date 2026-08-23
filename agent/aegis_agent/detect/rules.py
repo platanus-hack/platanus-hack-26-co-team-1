@@ -6,6 +6,7 @@ from typing import Callable
 
 from .contexto import es_marca_de_documento, es_tarjeta_de_verdad
 from .entropy import (
+    es_tarjeta,
     looks_random,
     luhn_valid,
     parece_contrasena,
@@ -391,9 +392,30 @@ _PII: tuple[Rule, ...] = (
         category="pii",
         severity="high",
         confidence=0.95,
-        pattern=_compile(r"\b(?:\d[ -]?){13,19}\b"),
+        # Los separadores van SOLO donde una tarjeta los lleva de verdad.
+        #
+        # El patron viejo era `(?:\d[ -]?){13,19}`, que admite un separador
+        # entre CADA digito, y por lo tanto un candidato podia cruzar varios
+        # numeros distintos: "120-455 803-217 964-330 1" se lee como una tirada
+        # de trece digitos. Luhn descarta nueve de cada diez, asi que en texto
+        # corto no se notaba nunca -- pero en un envio grande con datos
+        # numericos (coordenadas, un array, timestamps) hay decenas de miles de
+        # candidatos y el diez por ciento que pasa aparece igual.
+        #
+        # Medido: 671 KB de numeros separados por espacios daban credit_card
+        # mas bulk_pii_export, o sea el panel inventando dieciseis datos
+        # personales que no existian. Se vio en trafico real.
+        #
+        # Una tarjeta se agrupa de a cuatro, o de 4-6-5 si es Amex, y nunca
+        # digito por digito. Pedir eso no pierde ningun formato que alguien
+        # escriba a mano y corta el cruce de raiz.
+        pattern=_compile(
+            r"\b(?:\d{13,19}"
+            r"|\d{4}(?:[ -]\d{4}){2}[ -]\d{1,7}"
+            r"|\d{4}[ -]\d{6}[ -]\d{5})\b"
+        ),
         description="Numero de tarjeta que pasa la validacion de Luhn",
-        validator=luhn_valid,
+        validator=es_tarjeta,
         context_validator=es_tarjeta_de_verdad,
         redact_as="type",
         kind="credit_card",
