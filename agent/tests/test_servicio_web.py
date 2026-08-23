@@ -275,3 +275,52 @@ class TestSinFrontElServicioSigueDePie(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLaBaseColaborativaSincroniza(ServicioVivo):
+    """`/v1/domains/sync` tiene que ganarle al prefijo `/v1/domains/`.
+
+    Es la ruta de la que vive la promesa de que el catalogo crece solo: un
+    dominio que investigo UN equipo lo terminan conociendo todos porque cada
+    agente baja este delta cada cinco minutos.
+
+    Estuvo rota en produccion y nadie lo noto, porque falla de la peor manera
+    posible: "sync" caia en el manejador generico como si fuera el nombre de un
+    dominio y el agente recibia `{"domain": "sync", "classification": "pending"}`.
+    Eso no tiene la clave "dominios", asi que `DomainClient.sincronizar()` --que
+    esta escrito para aguantar quedarse sin red-- mezclaba una lista vacia, no
+    lanzaba nada y no dejaba rastro. El catalogo dejo de crecer en silencio.
+
+    El backend hermano (`aegis_backend/app.py`) ya tenia un comentario avisando
+    de exactamente esta trampa. No alcanzo. Por eso ahora es un test.
+    """
+
+    def test_sync_devuelve_el_delta_y_no_un_veredicto_sobre_el_dominio_sync(self):
+        estado, cuerpo = self.pedir("/v1/domains/sync?desde=1970-01-01T00:00:00Z")
+        datos = json.loads(cuerpo)
+        self.assertEqual(estado, 200)
+        self.assertIn("dominios", datos)
+        self.assertIn("hasta", datos)
+        # La firma exacta de la regresion.
+        self.assertNotEqual(datos.get("domain"), "sync")
+
+    def test_sin_desde_tambien_responde_el_delta(self):
+        # Es lo que pide un agente en su primer arranque, y lo que promete el
+        # docstring de sincronizacion(). Reventaba: la marca vacia llegaba a
+        # time.strptime y este endpoint es publico.
+        for ruta in ("/v1/domains/sync", "/v1/domains/sync?desde="):
+            with self.subTest(ruta=ruta):
+                estado, cuerpo = self.pedir(ruta)
+                self.assertEqual(estado, 200)
+                self.assertIn("dominios", json.loads(cuerpo))
+
+    def test_un_dominio_de_verdad_sigue_yendo_al_manejador_generico(self):
+        # El arreglo no puede haberse comido la ruta que ya funcionaba.
+        estado, cuerpo = self.pedir("/v1/domains/ejemplo-que-nadie-cataloga.xyz")
+        # 202 la primera vez (queda encolado para investigarlo) y 200 si ya
+        # habia veredicto. Cual de los dos depende de si otro test toco antes
+        # este dominio, y eso no es lo que se esta probando: lo que importa es
+        # que el nombre llego entero al manejador generico y no se lo comio la
+        # rama de sync.
+        self.assertIn(estado, (200, 202))
+        self.assertEqual(json.loads(cuerpo).get("domain"), "ejemplo-que-nadie-cataloga.xyz")

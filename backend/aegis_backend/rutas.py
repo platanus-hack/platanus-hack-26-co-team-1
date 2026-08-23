@@ -85,6 +85,9 @@ def veredicto(domain: str, store: DomainStore, ask_model=None) -> tuple[int, dic
     return respuesta
 
 
+DESDE_EL_ORIGEN = "1970-01-01T00:00:00Z"
+
+
 def sincronizacion(store: DomainStore, desde: str) -> tuple[int, dict]:
     """El delta que el agente baja para su cache local.
 
@@ -93,6 +96,14 @@ def sincronizacion(store: DomainStore, desde: str) -> tuple[int, dict]:
     manda todo, que es lo que pide un agente en su primer arranque.
     """
 
+    # Un `desde` vacio o ilegible es "desde el principio", que es justo lo que
+    # pide un agente en su primer arranque. Se normaliza ACA y no en cada store
+    # porque los dos leen la marca distinto: el de memoria la convierte a epoch
+    # y el de Supabase la manda cruda dentro de un filtro PostgREST. Sin esto,
+    # una marca vacia reventaba el de memoria y le armaba una consulta invalida
+    # al otro -- y este endpoint es publico, asi que la marca la elige quien
+    # llama.
+    desde = desde.strip() or DESDE_EL_ORIGEN
     ahora = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return (200, {"dominios": [v.as_response() for v in store.desde(desde)], "hasta": ahora})
 

@@ -540,15 +540,25 @@ class Handler(BaseHTTPRequestHandler):
             if ruta in exactas:
                 exactas[ruta]()
             else:
-                if ruta.startswith("/v1/domains/"):
-                    self._json(
-                        *rutas.veredicto(ruta[len("/v1/domains/") :], DOMINIOS, MODELO)
-                    )
+                if ruta == "/v1/domains/sync":
+                    # La ruta especifica va ANTES que el prefijo generico. Sin
+                    # esto "sync" cae en veredicto() como si fuera el nombre de
+                    # un dominio: el agente recibe {"domain":"sync"}, que no
+                    # trae la clave "dominios", y su cache local nunca se
+                    # actualiza. No falla ni deja rastro -- sincronizar() esta
+                    # escrito para no romperse sin red -- asi que la base
+                    # colaborativa deja de crecer en silencio.
+                    self._sincronizar_dominios()
                 else:
-                    if ruta.startswith("/v1/policy/"):
-                        self._leer_politica(ruta)
+                    if ruta.startswith("/v1/domains/"):
+                        self._json(
+                            *rutas.veredicto(ruta[len("/v1/domains/") :], DOMINIOS, MODELO)
+                        )
                     else:
-                        self._servir_el_front(ruta)
+                        if ruta.startswith("/v1/policy/"):
+                            self._leer_politica(ruta)
+                        else:
+                            self._servir_el_front(ruta)
 
     # -- lecturas -----------------------------------------------------------
 
@@ -639,6 +649,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _estadisticas(self) -> None:
         self._json(200, {"domains": DOMINIOS.count()})
+
+    def _sincronizar_dominios(self) -> None:
+        """El delta de la base colaborativa que el agente baja a su cache.
+
+        Es lo que hace que un dominio investigado por UN equipo lo conozcan
+        todos. La comparacion del camino critico nunca toca la red: el agente
+        baja esto cada cinco minutos y compara en memoria.
+        """
+
+        desde = parse_qs(urlsplit(self.path).query).get("desde", [""])[0]
+        self._json(*rutas.sincronizacion(DOMINIOS, desde))
 
     def _leer_politica(self, ruta: str) -> None:
         """La politica de una empresa: para su panel, o para sus agentes.
