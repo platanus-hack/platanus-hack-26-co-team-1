@@ -276,7 +276,7 @@ def _levanta_el_proxy(exe: Path) -> bool:
                 print(f"  OK   Aegis.exe servicio escucha en {puerto}")
                 return True
             time.sleep(0.5)
-        print(f"  FALLO Aegis.exe servicio no escucho en 60 s")
+        print("  FALLO Aegis.exe servicio no escucho en 60 s")
         return False
     finally:
         proceso.terminate()

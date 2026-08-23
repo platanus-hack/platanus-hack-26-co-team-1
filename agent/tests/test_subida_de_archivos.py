@@ -24,7 +24,6 @@ from aegis_agent.subidas import (
     ia_que_origina,
     subida_hacia_una_ia,
 )
-from tests.aislamiento import entorno_aislado
 from tests.test_embudo import FakeFlow, FakeRequest, make_addon
 
 ES_IA = lambda host: classify(host, Policy()) not in ("non_ai", "passthrough")

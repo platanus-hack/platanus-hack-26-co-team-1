@@ -17,7 +17,7 @@ from aegis_agent.detect import payload as payload_mod
 from aegis_agent.detect.engine import scan
 from aegis_agent.detect.payload import scan_payload, scan_preview
 from aegis_agent.detect.rules import RULES
-from aegis_agent.detect.ruleset import RULESET_POR_DEFECTO, RuleSet, ruleset_de
+from aegis_agent.detect.ruleset import RULESET_POR_DEFECTO, ruleset_de
 from aegis_agent.policy import CustomRule, Policy
 
 AWS_KEY = "AKIAIOSFODNN7EXAMPLE"

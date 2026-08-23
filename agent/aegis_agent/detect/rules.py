@@ -7,8 +7,6 @@ from typing import Callable
 from .contexto import es_marca_de_documento, es_tarjeta_de_verdad
 from .entropy import (
     es_tarjeta,
-    looks_random,
-    luhn_valid,
     parece_contrasena,
     parece_credencial_dicha,
     parece_documento_de_identidad,
@@ -488,4 +486,3 @@ _PII: tuple[Rule, ...] = (
 
 RULES: tuple[Rule, ...] = _SECRETS + _INTERNAL_DATA + _PII
 
-RULES_BY_ID = {rule.id: rule for rule in RULES}

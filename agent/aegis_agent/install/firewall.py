@@ -64,7 +64,7 @@ def plan(programas, ips) -> list[Step]:
     pasos.extend(
         Step(
             f"Quitarle la ruta directa a {programa.replace(chr(92), '/').rsplit('/', 1)[-1]}",
-            f"TCP 443 hacia las mismas direcciones, solo para ese programa",
+            "TCP 443 hacia las mismas direcciones, solo para ese programa",
         )
         for programa in programas
     )
@@ -136,7 +136,7 @@ def revertir() -> tuple[bool, str]:
 
 
 def reglas_puestas() -> list[str]:
-    ok, salida = _netsh(["show", "rule", f"name=all", f"group={GRUPO}"])
+    ok, salida = _netsh(["show", "rule", "name=all", f"group={GRUPO}"])
     nombres = []
     if ok:
         for linea in salida.splitlines():

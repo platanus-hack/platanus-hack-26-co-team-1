@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -482,6 +481,45 @@ def uninstall() -> list[str]:
     hechos.append("Variables de entorno eliminadas")
     if quitar_arranque():
         hechos.append("Arranque automatico quitado")
+    hechos.extend(_liberar_el_firewall())
+    return hechos
+
+
+def _liberar_el_firewall() -> list[str]:
+    """Devuelve la red a los programas que Aegis le corto. NO es opcional.
+
+    Cuando la capa D detecta un punto ciego y la politica dice "block", Aegis
+    le pone una regla de firewall al programa para quitarle la ruta directa
+    (ver proxy/addon.py). Esas reglas las pone Aegis y **las tiene que sacar
+    Aegis**: hasta aca `uninstall` revertia el proxy, la CA, las variables y el
+    arranque, y el firewall no lo tocaba nadie.
+
+    El resultado era el peor estado posible del producto: alguien desinstala la
+    herramienta de seguridad y su aplicacion sigue sin internet, sin ningun
+    rastro de por que. Es la misma falla que ya tuvo el instalador al reves
+    -dejar el navegador apuntando a un proxy muerto- y por el mismo motivo:
+    lo que se toca del sistema se devuelve.
+
+    Se nombran los programas liberados y no solo "listo": si alguien tuvo una
+    app cortada durante dias, merece leer cual era.
+    """
+
+    from . import firewall
+
+    hechos: list[str] = []
+    puestas = firewall.reglas_puestas()
+    if puestas:
+        ok, _ = firewall.revertir()
+        if ok:
+            hechos.append(f"Firewall liberado ({len(puestas)} regla(s))")
+            hechos.extend(f"  vuelve a tener red: {n}" for n in puestas)
+        else:
+            # Que falle no puede frenar el resto del desinstalador, pero
+            # callarlo dejaria a alguien sin red y sin saberlo.
+            hechos.append(
+                "NO se pudieron quitar las reglas de firewall. Corre como "
+                f'administrador: netsh advfirewall firewall delete rule group="{firewall.GRUPO}"'
+            )
     return hechos
 
 

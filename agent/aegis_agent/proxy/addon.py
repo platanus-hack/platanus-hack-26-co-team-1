@@ -24,9 +24,7 @@ from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for, pedir_en_segundo_plano
 from ..policy import (
     Classification,
-    Policy,
     classify,
-    decide,
     decidir_sobre,
     looks_like_ai_api,
 )
@@ -527,7 +525,7 @@ class Aegis:
     def _inspect(
         self, flow: http.HTTPFlow, host: str, classification: Classification
     ) -> None:
-        # Un snapshot por request: el hot-reload puede cambiar self.policy en
+        # Un snapshot por request: el hot-reload puede cambiar politica en
         # cualquier momento, y un mismo envio no puede escanearse con una
         # politica y decidirse con otra.
         politica = self.policy
@@ -567,7 +565,7 @@ class Aegis:
                     body,
                     flow.request.headers.get("Origin", ""),
                     flow.request.headers.get("Referer", ""),
-                    lambda candidato: classify(candidato, self.policy)
+                    lambda candidato: classify(candidato, politica)
                     not in ("non_ai", "passthrough"),
                 )
                 if origen is not None:
@@ -577,7 +575,7 @@ class Aegis:
                     # siempre sin gastar ni el barrido barato. Es lo que le queda
                     # a una empresa que decide que un destino sin clasificar
                     # nunca merece la pena, ni para investigarlo.
-                    if self.policy.unknown_domain_action == "allow":
+                    if politica.unknown_domain_action == "allow":
                         return
                     # El request no tiene forma de llamada a un modelo, pero eso
                     # no dice nada de lo que lleva adentro: un shadow AI interno
@@ -606,9 +604,9 @@ class Aegis:
             result = scan_payload(
                 body,
                 query,
-                self.policy.company_terms,
-                ruleset_de(self.policy),
-                self.policy.ocr_enabled,
+                politica.company_terms,
+                conjunto,
+                politica.ocr_enabled,
             )
             # Una credencial que viaja hacia su propio dueno no es una fuga: es
             # su uso normal. Claude Code manda su token a api.anthropic.com en
@@ -626,7 +624,7 @@ class Aegis:
             action = decidir_sobre(
                 classification,
                 result.findings,
-                self.policy,
+                politica,
                 proceso.nombre,
                 self.user_id,
                 self.area,
