@@ -76,33 +76,44 @@ def guardar(politica: Policy, ruta: Path | None = None) -> None:
     os.replace(temporal, destino)
 
 
+def refrescar_ahora(
+    url_base: str, tenant_id: str, ruta: Path | None = None
+) -> Policy | None:
+    """Pide la politica al backend, la persiste y la devuelve.
+
+    Es el tick del hot-reload: quien la recibe puede aplicarla a la referencia
+    viva sin esperar al proximo arranque. Nunca lanza: sin red, backend caido
+    o respuesta invalida devuelve None y el disco (la ultima politica
+    conocida) queda tal cual estaba.
+    """
+
+    try:
+        peticion = urllib.request.Request(
+            f"{url_base.rstrip('/')}/v1/policy/{tenant_id}"
+        )
+        with urllib.request.urlopen(peticion, timeout=REQUEST_TIMEOUT) as respuesta:
+            if respuesta.status == 200:
+                datos = json.loads(respuesta.read())
+                if datos:
+                    politica = Policy.desde_dict(datos)
+                    guardar(politica, ruta)
+                    return politica
+    except (urllib.error.URLError, OSError, ValueError, TypeError):
+        pass
+    return None
+
+
 def refrescar_en_segundo_plano(
     url_base: str, tenant_id: str, ruta: Path | None = None
 ) -> threading.Thread:
-    """Pide la politica al backend y, si llega bien, la deja guardada.
+    """Version un-solo-disparo de refrescar_ahora, en un hilo daemon.
 
-    No devuelve nada y no bloquea a nadie: el efecto es solo dejar el archivo
-    listo para el proximo arranque. Si el backend esta caido o la respuesta
-    viene rara, se traga el error y la politica en disco queda como estaba.
+    No devuelve la politica y no bloquea a nadie: el efecto es solo dejar el
+    archivo listo para el proximo arranque.
     """
 
-    def _tarea() -> None:
-        try:
-            peticion = urllib.request.Request(
-                f"{url_base.rstrip('/')}/v1/policy/{tenant_id}"
-            )
-            with urllib.request.urlopen(peticion, timeout=REQUEST_TIMEOUT) as respuesta:
-                if respuesta.status == 200:
-                    datos = json.loads(respuesta.read())
-                    if datos:
-                        # Se mezcla sobre la politica que ya hay, no sobre los
-                        # defaults: lo que el backend no nombra se conserva.
-                        guardar(Policy.desde_dict(datos, cargar(ruta)), ruta)
-        except (urllib.error.URLError, OSError, ValueError, TypeError):
-            # Sin red, backend caido o respuesta invalida: la politica en
-            # disco (la ultima conocida) queda tal cual estaba.
-            pass
-
-    hilo = threading.Thread(target=_tarea, daemon=True)
+    hilo = threading.Thread(
+        target=refrescar_ahora, args=(url_base, tenant_id, ruta), daemon=True
+    )
     hilo.start()
     return hilo

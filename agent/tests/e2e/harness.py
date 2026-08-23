@@ -11,8 +11,6 @@ import json
 import os
 import socket
 import subprocess
-import sys
-import sysconfig
 import tempfile
 import time
 from pathlib import Path

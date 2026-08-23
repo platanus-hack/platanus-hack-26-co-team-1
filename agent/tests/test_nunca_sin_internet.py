@@ -25,7 +25,7 @@ Ningun test de aca toca el sistema: todos heredan la red de contencion.
 from __future__ import annotations
 
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 from aegis_agent import cli, guardian
 from aegis_agent.install import windows

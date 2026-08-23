@@ -33,7 +33,6 @@ corpus escrito sin tildes.
 from __future__ import annotations
 
 import json
-import pathlib
 import unittest
 
 from bench.precision import LINEA_BASE, medir

@@ -16,6 +16,7 @@ from .detect.model import (  # noqa: E402
     ETIQUETAS_PRECISAS,
     UMBRAL_POR_DEFECTO,
 )
+from .detect.types import ORIGEN_IMAGEN  # noqa: E402
 from .suffixes import most_specific_match  # noqa: E402
 
 # Dominios que no se descifran nunca, ni para inspeccionar. Ver ADR 0003.
@@ -68,6 +69,28 @@ def modo_pedido_por_el_entorno() -> str | None:
 
 
 @dataclass(frozen=True)
+class CustomRule:
+    """Una regla de deteccion escrita por la empresa, no por nosotros.
+
+    El patron viaja como texto y se compila recien en detect/ruleset.py: si la
+    regex es invalida, la regla se descarta ahi sin tumbar al agente. Es una
+    dataclass congelada para que Policy siga siendo hashable.
+    """
+
+    id: str
+    pattern: str
+    category: str = "internal_data"
+    severity: str = "high"
+
+
+# Los valores que el motor entiende. Cualquier otra cosa que llegue de la web
+# se corrige al default en vez de propagarse: una severidad desconocida hace
+# KeyError en el orden de severidad del engine.
+_CATEGORIAS_VALIDAS = frozenset({"secret", "pii", "internal_data"})
+_SEVERIDADES_VALIDAS = frozenset({"critical", "high", "medium", "low"})
+
+
+@dataclass(frozen=True)
 class Policy:
     """Politica de la empresa. En produccion llega del backend y se cachea en disco."""
 
@@ -109,9 +132,6 @@ class Policy:
     # como se tratan las reglas deterministas.
     model_block_categories: frozenset[str] = field(
         default_factory=lambda: frozenset({"secret", "internal_data"})
-    )
-    model_warn_categories: frozenset[str] = field(
-        default_factory=lambda: frozenset({"pii"})
     )
     # Que etiquetas le pide la empresa al modelo y con que umbral de confianza.
     # Hoy son las medidas en detect/model.py, pero una empresa con sus propios
@@ -156,6 +176,31 @@ class Policy:
     # el modelo ya la genero, y dejar a la herramienta esperando un cuerpo que no
     # va a llegar rompe la sesion sin evitar nada.
     injection_action: str = "warn"
+    # Si se lee el texto de las imagenes que salen del equipo.
+    #
+    # Apagado por defecto porque cuesta segundos y no milisegundos (ver
+    # detect/ocr.py), asi que tiene que ser una decision de la empresa. Lo que
+    # NO puede seguir siendo es una variable de entorno invisible: `ocr_action`
+    # ya vive en el panel, y una pantalla que deja elegir que hacer con lo que
+    # se encuentra en una imagen mientras la lectura esta apagada por otro lado
+    # promete algo que no ocurre. Las dos preguntas se contestan en el mismo
+    # lugar o ninguna sirve.
+    #
+    # AEGIS_OCR sigue funcionando como interruptor de desarrollo: manda
+    # cualquiera de los dos que diga que si.
+    ocr_enabled: bool = False
+    # Que autoridad tiene lo que se leyo de una IMAGEN.
+    #
+    # Es la tercera deteccion probabilistica del sistema y hasta aca era la
+    # unica sin freno: un hallazgo de OCR cortaba con la misma autoridad que una
+    # llave de AWS con formato reconocido. No corresponde, y esta medido en
+    # detect/ocr.py: el texto que sale de una imagen es aproximado
+    # -`Verano2026Bogota` se leyo como `Verano2o26Bogota`- asi que un caracter
+    # mal leido puede cortarle el envio a alguien sin que hubiera nada.
+    #
+    # Por defecto avisa, igual que el modelo y que la inyeccion. "block" le
+    # devuelve la autoridad completa a la empresa que la quiera.
+    ocr_action: str = "warn"
     # Que hacer cuando la capa D detecta un punto ciego (una app que no pasa
     # por el proxy). "warn" solo lo reporta; "block" corta la conexion. El
     # mecanismo que lee este campo lo construye otra tarea: aca solo se
@@ -187,6 +232,48 @@ class Policy:
     # Lo mismo por area. Se resuelve despues de la persona: lo mas especifico
     # gana, igual que en la resolucion de dominios.
     area_actions: dict[str, str] = field(default_factory=dict)
+    # Las cuentas de la empresa en las herramientas que SI estan aprobadas.
+    #
+    # `approved_ai` dice "ChatGPT se puede usar" y no alcanza: la cuenta
+    # personal gratuita del empleado viaja por el mismo dominio aprobado y es
+    # justamente la que entrena con lo que le peguen. Esto declara CUALES
+    # cuentas son de la empresa; lo que no este declarado es de otro.
+    #
+    # Son huellas y identificadores de organizacion, nunca credenciales: ver
+    # identidad.py. Vacio significa apagado, porque con la lista vacia toda
+    # cuenta seria ajena y el primer dia se bloquearia la empresa entera.
+    corporate_accounts: frozenset[str] = field(default_factory=frozenset)
+    # Que hacer cuando una herramienta aprobada se usa con una cuenta que no es
+    # de la empresa. Por defecto avisa, igual que unknown_domain_action: el
+    # valor de esta capa es primero VER cuanta gente esta entrando con su cuenta
+    # personal, y esa respuesta suele bastar para que la empresa decida sola.
+    #
+    # "block" degrada el destino a no aprobado, con lo cual hereda todo lo que
+    # la empresa ya decidio para una IA no aprobada (unapproved_ai_action) en
+    # vez de inventar un camino nuevo.
+    foreign_account_action: str = "warn"
+    # --- lo que la empresa configura sobre QUE se detecta (rama nico) --------
+    #
+    # OJO CON LA DUPLICACION, que es real y esta resuelta en detect/ruleset.py:
+    # `disabled_rules` dice lo mismo que `rule_actions[id] == "off"`, y
+    # `forbidden_terms` lo mismo que `company_terms`. Se conservan las cuatro
+    # porque las dos formas ya tienen tests y pantalla, pero el motor las
+    # reconcilia en UN solo lugar al compilar: dos maneras de escribirlo, una
+    # sola de decidirlo.
+    # Reglas T1 que la empresa apago por id (por ejemplo "email_address" si
+    # mandar correos a la IA es parte del trabajo). Tambien alcanza a los
+    # hallazgos sinteticos (bulk_pii_export, archivo_critico); no toca lo que
+    # encuentra el modelo, que tiene sus propias perillas arriba.
+    disabled_rules: frozenset[str] = field(default_factory=frozenset)
+    # Terminos literales que no pueden salir: el nombre del proyecto secreto,
+    # el cliente que nadie puede nombrar. En la web esto es un textarea. La
+    # accion no se configura por termino: todos comparten una categoria y la
+    # categoria ya decide via block_categories/warn_categories.
+    forbidden_terms: tuple[str, ...] = ()
+    forbidden_terms_category: str = "internal_data"
+    # Reglas regex escritas por la empresa. Mas poder que los terminos (y mas
+    # riesgo): una regex invalida se descarta al compilar, no aca.
+    custom_rules: tuple[CustomRule, ...] = ()
 
     def a_dict(self) -> dict[str, Any]:
         """Serializa la politica a tipos JSON, estable y diffeable.
@@ -202,13 +289,14 @@ class Policy:
             "unapproved_ai_action": self.unapproved_ai_action,
             "model_action": self.model_action,
             "model_block_categories": sorted(self.model_block_categories),
-            "model_warn_categories": sorted(self.model_warn_categories),
             "model_block_labels": sorted(self.model_block_labels),
             "block_categories": sorted(self.block_categories),
             "warn_categories": sorted(self.warn_categories),
             "model_labels": list(self.model_labels),
             "model_threshold": self.model_threshold,
             "injection_action": self.injection_action,
+            "ocr_enabled": self.ocr_enabled,
+            "ocr_action": self.ocr_action,
             "company_terms": dict(sorted(self.company_terms.items())),
             "company_terms_action": self.company_terms_action,
             "app_actions": dict(sorted(self.app_actions.items())),
@@ -217,6 +305,20 @@ class Policy:
             "rule_actions": dict(sorted(self.rule_actions.items())),
             "user_actions": dict(sorted(self.user_actions.items())),
             "area_actions": dict(sorted(self.area_actions.items())),
+            "corporate_accounts": sorted(self.corporate_accounts),
+            "foreign_account_action": self.foreign_account_action,
+            "disabled_rules": sorted(self.disabled_rules),
+            "forbidden_terms": list(self.forbidden_terms),
+            "forbidden_terms_category": self.forbidden_terms_category,
+            "custom_rules": [
+                {
+                    "id": regla.id,
+                    "pattern": regla.pattern,
+                    "category": regla.category,
+                    "severity": regla.severity,
+                }
+                for regla in self.custom_rules
+            ],
         }
 
     @classmethod
@@ -241,13 +343,14 @@ class Policy:
         campos_frozenset = (
             "approved_ai",
             "model_block_categories",
-            "model_warn_categories",
             "model_block_labels",
             "block_categories",
             "warn_categories",
             "blocked_domains",
+            "corporate_accounts",
+            "disabled_rules",
         )
-        campos_tupla = ("model_labels",)
+        campos_tupla = ("model_labels", "forbidden_terms")
         campos_dict = (
             "app_actions",
             "company_terms",
@@ -264,6 +367,10 @@ class Policy:
             "injection_action",
             "company_terms_action",
             "blind_spot_action",
+            "foreign_account_action",
+            "ocr_action",
+            "ocr_enabled",
+            "forbidden_terms_category",
         )
 
         valores: dict[str, Any] = {}
@@ -281,8 +388,53 @@ class Policy:
             valores[campo] = (
                 dict(datos[campo]) if campo in datos else dict(getattr(base, campo))
             )
+        valores["custom_rules"] = _custom_rules_tolerantes(
+            datos.get("custom_rules", ())
+        )
 
         return cls(**valores)
+
+
+def _custom_rules_tolerantes(entradas: Any) -> tuple[CustomRule, ...]:
+    """Convierte lo que haya mandado la web en reglas utilizables.
+
+    Una entrada rota se salta y una categoria o severidad que el motor no
+    conoce se corrige al default: la politica la edita gente, y un formulario
+    a medio guardar no puede dejar a la empresa sin proteccion.
+    """
+
+    reglas: list[CustomRule] = []
+    if not isinstance(entradas, (list, tuple)):
+        return ()
+    for entrada in entradas:
+        if isinstance(entrada, CustomRule):
+            entrada = {
+                "id": entrada.id,
+                "pattern": entrada.pattern,
+                "category": entrada.category,
+                "severity": entrada.severity,
+            }
+        if not isinstance(entrada, dict):
+            continue
+        rule_id = entrada.get("id")
+        patron = entrada.get("pattern")
+        if not rule_id or not patron:
+            continue
+        categoria = entrada.get("category", "internal_data")
+        if categoria not in _CATEGORIAS_VALIDAS:
+            categoria = "internal_data"
+        severidad = entrada.get("severity", "high")
+        if severidad not in _SEVERIDADES_VALIDAS:
+            severidad = "high"
+        reglas.append(
+            CustomRule(
+                id=str(rule_id),
+                pattern=str(patron),
+                category=categoria,
+                severity=severidad,
+            )
+        )
+    return tuple(reglas)
 
 
 # Un dominio que nadie clasifico todavia igual se delata por la forma del
@@ -565,6 +717,18 @@ def decidir_sobre(
         and action == "block_content"
         and peor.rule_id.startswith("empresa_")
         and policy.company_terms_action == "warn"
+    ):
+        action = "warn"
+
+    # Lo leido de una imagen se rebaja por el mismo motivo que lo del modelo: es
+    # probabilistico. Va antes de la rebaja del modelo y no despues porque son
+    # excluyentes -- scan_model corre sobre el texto principal, nunca sobre una
+    # vista de OCR -- y asi cada una se lee sin tener que pensar en la otra.
+    if (
+        peor is not None
+        and action == "block_content"
+        and peor.origen == ORIGEN_IMAGEN
+        and policy.ocr_action != "block"
     ):
         action = "warn"
 

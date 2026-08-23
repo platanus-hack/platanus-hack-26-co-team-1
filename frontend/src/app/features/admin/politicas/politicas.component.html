@@ -73,6 +73,70 @@
             <button type="button" class="aegis-btn-secondary shrink-0" (click)="agregarUrlBloqueada()">Bloquear</button>
           </div>
         </div>
+
+        <div class="aegis-card p-6">
+          <div class="mb-1 flex items-center gap-2.5">
+            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+              <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4">
+                <rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.4"/>
+                <circle cx="7.5" cy="9.5" r="1.75" stroke="currentColor" stroke-width="1.4"/>
+                <path d="M11.5 8.5h4M11.5 11.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Cuentas de la empresa</h2>
+          </div>
+          <p class="mb-4 text-sm text-aegis-dim">
+            Permitir una herramienta no es permitir cualquier cuenta en esa herramienta. La cuenta personal de un
+            colaborador entra por el mismo dominio aprobado, y es la que entrena con lo que le peguen. Acá se declara
+            cuáles cuentas son de la empresa.
+          </p>
+
+          @if (!cuentas.length) {
+            <p class="mb-4 rounded-lg border border-aegis-amber/25 bg-aegis-amber/[0.06] px-3 py-2 text-sm text-aegis-amber">
+              Sin cuentas declaradas la comprobación está apagada: no se distingue una cuenta corporativa de una
+              personal. Agregá al menos una para encenderla.
+            </p>
+          }
+
+          <div class="mb-4 flex flex-wrap gap-2">
+            @for (cuenta of cuentas; track cuenta) {
+              <span class="inline-flex items-center gap-1.5 rounded-full border border-aegis-accent/25 bg-aegis-accent/[0.06] px-3 py-1.5 font-display text-xs text-aegis-accent">
+                {{ cuenta }}
+                <button type="button" class="text-aegis-accent/60 transition hover:text-aegis-accent" (click)="quitarCuenta(cuenta)" aria-label="Quitar la cuenta {{ cuenta }}">
+                  <svg viewBox="0 0 12 12" class="h-2.5 w-2.5"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                </button>
+              </span>
+            }
+          </div>
+
+          <div class="flex gap-2">
+            <input class="aegis-input" type="text" placeholder="cuenta:org-acme" [(ngModel)]="nuevaCuenta" (keydown.enter)="agregarCuenta()" />
+            <button type="button" class="aegis-btn-secondary shrink-0" (click)="agregarCuenta()">Agregar</button>
+          </div>
+          <p class="mt-2 text-xs text-aegis-faint">
+            Se declara la organización (<code>cuenta:org-acme</code>) o la huella de la llave
+            (<code>clave:9f2a1b3c4d5e</code>) que muestra el panel. Nunca la llave: el agente la reemplaza por su
+            huella antes de que salga del equipo.
+          </p>
+
+          <div class="mt-5 border-t border-aegis-border pt-4">
+            <label class="mb-2 block font-display text-xs font-semibold uppercase tracking-wide text-aegis-dim">
+              Cuando alguien usa una cuenta que no es de la empresa
+            </label>
+            <select
+              class="aegis-input"
+              [ngModel]="politica().foreign_account_action"
+              (ngModelChange)="cambiarAccionCuentaAjena($event)"
+            >
+              <option value="warn">Dejar pasar y registrarlo</option>
+              <option value="block">Tratarla como una IA no aprobada</option>
+            </select>
+            <p class="mt-2 text-xs text-aegis-faint">
+              La primera pregunta suele ser cuánta gente entra con su cuenta personal, no a quién cortar. Por eso
+              registrar es el valor por defecto.
+            </p>
+          </div>
+        </div>
       </div>
 
       <div class="flex flex-col gap-6">
@@ -304,6 +368,44 @@
           <p class="mt-1.5 text-xs text-aegis-faint">
             Bloquear aplica sólo al envío. La respuesta no se corta nunca: cuando llega, el modelo ya la generó, y
             dejar a la herramienta esperando un cuerpo que no va a llegar rompe la sesión sin evitar nada.
+          </p>
+        </div>
+      </div>
+
+      <div class="aegis-card p-6">
+        <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Texto leído de imágenes</h2>
+        <p class="mt-1.5 text-sm text-aegis-dim">
+          Nadie transcribe la nómina: le saca una foto a la pantalla. Aegis puede leer el texto de una captura antes
+          de que salga del equipo, y es el canal que más crece.
+        </p>
+        <div class="mt-4 flex items-start justify-between gap-4 rounded-lg border border-aegis-border bg-aegis-surface2 px-4 py-3">
+          <div>
+            <p class="text-sm font-medium text-aegis-text">Leer el texto de las imágenes</p>
+            <p class="mt-0.5 text-xs text-aegis-faint">Cuesta ~2 s por imagen y sólo se paga cuando alguien manda una.</p>
+          </div>
+          <button
+            type="button"
+            class="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+            [class.bg-aegis-accent]="politica().ocr_enabled"
+            [class.bg-aegis-surface3]="!politica().ocr_enabled"
+            (click)="cambiarAvanzado('ocr_enabled', !politica().ocr_enabled)"
+            [attr.aria-label]="(politica().ocr_enabled ? 'Dejar de leer' : 'Leer') + ' el texto de las imágenes'"
+          >
+            <span class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all" [style.left.px]="politica().ocr_enabled ? 22 : 2"></span>
+          </button>
+        </div>
+
+        <div class="mt-4">
+          <label class="aegis-label">Cuando se encuentra algo en una imagen</label>
+          <select class="aegis-select mt-1.5 w-full" [ngModel]="politica().ocr_action" (ngModelChange)="cambiarAvanzado('ocr_action', $event)">
+            @for (o of opcionesAccion; track o.valor) {
+              <option [value]="o.valor">{{ o.etiqueta }}</option>
+            }
+          </select>
+          <p class="mt-1.5 text-xs text-aegis-faint">
+            El texto que sale de una imagen es aproximado: medido acá, <code>Verano2026Bogota</code> se leyó como
+            <code>Verano2o26Bogota</code>. Un carácter mal leído no debería cortarle el envío a nadie, así que por
+            defecto sólo avisa.
           </p>
         </div>
       </div>

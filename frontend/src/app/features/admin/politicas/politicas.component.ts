@@ -79,6 +79,7 @@ export class PoliticasComponent implements OnInit {
   private tomarDeLaPolitica(): void {
     const p = this.politica();
     this.urlsBloqueadas = [...p.blocked_domains];
+    this.cuentas = [...p.corporate_accounts];
     this.terminos = Object.entries(p.company_terms).map(([termino, etiqueta]) => ({
       termino,
       etiqueta,
@@ -119,6 +120,7 @@ export class PoliticasComponent implements OnInit {
       blocked_domains: this.urlsBloqueadas,
       rule_actions: reglas,
       company_terms: terminos,
+      corporate_accounts: this.cuentas,
     });
   }
 
@@ -141,7 +143,7 @@ export class PoliticasComponent implements OnInit {
     { valor: 'warn', etiqueta: 'Sólo avisar' },
   ];
 
-  async cambiarAvanzado(campo: string, valor: string): Promise<void> {
+  async cambiarAvanzado(campo: string, valor: string | boolean): Promise<void> {
     await this.servicio.guardar({ [campo]: valor } as any);
   }
 
@@ -215,6 +217,33 @@ export class PoliticasComponent implements OnInit {
   quitarUrlBloqueada(url: string): void {
     this.urlsBloqueadas = this.urlsBloqueadas.filter((u) => u !== url);
     void this.persistir();
+  }
+
+  // --- Cuentas de la empresa ------------------------------------------------
+  //
+  // Permitir una herramienta no es permitir cualquier cuenta en esa
+  // herramienta. Mientras esta lista esté vacía la comprobación está apagada, y
+  // eso se dice en pantalla: si no, un administrador que no entiende por qué no
+  // pasa nada termina creyendo que la función no sirve.
+
+  cuentas: string[] = [];
+  nuevaCuenta = '';
+
+  agregarCuenta(): void {
+    const cuenta = this.nuevaCuenta.trim();
+    if (!cuenta || this.cuentas.includes(cuenta)) return;
+    this.cuentas = [...this.cuentas, cuenta];
+    this.nuevaCuenta = '';
+    void this.persistir();
+  }
+
+  quitarCuenta(cuenta: string): void {
+    this.cuentas = this.cuentas.filter((c) => c !== cuenta);
+    void this.persistir();
+  }
+
+  async cambiarAccionCuentaAjena(accion: string): Promise<void> {
+    await this.servicio.guardar({ foreign_account_action: accion });
   }
 
   excepciones: Excepcion[] = [

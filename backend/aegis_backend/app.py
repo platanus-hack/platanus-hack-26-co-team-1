@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import rutas
 from .classifier import anthropic_model
-from .store import DomainStore, PolicyStore, store_from_env
+from .store import DomainStore, PolicyStore, store_from_env, SupabaseDomainStore
 
 DEFAULT_PORT = 8686
 

@@ -33,7 +33,6 @@ from __future__ import annotations
 import os
 import socket
 import subprocess
-import sys
 import time
 
 # Cada cuanto se mira el puerto, y cuantas fallas seguidas hacen falta para
@@ -83,7 +82,7 @@ def hay_que_actuar(puerto: int) -> bool:
         return False
 
 
-def vigilar(puerto: int, pid_del_servicio: int | None = None) -> int:
+def vigilar(puerto: int) -> int:
     """Mira el puerto para siempre. Apaga el proxy si el servicio no vuelve."""
 
     fallas = 0

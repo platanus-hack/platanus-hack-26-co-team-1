@@ -8,6 +8,7 @@ la corre nadie dos veces.
 
 import unittest
 from unittest import mock
+from unittest.mock import patch
 
 from aegis_agent.install import firewall
 
@@ -102,3 +103,54 @@ class TestErrores(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDesinstalarDevuelveLaRed(unittest.TestCase):
+    """Lo que Aegis le corta al sistema, Aegis lo devuelve.
+
+    Cuando la capa D encuentra un punto ciego y la politica dice "block", el
+    agente le pone una regla de firewall al programa para quitarle la ruta
+    directa. Hasta aca `uninstall` revertia el proxy, la CA, las variables y el
+    arranque -- y el firewall no lo tocaba nadie.
+
+    O sea: alguien desinstalaba la herramienta de seguridad y su aplicacion
+    seguia sin internet, para siempre y sin ningun rastro de por que. Es la
+    misma falla que ya tuvo el instalador al reves (dejar el navegador
+    apuntando a un proxy muerto), que es la peor que tuvo el producto.
+    """
+
+    def _desinstalar_con(self, puestas, revertir_ok=True):
+        from aegis_agent.install import windows
+
+        with patch.object(windows, "write_proxy_settings"), \
+             patch.object(windows, "untrust_ca", return_value=False), \
+             patch.object(windows, "clear_env_vars"), \
+             patch.object(windows, "quitar_arranque", return_value=False), \
+             patch.object(firewall, "reglas_puestas", return_value=puestas), \
+             patch.object(firewall, "revertir", return_value=(revertir_ok, "")) as revertir:
+            hechos = windows.uninstall()
+        return hechos, revertir
+
+    def test_desinstalar_quita_las_reglas_que_puso(self):
+        hechos, revertir = self._desinstalar_con(["Aegis - sin ruta directa para app.exe"])
+        revertir.assert_called_once()
+        self.assertTrue(any("Firewall liberado" in h for h in hechos))
+
+    def test_dice_que_programa_vuelve_a_tener_red(self):
+        """Si alguien tuvo una app cortada dias, merece leer cual era."""
+
+        hechos, _ = self._desinstalar_con(["Aegis - sin ruta directa para cursor.exe"])
+        self.assertTrue(any("cursor.exe" in h for h in hechos))
+
+    def test_sin_reglas_puestas_no_toca_nada(self):
+        hechos, revertir = self._desinstalar_con([])
+        revertir.assert_not_called()
+        self.assertFalse(any("irewall" in h for h in hechos))
+
+    def test_si_falla_lo_dice_con_el_comando_para_arreglarlo(self):
+        """Callarlo dejaria a alguien sin red y sin saberlo."""
+
+        hechos, _ = self._desinstalar_con(["Aegis - sin ruta directa para app.exe"], revertir_ok=False)
+        problema = [h for h in hechos if "NO se pudieron quitar" in h]
+        self.assertTrue(problema)
+        self.assertIn("netsh advfirewall", problema[0])

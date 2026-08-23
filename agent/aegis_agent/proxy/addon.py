@@ -7,7 +7,7 @@ import time
 
 from mitmproxy import http
 
-from .. import cert_siblings
+from .. import cert_siblings, identidad
 from ..detect import inyeccion, model
 from ..detect.owners import exento
 from ..detect.payload import (
@@ -17,20 +17,19 @@ from ..detect.payload import (
     texto_de_respuesta,
     texto_para_inyeccion,
 )
+from ..detect.ruleset import ruleset_de
 from ..domains import DomainClient
-from ..detect.types import Finding
+from ..detect.types import EVIDENCE_MAX_LEN, Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for, pedir_en_segundo_plano
 from ..policy import (
     Classification,
-    Policy,
     classify,
-    decide,
     decidir_sobre,
     looks_like_ai_api,
 )
 from ..policy_store import cargar as cargar_politica
-from ..policy_store import refrescar_en_segundo_plano
+from ..policy_store import refrescar_ahora
 from ..procesos import DESCONOCIDO, Proceso, del_puerto
 from ..sensor import SensorDePuntosCiegos
 from ..subidas import subida_hacia_una_ia
@@ -143,11 +142,20 @@ class Aegis:
         if model.habilitado():
             threading.Thread(target=model.cargar, daemon=True).start()
 
-        if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
-            refrescar_en_segundo_plano(
-                os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686"),
-                self.policy.tenant_id,
+        self._url_backend = os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686")
+        # Cada cuanto se vuelve a pedir la politica. Un minuto alcanza: lo que
+        # la web guarda tarda eso en aplicar, sin martillar el backend.
+        try:
+            self._intervalo_refresco = float(
+                os.environ.get("AEGIS_REFRESCO_POLITICA", "60")
             )
+        except ValueError:
+            self._intervalo_refresco = 60.0
+
+        if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
+            # El refresco corre en bucle y aplica en caliente: la politica que
+            # la web edita cambia el comportamiento sin reiniciar el agente.
+            threading.Thread(target=self._refrescar_en_bucle, daemon=True).start()
             # La lista negra se sincroniza sola al arrancar y despues cada
             # tanto: nunca en el camino de una decision, que sigue siendo
             # 100% local (suffixes.py).
@@ -251,6 +259,28 @@ class Aegis:
             conocido = None
         return conocido or Proceso()
 
+    def _refrescar_politica(self) -> None:
+        """Un tick del hot-reload: pedir, persistir y aplicar la politica.
+
+        El swap es una asignacion de referencia (atomica en CPython) y solo
+        pasa cuando la politica realmente cambio: el cache del ruleset es por
+        identidad, y reemplazar el objeto sin necesidad recompilaria las
+        regex en cada tick.
+        """
+
+        nueva = refrescar_ahora(self._url_backend, self.policy.tenant_id)
+        if nueva is not None and nueva != self.policy:
+            self.policy = nueva
+
+    def _refrescar_en_bucle(self) -> None:
+        while True:
+            try:
+                self._refrescar_politica()
+            except Exception:
+                # Un tick roto no puede matar el hilo: el proximo lo reintenta.
+                pass
+            time.sleep(self._intervalo_refresco)
+
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
         if flow.response is None:
@@ -265,9 +295,13 @@ class Aegis:
         message = flow.websocket.messages[-1]
         if message.from_client:
             host = flow.request.pretty_host
-            classification = classify(host, self.policy)
+            politica = self.policy
+            classification = classify(host, politica)
             if classification not in ("passthrough", "non_ai"):
-                result = scan_payload(message.content if isinstance(message.content, bytes) else str(message.content).encode())
+                result = scan_payload(
+                    message.content if isinstance(message.content, bytes) else str(message.content).encode(),
+                    ruleset=ruleset_de(politica),
+                )
                 if result.findings:
                     worst = result.findings[0]
                     message.content = _WS_REDACTED.encode("utf-8")
@@ -380,6 +414,15 @@ class Aegis:
             if compartido == "ai_unapproved":
                 classification = "ai_unapproved"
 
+        degradado_por_la_cuenta = False
+        if classification == "ai_approved":
+            # Aprobar la herramienta no es aprobar la cuenta. Va antes de
+            # cualquier otra cosa porque puede cambiar la clasificacion, y todo
+            # lo que sigue depende de ella.
+            nueva = self._cuenta_de_la_empresa(flow, host, classification)
+            degradado_por_la_cuenta = nueva != classification
+            classification = nueva
+
         if classification in ("ai_approved", "ai_unapproved"):
             # El proxy ya termino el handshake TLS para llegar hasta aca: el
             # certificado esta en la mano y sus SAN casi siempre delatan a la
@@ -393,10 +436,17 @@ class Aegis:
         if corta_destino:
             self._block_destination(flow, host, classification)
         else:
-            if classification == "ai_unapproved":
+            if classification == "ai_unapproved" and not degradado_por_la_cuenta:
                 # Aunque se deje pasar, el uso de una herramienta no aprobada es
                 # justamente lo que la empresa necesita ver en el panel: con que
                 # aplicacion la usan es la otra mitad del dato.
+                #
+                # Salvo cuando la degradacion vino de la cuenta: ese caso ya
+                # dejo su propio evento, que ademas dice POR QUE. Registrar los
+                # dos deja al panel con dos filas para una sola causa, y la
+                # generica diciendo "allowed" al lado de la otra diciendo
+                # "blocked". Dos evidencias que se contradicen es peor que
+                # ninguna.
                 self._registrar_uso(host, classification, self._proceso_de(flow).nombre)
             if flow.request.method in METHODS_WITH_PAYLOAD and classification != "passthrough":
                 self._inspect(flow, host, classification)
@@ -475,6 +525,11 @@ class Aegis:
     def _inspect(
         self, flow: http.HTTPFlow, host: str, classification: Classification
     ) -> None:
+        # Un snapshot por request: el hot-reload puede cambiar politica en
+        # cualquier momento, y un mismo envio no puede escanearse con una
+        # politica y decidirse con otra.
+        politica = self.policy
+        conjunto = ruleset_de(politica)
         # get_content decodifica gzip/brotli. Con raw_content, comprimir el body
         # alcanzaria para pasar cualquier secreto sin que ninguna regla lo vea.
         body = flow.request.get_content(strict=False) or b""
@@ -510,7 +565,7 @@ class Aegis:
                     body,
                     flow.request.headers.get("Origin", ""),
                     flow.request.headers.get("Referer", ""),
-                    lambda candidato: classify(candidato, self.policy)
+                    lambda candidato: classify(candidato, politica)
                     not in ("non_ai", "passthrough"),
                 )
                 if origen is not None:
@@ -520,7 +575,7 @@ class Aegis:
                     # siempre sin gastar ni el barrido barato. Es lo que le queda
                     # a una empresa que decide que un destino sin clasificar
                     # nunca merece la pena, ni para investigarlo.
-                    if self.policy.unknown_domain_action == "allow":
+                    if politica.unknown_domain_action == "allow":
                         return
                     # El request no tiene forma de llamada a un modelo, pero eso
                     # no dice nada de lo que lleva adentro: un shadow AI interno
@@ -542,7 +597,17 @@ class Aegis:
             if self._inyeccion_en_el_envio(flow, host, classification, body, proceso):
                 return
 
-            result = scan_payload(body, query, self.policy.company_terms)
+            # Las reglas COMPILADAS de la politica y no las de fabrica: es lo
+            # que hace que apagar una regla o agregar una regex propia cambie
+            # algo. El compilado se cachea por identidad del objeto Policy, asi
+            # que el hot-reload recompila una vez y no en cada request.
+            result = scan_payload(
+                body,
+                query,
+                politica.company_terms,
+                conjunto,
+                politica.ocr_enabled,
+            )
             # Una credencial que viaja hacia su propio dueno no es una fuga: es
             # su uso normal. Claude Code manda su token a api.anthropic.com en
             # cada peticion, y bloquear eso solo logra que la herramienta no
@@ -559,7 +624,7 @@ class Aegis:
             action = decidir_sobre(
                 classification,
                 result.findings,
-                self.policy,
+                politica,
                 proceso.nombre,
                 self.user_id,
                 self.area,
@@ -613,8 +678,66 @@ class Aegis:
                         proceso=proceso.nombre,
                     )
 
+    def _cuenta_de_la_empresa(
+        self, flow: http.HTTPFlow, host: str, classification: Classification
+    ) -> Classification:
+        """Degrada una herramienta aprobada usada con una cuenta que no es la de la empresa.
+
+        La degradacion es a `ai_unapproved` y no a un estado nuevo, y eso es
+        deliberado: la empresa ya decidio que hacer con una IA no aprobada
+        (`unapproved_ai_action`), y esa decision vale igual acá. Un camino
+        propio significaria dos lugares donde ajustar la misma politica.
+
+        Cuando la accion es "warn" el envio sigue su curso exactamente como
+        antes y lo unico que cambia es que el panel lo ve. Es el default a
+        proposito: la primera pregunta que tiene una empresa no es a quien
+        cortar sino cuanta gente esta entrando con su cuenta personal.
+        """
+
+        ajena = identidad.es_ajena(
+            flow.request.headers,
+            flow.request.path,
+            self.policy.corporate_accounts,
+        )
+        corta = self.policy.foreign_account_action == "block"
+        resultado = classification
+        if ajena is not None:
+            # Se decide ANTES de registrar. El evento tiene que decir lo que de
+            # verdad paso: grabarlo como "aprobado" y degradar despues deja la
+            # evidencia describiendo un mundo que no ocurrio.
+            resultado = "ai_unapproved" if corta else classification
+            self._registrar_uso(
+                host,
+                resultado,
+                self._proceso_de(flow).nombre,
+                # La identidad completa es la que compara la politica; esto es
+                # solo lo que se muestra. Un uuid recortado a 32 sigue siendo
+                # reconocible y el contrato no admite mas (ver detect/types.py).
+                finding=Finding(
+                    rule_id="cuenta_ajena",
+                    category="policy",
+                    severity="high",
+                    confidence=1.0,
+                    evidence=ajena[:EVIDENCE_MAX_LEN],
+                    start=0,
+                    end=0,
+                ),
+                accion="blocked" if corta else "warned",
+                # Clave propia para que este evento no se coma la pausa del uso
+                # normal del mismo dominio: son dos cosas distintas que el panel
+                # necesita ver por separado.
+                clave=f"cuenta:{host}",
+            )
+        return resultado
+
     def _registrar_uso(
-        self, host: str, classification: Classification, proceso: str = ""
+        self,
+        host: str,
+        classification: Classification,
+        proceso: str = "",
+        finding: Finding | None = None,
+        accion: str = "allowed",
+        clave: str = "",
     ) -> None:
         """Un evento por dominio cada tanto, no uno por peticion.
 
@@ -623,16 +746,17 @@ class Aegis:
         """
 
         ahora = time.time()
+        llave = clave or host
         with self._lock_uso:
-            reciente = ahora - self._ultimo_uso.get(host, 0) < PAUSA_USO
+            reciente = ahora - self._ultimo_uso.get(llave, 0) < PAUSA_USO
             if not reciente:
-                self._ultimo_uso[host] = ahora
+                self._ultimo_uso[llave] = ahora
         if not reciente:
             self._record(
                 host=host,
                 classification=classification,
-                finding=None,
-                action="allowed",
+                finding=finding,
+                action=accion,
                 payload_bytes=0,
                 truncated=False,
                 proceso=proceso,

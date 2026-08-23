@@ -14,12 +14,13 @@ import os
 import socket
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+from aegis_agent import entorno
 
 AGENT_ROOT = Path(__file__).resolve().parent.parent
 MOCK = AGENT_ROOT / "tests" / "e2e" / "mock_upstream.py"

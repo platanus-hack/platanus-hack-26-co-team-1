@@ -39,11 +39,58 @@ def correr(nombre: str, cwd: Path) -> int:
     ).returncode
 
 
+REVISIONES = ("F", "E9")
+
+
+def revisar() -> int:
+    """Nombres indefinidos, variables muertas e imports sin usar.
+
+    Existe por tres bugs que una auditoria encontro en un solo dia y que la
+    suite entera no habia visto NUNCA, porque los tres viven justo en el codigo
+    que los tests reemplazan con dobles:
+
+      - `demo/run.py` llamaba a `entorno.mitmdump_en_disco()` sin importar
+        `entorno`. `aegis demo` -- la demo del producto -- reventaba con
+        NameError, y los e2e no lo tocaban porque levantan su propio arnes.
+      - `backend/app.py` anotaba un tipo que no existia.
+      - Una variable compilada y nunca usada escondia que `_inspect` ignoraba
+        el snapshot de politica del hot-reload.
+
+    Son dos segundos y cazan exactamente esa clase. Solo F y E9: las reglas de
+    estilo de ruff chocan a proposito con las convenciones del repo (if/else
+    explicito en vez de ternario, un solo return por funcion).
+
+    Y es OPCIONAL. `agent/requirements.txt` esta vacio a proposito -- el agente
+    arranca con Python pelado (ver backend/supabase.py) -- asi que exigir ruff
+    para poder correr los tests cambiaria esa promesa por una comodidad. Si no
+    esta, se dice y se sigue.
+    """
+
+    print("\n=== revision estatica ===")
+    try:
+        completado = subprocess.run(
+            [sys.executable, "-m", "ruff", "check", ".",
+             f"--select={','.join(REVISIONES)}",
+             "--exclude=node_modules,dist", "--output-format=concise"],
+            cwd=str(RAIZ),
+        )
+    except (OSError, ValueError):
+        completado = None
+
+    if completado is None or completado.returncode > 1:
+        print("  ruff no esta instalado; se omite (pip install ruff)")
+        resultado = 0
+    else:
+        resultado = completado.returncode
+    return resultado
+
+
 def main() -> int:
     fallos = correr("agente", RAIZ / "agent")
     backend = RAIZ / "backend" / "tests"
     if backend.exists():
         fallos += correr("backend", RAIZ / "backend")
+    fallos += revisar()
     return 1 if fallos else 0
 
 

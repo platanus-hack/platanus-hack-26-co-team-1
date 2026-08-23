@@ -17,11 +17,13 @@ from urllib.parse import unquote_plus
 from . import diccionario
 from . import ocr
 from .engine import scan
+from .rules import RULES, Rule
 from .files import scan_files
 from .imagenes import extraer as extraer_imagenes
 from .model import scan_model
 from .prompt import extract_prompt
-from .types import Finding
+from .ruleset import RULESET_POR_DEFECTO, RuleSet
+from .types import ORIGEN_IMAGEN, Finding
 
 # Un secreto casi nunca viaja en texto plano y derecho: viaja dentro de un JSON
 # escapado, de un multipart, de un .docx (que es un zip), en base64 o en un body
@@ -218,7 +220,9 @@ def _segmentos(texto: str):
         posicion += SEGMENTO - SOLAPE
 
 
-def _scan_con_presupuesto(texto: str, restante_ms: float) -> tuple[list[Finding], bool]:
+def _scan_con_presupuesto(
+    texto: str, restante_ms: float, rules: tuple[Rule, ...] = RULES
+) -> tuple[list[Finding], bool]:
     """Escanea la vista mientras alcance el presupuesto. Devuelve (hallazgos, completo)."""
 
     hallazgos: list[Finding] = []
@@ -238,7 +242,7 @@ def _scan_con_presupuesto(texto: str, restante_ms: float) -> tuple[list[Finding]
         if not obligatorio and (time.perf_counter() - inicio) * 1000 > restante_ms:
             completo = False
             break
-        for hallazgo in scan(pedazo):
+        for hallazgo in scan(pedazo, rules):
             hallazgos.append(
                 hallazgo
                 if desplazamiento == 0
@@ -569,7 +573,7 @@ def _cadenas(dato) -> list[str]:
     return encontradas
 
 
-def scan_preview(preview: str) -> list[Finding]:
+def scan_preview(preview: str, ruleset: RuleSet | None = None) -> list[Finding]:
     """Barrido barato sobre un preview de texto: solo regex, nada de archivos.
 
     Sirve para decidir si un destino sin clasificar merece el escaneo completo
@@ -579,10 +583,11 @@ def scan_preview(preview: str) -> list[Finding]:
     que esto ya encontro algo, no en cada POST de la navegacion normal.
     """
 
+    rs = ruleset or RULESET_POR_DEFECTO
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for view in (preview, *_derived_views(preview)):
-        for finding in scan(view):
+        for finding in scan(view, rs.rules):
             key = (finding.rule_id, finding.evidence)
             if key not in seen:
                 seen.add(key)
@@ -592,14 +597,21 @@ def scan_preview(preview: str) -> list[Finding]:
 
 
 def scan_payload(
-    body: bytes | None, query: str = "", terminos: dict[str, str] | None = None
+    body: bytes | None,
+    query: str = "",
+    terminos: dict[str, str] | None = None,
+    ruleset: RuleSet | None = None,
+    leer_imagenes: bool = False,
 ) -> ScanResult:
     """Escanea un request completo, incluidas sus formas ofuscadas.
 
     Devuelve hallazgos deduplicados: el mismo secreto visto en el texto plano y
-    en su version base64 es un solo incidente, no dos.
+    en su version base64 es un solo incidente, no dos. El ruleset trae lo que
+    la politica cambio (reglas apagadas, terminos, regex propias); sin el se
+    corre con las reglas de fabrica.
     """
 
+    rs = ruleset or RULESET_POR_DEFECTO
     truncated = False
     payload = body or b""
     if len(payload) > MAX_INSPECT_BYTES:
@@ -607,6 +619,11 @@ def scan_payload(
         truncated = True
 
     views: list[str] = []
+    # Se rastrea por POSICION y no por contenido. Rastrear por texto parece mas
+    # simple hasta que el OCR lee exactamente lo mismo que dice el cuerpo: ahi
+    # la vista del texto queda marcada como imagen y una fuga escrita de verdad
+    # se rebaja a un aviso. La rebaja tiene que equivocarse hacia bloquear.
+    indices_de_imagen: set[int] = set()
     principal = ""
     if query:
         views.append(query)
@@ -626,10 +643,19 @@ def scan_payload(
         # que todo lo de arriba ya se resolvio antes de considerar pagarla. La
         # extraccion de las imagenes es barata y siempre corre; lo que esta
         # apagado por defecto es leerlas.
-        if ocr.habilitado():
+        if leer_imagenes or ocr.habilitado():
             imagenes = extraer_imagenes(payload, principal)
             if imagenes:
-                views.extend(ocr.vistas(imagenes))
+                # De cual vista salio cada hallazgo decide cuanta autoridad
+                # tiene (ver types.ORIGEN_IMAGEN).
+                desde = len(views)
+                leidas, incompleto = ocr.vistas(imagenes)
+                views.extend(leidas)
+                indices_de_imagen.update(range(desde, len(views)))
+                # Una imagen que no se alcanzo a leer es un escaneo incompleto,
+                # igual que una vista que quedo sin recorrer. Decirlo es lo que
+                # separa "no habia nada" de "no se llego a mirar".
+                truncated = truncated or incompleto
 
     # El espanol de verdad lleva tildes y enes. Las reglas estan escritas sin
     # ellas, asi que una regla veia "la contrasena del servidor" y NINGUNA veia
@@ -641,11 +667,15 @@ def scan_payload(
     # solo aparece en la vista desescapada. Aplicarlo sobre TODAS las vistas es
     # lo unico que la alcanza, y de paso una regla nueva hereda la cobertura sin
     # que su autor tenga que acordarse.
-    views.extend(
-        plano
-        for vista in list(views)
-        if not vista.isascii() and (plano := sin_tildes(vista)) != vista
-    )
+    for indice, vista in enumerate(list(views)):
+        if not vista.isascii() and (plano := sin_tildes(vista)) != vista:
+            # La vista derivada hereda el origen de la suya: quitarle las tildes
+            # al texto de un OCR no lo vuelve mas confiable. Se marca ANTES de
+            # agregarla, cuando len(views) todavia es la posicion que va a
+            # ocupar.
+            if indice in indices_de_imagen:
+                indices_de_imagen.add(len(views))
+            views.append(plano)
 
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
@@ -657,7 +687,7 @@ def scan_payload(
     budget = MAX_TOTAL_EXPANDED_CHARS
     scanned = 0
     arranque = time.perf_counter()
-    for view in views:
+    for indice, view in enumerate(views):
         gastado = (time.perf_counter() - arranque) * 1000
         if gastado > PRESUPUESTO_MS:
             # Se agoto el tiempo y quedan vistas sin mirar. Se dice en el evento:
@@ -671,8 +701,14 @@ def scan_payload(
             # El tope de la vista incluye la cola: recortar aca de nuevo dejaria
             # afuera justo el pedazo que se conservo para no perder el final.
             recorte = view[: MAX_INSPECT_BYTES + TAIL_BYTES]
+            # Con las reglas COMPILADAS de la politica, no con las de fabrica:
+            # es lo que hace que apagar una regla o agregar una propia cambie
+            # algo de verdad. Y sigue pasando por el presupuesto: la rama que
+            # trajo el ruleset llamaba a scan() directo, y eso se llevaba puesto
+            # el limite de latencia de T1, que existe por una medicion (1 ms por
+            # KB, del orden de un segundo en 1 MB).
             view_findings, completo = _scan_con_presupuesto(
-                recorte, PRESUPUESTO_MS - gastado
+                recorte, PRESUPUESTO_MS - gastado, rs.rules
             )
             if not completo:
                 truncated = True
@@ -689,24 +725,37 @@ def scan_payload(
                 # Se toma el maximo por vista y no la suma: el mismo export visto
                 # en texto plano y en base64 no son dos fugas distintas.
                 counts[rule_id] = max(counts[rule_id], total)
+            de_imagen = indice in indices_de_imagen
             for finding in view_findings:
                 key = (finding.rule_id, finding.evidence)
                 posicion = (finding.rule_id, finding.start)
                 if key not in seen and posicion not in posiciones:
                     seen.add(key)
                     posiciones.add(posicion)
-                    findings.append(finding)
+                    # El mismo secreto visto en el texto Y en una imagen se
+                    # queda con el primero que se vio, que por el orden de las
+                    # vistas es siempre el del texto. Es lo que corresponde: si
+                    # esta escrito en el cuerpo, no hay nada probabilistico.
+                    findings.append(
+                        replace(finding, origen=ORIGEN_IMAGEN)
+                        if de_imagen
+                        else finding
+                    )
 
     # El archivo puede ser critico por lo que es, no por lo que dice: un
     # volcado binario no tiene ni una palabra que una regla de texto encuentre.
+    # Los hallazgos sinteticos no nacen de una Rule, asi que las reglas
+    # apagadas de la politica se aplican aca por id.
     for hallazgo in scan_files(payload, principal):
+        if hallazgo.rule_id in rs.disabled:
+            continue
         clave = (hallazgo.rule_id, hallazgo.evidence)
         if clave not in seen:
             seen.add(clave)
             findings.append(hallazgo)
 
     bulk = _bulk_pii(counts)
-    if bulk is not None:
+    if bulk is not None and bulk.rule_id not in rs.disabled:
         findings.append(bulk)
 
     # T2 solo entra cuando T1 se quedo sin nada que decir. Si ya hay una
@@ -716,8 +765,16 @@ def scan_payload(
         # Al modelo se le da lo que escribio la persona, no el sobre que lo
         # lleva. Si la forma del request no se reconoce se mira todo: un
         # servicio que nadie clasifico todavia tampoco tiene una forma conocida,
-        # y recortar ahi seria recortar justo el caso peligroso.
-        findings.extend(scan_model(extract_prompt(principal) or principal))
+        # y recortar ahi seria recortar justo el caso peligroso. Las etiquetas
+        # y el umbral son los de la politica: es la parte del modelo que la
+        # empresa puede ajustar sin tocar codigo.
+        findings.extend(
+            scan_model(
+                extract_prompt(principal) or principal,
+                rs.model_labels,
+                rs.model_threshold,
+            )
+        )
 
     # Se reordena al final para que el primero sea el hallazgo mas especifico, no
     # el ultimo que se agrego. De ese primero sale la leccion que ve la persona,

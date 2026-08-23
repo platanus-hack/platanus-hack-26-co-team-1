@@ -33,11 +33,40 @@ export interface Politica {
   company_terms: Record<string, string>;
   company_terms_action: string;
   injection_action: string;
+  /**
+   * Si se lee el texto de las imágenes que salen del equipo.
+   *
+   * Apagado por defecto: cuesta ~2 s por imagen, así que es una decisión de la
+   * empresa. Vive acá y no en una variable de entorno porque `ocr_action` ya
+   * está en el panel, y elegir qué hacer con lo que se encuentra en una imagen
+   * mientras la lectura está apagada por otro lado promete algo que no ocurre.
+   */
+  ocr_enabled: boolean;
+  /**
+   * Qué autoridad tiene lo que se leyó de una imagen.
+   *
+   * Es la tercera detección probabilística del sistema, junto con el modelo
+   * local y la inyección, y hasta acá era la única sin freno.
+   */
+  ocr_action: string;
   blind_spot_action: string;
   unknown_domain_action: string;
   unapproved_ai_action: string;
   model_action: string;
   model_threshold: number;
+  /**
+   * Las cuentas de la empresa en las herramientas aprobadas.
+   *
+   * `approved_ai` dice "ChatGPT se puede usar" y no alcanza: la cuenta personal
+   * del empleado entra por el mismo dominio aprobado. Esto declara cuáles
+   * cuentas son de la empresa; lo que no esté acá es de otro.
+   *
+   * Son huellas e identificadores de organización, nunca credenciales: el
+   * agente hashea la llave antes de que salga del equipo, así que este campo
+   * no puede llevar un secreto ni por error.
+   */
+  corporate_accounts: string[];
+  foreign_account_action: string;
 }
 
 const VACIA: Politica = {
@@ -50,11 +79,15 @@ const VACIA: Politica = {
   company_terms: {},
   company_terms_action: 'block',
   injection_action: 'warn',
+  ocr_enabled: false,
+  ocr_action: 'warn',
   blind_spot_action: 'warn',
   unknown_domain_action: 'warn',
   unapproved_ai_action: 'warn',
   model_action: 'block',
   model_threshold: 0.7,
+  corporate_accounts: [],
+  foreign_account_action: 'warn',
 };
 
 @Injectable({ providedIn: 'root' })

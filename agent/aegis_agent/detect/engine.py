@@ -89,18 +89,19 @@ def _drop_overlapping(findings: list[Finding]) -> list[Finding]:
     return kept
 
 
-def scan(text: str) -> list[Finding]:
+def scan(text: str, rules: tuple[Rule, ...] = RULES) -> list[Finding]:
     """Hallazgos del texto, del mas severo al menos severo.
 
     El texto original no queda referenciado en el resultado: los Finding solo
-    llevan evidencia redactada.
+    llevan evidencia redactada. Por defecto corren las reglas de fabrica; la
+    politica de la empresa puede pasar su propio conjunto (detect/ruleset.py).
     """
 
     if not text:
         result: list[Finding] = []
     else:
         findings: list[Finding] = []
-        for rule in RULES:
+        for rule in rules:
             findings.extend(_findings_for_rule(rule, text))
         result = sorted(_drop_overlapping(findings), key=_rank)
     return result

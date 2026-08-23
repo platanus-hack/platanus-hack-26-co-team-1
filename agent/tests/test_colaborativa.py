@@ -573,6 +573,104 @@ class TestRefrescoDeLaPolitica(BackendVivo):
         self.assertFalse(ruta.exists())
 
 
+class TestHotReload(BackendVivo):
+    """La politica que edita la web aplica sin reiniciar el agente.
+
+    Antes el agente leia la politica una sola vez al arrancar: la web podia
+    guardar lo que quisiera y el bloqueo seguia igual hasta el proximo
+    reinicio. El tick de refresco (addon._refrescar_politica) trae la politica
+    del backend, la persiste y cambia la referencia viva; el ruleset compilado
+    se invalida solo porque el cache es por identidad del objeto.
+    """
+
+    def _addon(self, workdir: Path):
+        import os
+        from unittest import mock
+
+        from tests.test_destino_desconocido import make_addon
+
+        entorno = {
+            "AEGIS_POLITICA": str(workdir / "politica.json"),
+            "AEGIS_BACKEND": f"http://127.0.0.1:{self.port}",
+            "AEGIS_BACKEND_DISABLED": "1",  # sin hilos de fondo en el test
+        }
+        parche = mock.patch.dict(os.environ, entorno)
+        parche.start()
+        self.addCleanup(parche.stop)
+        return make_addon(workdir / "eventos.jsonl")
+
+    def test_refrescar_ahora_devuelve_la_politica_y_la_persiste(self):
+        self._put(
+            "/v1/policy/empresa-ahora",
+            Policy(tenant_id="empresa-ahora", model_threshold=0.9).a_dict(),
+        )
+        ruta = Path(self.workdir.name) / "politica-ahora.json"
+
+        politica = policy_store.refrescar_ahora(
+            f"http://127.0.0.1:{self.port}", "empresa-ahora", ruta
+        )
+
+        self.assertEqual(politica.model_threshold, 0.9)
+        self.assertEqual(policy_store.cargar(ruta).model_threshold, 0.9)
+
+    def test_refrescar_ahora_sin_backend_devuelve_none_y_no_lanza(self):
+        ruta = Path(self.workdir.name) / "politica-caida.json"
+        politica = policy_store.refrescar_ahora("http://127.0.0.1:1", "acme", ruta)
+        self.assertIsNone(politica)
+        self.assertFalse(ruta.exists())
+
+    def test_refrescar_ahora_con_politica_vacia_devuelve_none(self):
+        ruta = Path(self.workdir.name) / "politica-vacia.json"
+        politica = policy_store.refrescar_ahora(
+            f"http://127.0.0.1:{self.port}", "tenant-que-jamas-configuro", ruta
+        )
+        self.assertIsNone(politica)
+
+    def test_el_tick_aplica_la_politica_en_caliente(self):
+        import tempfile
+
+        from tests.test_destino_desconocido import FakeFlow, FakeRequest
+
+        workdir = tempfile.TemporaryDirectory()
+        self.addCleanup(workdir.cleanup)
+        addon = self._addon(Path(workdir.name))
+
+        llave = "AKIAIOSFODNN7EXAMPLE"
+
+        # Antes del tick: la llave AWS hacia una IA aprobada se corta.
+        flujo = FakeFlow(FakeRequest("claude.ai", "/api", f'{{"k": "{llave}"}}'.encode()))
+        addon.request(flujo)
+        self.assertIsNotNone(flujo.response)
+
+        # La web apaga la regla y el agente refresca: mismo envio, ahora pasa.
+        self._put(
+            "/v1/policy/acme",
+            Policy(tenant_id="acme", disabled_rules=frozenset({"aws_access_key_id"})).a_dict(),
+        )
+        addon._refrescar_politica()
+
+        flujo = FakeFlow(FakeRequest("claude.ai", "/api", f'{{"k": "{llave}"}}'.encode()))
+        addon.request(flujo)
+        self.assertIsNone(flujo.response)
+
+    def test_un_tick_sin_cambios_no_reemplaza_el_objeto(self):
+        # La identidad estable importa: el cache del ruleset es por identidad,
+        # y un swap gratuito recompilaria las regex en cada tick.
+        import tempfile
+
+        workdir = tempfile.TemporaryDirectory()
+        self.addCleanup(workdir.cleanup)
+        addon = self._addon(Path(workdir.name))
+
+        self._put("/v1/policy/acme", Policy(tenant_id="acme", model_threshold=0.7).a_dict())
+        addon._refrescar_politica()
+        primera = addon.policy
+
+        addon._refrescar_politica()
+
+        self.assertIs(addon.policy, primera)
+
+
 class TestClienteDelAgente(BackendVivo):
     def _cliente(self, nombre: str) -> DomainClient:
         ruta = Path(self.workdir.name) / f"cache-{nombre}.json"

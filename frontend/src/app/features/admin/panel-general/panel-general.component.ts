@@ -12,6 +12,12 @@ import { DirectorioService } from '../../../shared/data/directorio.service';
 import { MetricasService, Ranking } from '../../../shared/data/metricas.service';
 import { InsightsService } from '../../../shared/data/insights.service';
 
+/** Fecha local en formato YYYY-MM-DD, para precargar los <input type="date">. */
+function isoLocal(d: Date): string {
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off * 60_000).toISOString().slice(0, 10);
+}
+
 /** Panel general: dashboard agregado semanal con widgets de actividad DLP. */
 @Component({
   selector: 'app-panel-general',
@@ -39,9 +45,10 @@ export class PanelGeneralComponent implements OnInit {
   readonly rangos = ['Esta semana', 'Últimos 14 días', 'Este mes', 'Personalizado'];
 
   // Fechas del rango personalizado, en el formato de <input type="date">
-  // (yyyy-mm-dd). Vacias hasta que el agente elige y confirma.
-  personalizadoDesde = '';
-  personalizadoHasta = '';
+  // (yyyy-mm-dd). Precargadas con los ultimos 7 dias -y no vacias- para que
+  // el "Aplicar" tenga un rango valido desde el primer click.
+  personalizadoDesde = isoLocal(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+  personalizadoHasta = isoLocal(new Date());
 
   /** El botón cambia el filtro; "Personalizado" espera a que se confirme. */
   elegirRango(r: string): void {

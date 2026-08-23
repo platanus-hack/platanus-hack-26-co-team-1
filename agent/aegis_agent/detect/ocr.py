@@ -68,10 +68,29 @@ import os
 import threading
 import time
 
-# Presupuesto en milisegundos. En segundos y no en milisegundos porque el OCR
-# cuesta segundos: ver el encabezado. Si se pasa, se descarta el resultado y
-# queda lo que vio el resto del motor, igual que con T2.
-PRESUPUESTO_MS = int(os.environ.get("AEGIS_OCR_PRESUPUESTO_MS", "4000"))
+# Presupuesto en milisegundos. Si se pasa, se descarta el resultado y queda lo
+# que vio el resto del motor, igual que con T2.
+#
+# ERA 4000 Y ESO APAGABA EL OCR EN EL CASO REAL. El numero viejo se fijo midiendo
+# la imagen de laboratorio del encabezado --900x260, tres renglones-- y nunca
+# contra una captura de pantalla, que es lo unico que manda una persona. Medido
+# ahora sobre una captura de 1920x1080, la resolucion mas comun que existe:
+#
+#     carga del motor        495 ms   (una vez)
+#     primera inferencia    4225 ms   <-- pasaba el presupuesto SIEMPRE
+#     siguientes            1900 ms
+#
+# O sea que la PRIMERA imagen que mandaba cualquiera se descartaba entera, y en
+# una demo -donde siempre hay una primera imagen- el OCR no encontraba nada
+# nunca. La primera inferencia es cara porque el motor optimiza por forma de
+# entrada; calentarlo con una imagen chica no sirve (medido: baja a 3510 ms, que
+# sigue sin margen en una maquina ocupada).
+#
+# 8000 da dos veces el costo de regimen y cubre la primera con holgura. Es
+# tolerable porque esto se paga cuando alguien arrastra una imagen, que es un
+# momento donde ya se espera una demora -- no en un tecleo, que es lo que
+# gobierna el presupuesto de 700 ms de T2.
+PRESUPUESTO_MS = int(os.environ.get("AEGIS_OCR_PRESUPUESTO_MS", "8000"))
 
 # Lado minimo al que se agranda una imagen chica. Medido: la llave de AWS no se
 # leyo a 900 px de ancho y si se leyo a 1800.
@@ -219,18 +238,27 @@ def leer(datos: bytes) -> str:
     return _por_renglones(resultado)
 
 
-def vistas(imagenes: list[bytes]) -> list[str]:
-    """El texto de cada imagen, para sumarlo a las vistas del payload.
+def vistas(imagenes: list[bytes]) -> tuple[list[str], bool]:
+    """El texto de cada imagen, y si quedo alguna sin leer.
 
     El presupuesto es POR IMAGEN y ademas total: cuatro imagenes de cuatro
     segundos serian dieciseis, y a esa altura la persona ya penso que Aegis rompio
     su navegador.
+
+    El segundo valor existe porque descartar EN SILENCIO es una promesa que el
+    producto no cumple: el panel decia "se escaneo y no habia nada" cuando lo
+    que paso fue que no se llego a mirar. Es la misma regla que ya gobierna al
+    presupuesto de T1 en payload.py, que marca `truncated`; al del OCR le
+    faltaba.
     """
 
     salida: list[str] = []
+    incompleto = False
     inicio = time.perf_counter()
     for datos in imagenes:
         if (time.perf_counter() - inicio) * 1000 > PRESUPUESTO_MS:
+            # Quedan imagenes sin mirar y hay que decirlo.
+            incompleto = True
             break
         try:
             texto = leer(datos)
@@ -243,4 +271,9 @@ def vistas(imagenes: list[bytes]) -> list[str]:
             texto = ""
         if texto:
             salida.append(texto)
-    return salida
+        else:
+            # Vacio significa que esta imagen no se leyo: se paso de presupuesto
+            # dentro de `leer`, el motor no cargo, o la imagen le cayo mal. Las
+            # tres son "no se miro", que no es lo mismo que "no habia nada".
+            incompleto = True
+    return salida, incompleto

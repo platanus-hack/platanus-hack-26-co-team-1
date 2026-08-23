@@ -286,8 +286,31 @@ class TestElCli(CasoAislado):
         with patch("builtins.print"):
             self.assertEqual(cli.main(["volar"]), 2)
 
-    def test_sin_argumentos_muestra_el_estado(self):
-        with patch.object(cli, "_estado", return_value=0) as estado:
+    def test_sin_argumentos_abre_el_panel_si_ya_esta_instalado(self):
+        """Doble clic en Aegis.exe es como se abre esto, y ahi no se lee una tabla.
+
+        Antes, sin argumentos, se imprimia el estado: ocho lineas de vocabulario
+        interno que terminan en "Aegis no esta activo", o sea que describen el
+        problema sin ofrecer la salida. Ahora hay una sola pregunta por momento:
+        si ya esta instalado se abre el panel, que es donde se mira y se opera.
+        """
+
+        from aegis_agent import control
+
+        with patch.object(control, "estado", return_value={"situacion": control.APAGADO}),              patch.object(cli, "_panel", return_value=0) as panel:
+            cli.main([])
+        panel.assert_called_once()
+
+    def test_sin_instalar_y_sin_nadie_mirando_no_se_queda_esperando(self):
+        """Un instalador que espera una tecla que nunca llega es un instalador colgado.
+
+        Pasa de verdad: un script, una tarea programada o esta misma suite corren
+        el binario sin una consola interactiva del otro lado.
+        """
+
+        from aegis_agent import control
+
+        with patch.object(control, "estado", return_value={"situacion": control.SIN_INSTALAR}),              patch.object(cli.sys.stdin, "isatty", return_value=False),              patch.object(cli, "_estado", return_value=0) as estado,              patch("builtins.input", side_effect=AssertionError("no se puede preguntar")):
             cli.main([])
         estado.assert_called_once()
 

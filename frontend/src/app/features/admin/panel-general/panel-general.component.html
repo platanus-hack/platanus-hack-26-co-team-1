@@ -25,12 +25,14 @@
         <input
           type="date"
           [(ngModel)]="personalizadoDesde"
+          [max]="personalizadoHasta"
           class="rounded-md border border-aegis-border bg-aegis-surface px-2 py-1 font-display text-xs text-aegis-text"
         />
         <span class="text-xs text-aegis-faint">a</span>
         <input
           type="date"
           [(ngModel)]="personalizadoHasta"
+          [min]="personalizadoDesde"
           class="rounded-md border border-aegis-border bg-aegis-surface px-2 py-1 font-display text-xs text-aegis-text"
         />
         <button type="button" class="aegis-btn-ghost px-2 py-1" (click)="aplicarPersonalizado()">Aplicar</button>
@@ -144,30 +146,6 @@
           </div>
         } @empty {
           <p class="text-sm text-aegis-faint">Ningún área tuvo incidentes en este rango.</p>
-        }
-      </div>
-    </div>
-
-    <div class="aegis-card p-6">
-      <div class="mb-4 flex items-center gap-2.5">
-        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
-          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4"><path d="M3 17V9M9 17V3M15 17v-6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        </span>
-        <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Áreas que más usan IA</h2>
-      </div>
-      <div class="flex flex-col gap-3.5">
-        @for (a of m().areasUsoIa; track a.nombre) {
-          <div>
-            <div class="mb-1.5 flex items-center justify-between text-sm">
-              <span class="text-aegis-text">{{ a.nombre }}</span>
-              <span class="font-display text-xs text-aegis-faint">{{ a.valor }}</span>
-            </div>
-            <div class="h-1.5 w-full rounded-full bg-aegis-surface3">
-              <div class="h-1.5 rounded-full bg-aegis-accent" [style.width.%]="(a.valor / max(m().areasUsoIa)) * 100"></div>
-            </div>
-          </div>
-        } @empty {
-          <p class="text-sm text-aegis-faint">Sin uso de IA registrado en este rango.</p>
         }
       </div>
     </div>
