@@ -31,6 +31,11 @@ def correr(nombre: str, cwd: Path) -> int:
         **os.environ,
         "AEGIS_SUPABASE_DISABLED": "1",
         "AEGIS_EVENTS_URL": "",
+        # 3. El aviso en pantalla lanza un PowerShell por cada bloqueo. Sin
+        #    esto, la suite le tapa el escritorio de notificaciones a quien la
+        #    corre. Va aca ademas de en tests/__init__.py por el mismo motivo
+        #    que lo demas: el helper solo protege a quien se acuerda de usarlo.
+        "AEGIS_AVISO": "0",
     }
     return subprocess.run(
         [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", "."],

@@ -33,7 +33,7 @@ from ..policy_store import cargar as cargar_politica
 from ..policy_store import refrescar_ahora
 from ..procesos import DESCONOCIDO, Proceso, del_puerto
 from ..sensor import SensorDePuntosCiegos
-from .. import adjuntos
+from .. import adjuntos, aviso
 from ..subidas import subida_hacia_una_ia
 from ..signals import SignalCollector
 from . import blockpage
@@ -92,7 +92,9 @@ def _is_navigation(flow: http.HTTPFlow) -> bool:
     return navegacion
 
 
-def _deny(flow: http.HTTPFlow, html: str, mensaje: str, cabeceras: dict) -> None:
+def _deny(
+    flow: http.HTTPFlow, html: str, mensaje: str, cabeceras: dict, app: str = ""
+) -> None:
     """Responde con la pagina o con un error que la aplicacion pueda mostrar."""
 
     if _is_navigation(flow):
@@ -110,6 +112,21 @@ def _deny(flow: http.HTTPFlow, html: str, mensaje: str, cabeceras: dict) -> None
             ensure_ascii=False,
         ).encode("utf-8")
         tipo = _JSON_HEADERS
+        # Aca se termina nuestro control: que la app pinte este mensaje o un
+        # error generico lo decide ella, y no hay contrato que lo garantice.
+        # Cuando se lo come, la persona ve que su mensaje fallo y no tiene una
+        # sola pista de que fue Aegis ni de por que -- que es justo el escenario
+        # que el producto existe para evitar, porque un bloqueo que no se
+        # entiende no ensena nada y se siente como una falla de la herramienta.
+        # Al navegador no se le avisa: ya recibio la pagina entera.
+        #
+        # Envuelto porque este es el camino del bloqueo: avisar es lo ultimo que
+        # pasa y lo menos importante que pasa. Si el aviso falla, el envio tiene
+        # que quedar cortado igual.
+        try:
+            aviso.avisar_bloqueo(mensaje, app, flow.request.pretty_host)
+        except Exception:
+            pass
     flow.response = http.Response.make(403, cuerpo, {**tipo, **cabeceras})
 
 
