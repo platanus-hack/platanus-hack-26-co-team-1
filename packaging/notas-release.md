@@ -4,7 +4,7 @@ Cuando encuentra algo, te lo explica antes de que salga.
 
 ## Qué se descarga
 
-`Aegis-windows-completo.zip` — 1,2 GB.
+`Aegis-windows.zip` — 1,2 GB.
 
 Trae las reglas deterministas, el diccionario de tu empresa, la lectura de texto en imágenes **y el modelo local**, que es lo único que ve los datos de negocio: *"el margen con Alpina quedó en 4%"*. Sobre el banco de pruebas, las reglas ven 0 de 14 de esos casos y el modelo es lo que los cubre.
 

@@ -491,6 +491,17 @@ def _abre_el_panel(exe: Path) -> bool:
             proceso.kill()
 
 
+# GitHub no acepta un archivo de release de mas de 2 GB. No es un limite blando:
+# la subida falla y no hay forma de publicar ese paquete.
+#
+# Ya paso una vez. El modelo de gliner viene en los dos formatos --
+# model.safetensors y pytorch_model.bin son el MISMO modelo-- y llevarse la
+# carpeta entera metia los dos: 1.102 MB de nada que dejaban el zip en 2.241 MB.
+# El build terminaba diciendo "listo" y el problema aparecia recien al subirlo,
+# que es el peor momento posible para enterarse.
+LIMITE_DE_GITHUB = 2 * 1024**3
+
+
 def empaquetar() -> Path:
     if ZIP.exists():
         ZIP.unlink()
@@ -498,6 +509,16 @@ def empaquetar() -> Path:
         for archivo in sorted(CARPETA.rglob("*")):
             if archivo.is_file():
                 z.write(archivo, Path("Aegis") / archivo.relative_to(CARPETA))
+
+    pesa = ZIP.stat().st_size
+    if pesa > LIMITE_DE_GITHUB:
+        raise SystemExit(
+            f"\n{ZIP.name} pesa {pesa / 1024**3:.2f} GB y GitHub no "
+            f"acepta mas de 2 GB por archivo: no se puede publicar.\n"
+            "Casi siempre es un duplicado del modelo: revisa la lista `_sobra` "
+            "de packaging/aegis.spec."
+        )
+    print(f"  {ZIP.name}: {pesa / 1024**3:.2f} GB (limite de GitHub: 2 GB)")
     return ZIP
 
 
