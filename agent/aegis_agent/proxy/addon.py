@@ -167,14 +167,27 @@ class Aegis:
             threading.Thread(target=model.cargar, daemon=True).start()
 
         self._url_backend = os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686")
-        # Cada cuanto se vuelve a pedir la politica. Un minuto alcanza: lo que
-        # la web guarda tarda eso en aplicar, sin martillar el backend.
+        # Cada cuanto se vuelve a pedir la politica.
+        #
+        # Diez segundos y no sesenta: quien acaba de tocar una perilla en el
+        # panel se queda mirando la pantalla a ver si paso algo, y un minuto es
+        # mucho mas de lo que alguien espera antes de concluir que no funciono.
+        # El costo es real --seis veces mas peticiones-- pero cada una vale
+        # centavos: si la politica no cambio, el agente compara y no hace nada,
+        # ni siquiera recompila las regex, porque el cache va por identidad del
+        # objeto. Lo que se paga es una peticion chica cada diez segundos por
+        # equipo, y lo que se compra es que la configuracion se sienta viva.
+        #
+        # Si algun dia esto escala a miles de equipos, la respuesta no es volver
+        # a subir el numero sino dejar de sondear: un canal que empuje el cambio
+        # cuando ocurre. Subir el intervalo solo hace el producto mas lento sin
+        # arreglar el modelo.
         try:
             self._intervalo_refresco = float(
-                os.environ.get("AEGIS_REFRESCO_POLITICA", "60")
+                os.environ.get("AEGIS_REFRESCO_POLITICA", "10")
             )
         except ValueError:
-            self._intervalo_refresco = 60.0
+            self._intervalo_refresco = 10.0
 
         if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
             # El refresco corre en bucle y aplica en caliente: la politica que
