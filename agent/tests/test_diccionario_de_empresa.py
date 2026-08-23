@@ -31,7 +31,8 @@ from unittest.mock import patch
 from aegis_agent.detect import diccionario
 from aegis_agent.detect.payload import scan_payload
 from aegis_agent.lessons import lesson_for
-from aegis_agent.policy import Policy, decidir_sobre
+from aegis_agent.detect.ruleset import ruleset_de
+from aegis_agent.policy import Policy, classify, decidir_sobre
 
 TERMINOS = {
     "Proyecto Fenix": "proyecto",
@@ -208,3 +209,86 @@ class TestLaPoliticaLoTransporta(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHablarDeLoPropioConLaHerramientaPropia(unittest.TestCase):
+    """El diccionario puede pasar hacia una IA aprobada, y solo hacia ella.
+
+    Son dos preguntas distintas y las contestabamos con una. "Que no salga de la
+    empresa" no significa "que no salga hacia la herramienta que la empresa
+    eligio y le paga": si la organizacion decidio que Claude es su asistente,
+    prohibirle nombrar sus propios proyectos ahi deja el diccionario inservible.
+    La gente lo apaga entero, y con el se van tambien los destinos donde SI
+    importaba.
+    """
+
+    TERMINOS = {"Proyecto Fenix": "proyecto"}
+    APROBADAS = frozenset({"claude.ai", "api.anthropic.com"})
+
+    def _politica(self, en_aprobada: str) -> Policy:
+        return Policy(
+            approved_ai=self.APROBADAS,
+            company_terms=self.TERMINOS,
+            company_terms_action="block",
+            company_terms_en_aprobada=en_aprobada,
+        )
+
+    def _decidir(self, texto: str, host: str, en_aprobada: str = "allow") -> str:
+        politica = self._politica(en_aprobada)
+        cuerpo = json.dumps(
+            {"model": "m", "messages": [{"role": "user", "content": texto}]}
+        ).encode()
+        resultado = scan_payload(
+            cuerpo, "", politica.company_terms, ruleset_de(politica)
+        )
+        return decidir_sobre(
+            classify(host, politica), resultado.findings, politica,
+            "chrome.exe", "u", "ventas", host,
+        )
+
+    TERMINO = "el margen de Proyecto Fenix quedo en 4%"
+    LLAVE = "la llave es AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"
+    AMBOS = "para Proyecto Fenix usa AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"
+
+    def test_hacia_una_aprobada_el_termino_pasa(self):
+        for host in sorted(self.APROBADAS):
+            with self.subTest(host=host):
+                self.assertEqual(self._decidir(self.TERMINO, host), "allow")
+
+    def test_hacia_cualquier_otra_sigue_cortando(self):
+        for host in ("chatgpt.com", "gemini.google.com"):
+            with self.subTest(host=host):
+                self.assertEqual(self._decidir(self.TERMINO, host), "block_content")
+
+    def test_una_credencial_corta_igual_en_la_aprobada(self):
+        """El permiso es para el diccionario, no para todo lo demas."""
+
+        self.assertEqual(self._decidir(self.LLAVE, "claude.ai"), "block_content")
+
+    def test_un_termino_JUNTO_a_una_credencial_no_pasa(self):
+        """El caso que abre el agujero si se mira solo el peor hallazgo.
+
+        Un mensaje que lleva el nombre de un proyecto Y una llave de AWS tiene
+        que cortarse igual. Si la exencion mirara unicamente `findings[0]`, el
+        mensaje entero pasaria segun cual de los dos ordenara primero -- y eso
+        no se ve probando un caso a la vez.
+        """
+
+        self.assertEqual(self._decidir(self.AMBOS, "claude.ai"), "block_content")
+
+    def test_sin_pedirlo_no_cambia_nada(self):
+        """El default no afloja nada: hay que escribirlo para que aplique."""
+
+        self.assertEqual(
+            self._decidir(self.TERMINO, "claude.ai", en_aprobada="igual"),
+            "block_content",
+        )
+
+    def test_la_perilla_viaja_en_la_politica(self):
+        """Si no sobrevive al viaje al backend, el panel no puede configurarla."""
+
+        ida = self._politica("allow").a_dict()
+        self.assertEqual(ida["company_terms_en_aprobada"], "allow")
+        self.assertEqual(
+            Policy.desde_dict(ida).company_terms_en_aprobada, "allow"
+        )

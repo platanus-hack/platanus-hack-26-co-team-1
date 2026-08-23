@@ -167,6 +167,20 @@ class Policy:
     # propia lista. Por defecto corta, porque un termino declarado es una
     # decision explicita y no una probabilidad.
     company_terms_action: str = "block"
+
+    # Que pasa con el diccionario cuando el destino SI es una IA aprobada.
+    #
+    # "igual" (el default) aplica `company_terms_action` sin mirar el destino.
+    # "allow" deja pasar los terminos propios hacia las herramientas que la
+    # empresa aprobo, y los sigue cortando hacia todas las demas.
+    #
+    # Existe porque son dos preguntas distintas y las estabamos contestando con
+    # una. "Que no salga de la empresa" no significa "que no salga hacia la
+    # herramienta que la empresa eligio y le paga": si la organizacion decidio
+    # que Claude es su asistente, prohibirle nombrar sus propios proyectos ahi
+    # deja el diccionario inservible -- la gente lo apaga entero y con el se van
+    # tambien los destinos donde SI importaba.
+    company_terms_en_aprobada: str = "igual"
     # Que hacer con un intento de inyeccion de prompt. Por defecto avisa: la
     # deteccion es heuristica, igual que la del modelo, y cortarle a alguien la
     # respuesta a mitad de una conversacion por una probabilidad es la forma mas
@@ -299,6 +313,7 @@ class Policy:
             "ocr_action": self.ocr_action,
             "company_terms": dict(sorted(self.company_terms.items())),
             "company_terms_action": self.company_terms_action,
+            "company_terms_en_aprobada": self.company_terms_en_aprobada,
             "app_actions": dict(sorted(self.app_actions.items())),
             "blind_spot_action": self.blind_spot_action,
             "blocked_domains": sorted(self.blocked_domains),
@@ -366,6 +381,7 @@ class Policy:
             "model_threshold",
             "injection_action",
             "company_terms_action",
+            "company_terms_en_aprobada",
             "blind_spot_action",
             "foreign_account_action",
             "ocr_action",
@@ -727,6 +743,22 @@ def decidir_sobre(
         and policy.company_terms_action == "warn"
     ):
         action = "warn"
+
+    # Y hacia la herramienta que la empresa aprobo, puede dejar pasar lo suyo.
+    #
+    # Se exige que TODOS los hallazgos sean del diccionario, y no solo el peor.
+    # La diferencia no es teorica: un mensaje que lleva el nombre de un proyecto
+    # interno Y una llave de AWS tiene que cortarse igual, y mirar unicamente
+    # `peor` lo dejaria pasar entero segun cual de los dos ordenara primero.
+    # Es la clase de agujero que no se ve al probarlo con un caso a la vez.
+    if (
+        action == "block_content"
+        and classification == "ai_approved"
+        and policy.company_terms_en_aprobada == "allow"
+        and findings
+        and all(hallazgo.rule_id.startswith("empresa_") for hallazgo in findings)
+    ):
+        action = "allow"
 
     # Lo leido de una imagen se rebaja por el mismo motivo que lo del modelo: es
     # probabilistico. Va antes de la rebaja del modelo y no despues porque son
