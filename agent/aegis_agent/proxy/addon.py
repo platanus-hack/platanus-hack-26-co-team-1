@@ -17,6 +17,7 @@ from ..detect.payload import (
     texto_de_respuesta,
     texto_para_inyeccion,
 )
+from ..detect.ruleset import ruleset_de
 from ..domains import DomainClient
 from ..detect.types import EVIDENCE_MAX_LEN, Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
@@ -30,7 +31,7 @@ from ..policy import (
     looks_like_ai_api,
 )
 from ..policy_store import cargar as cargar_politica
-from ..policy_store import refrescar_en_segundo_plano
+from ..policy_store import refrescar_ahora
 from ..procesos import DESCONOCIDO, Proceso, del_puerto
 from ..sensor import SensorDePuntosCiegos
 from ..subidas import subida_hacia_una_ia
@@ -143,11 +144,20 @@ class Aegis:
         if model.habilitado():
             threading.Thread(target=model.cargar, daemon=True).start()
 
-        if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
-            refrescar_en_segundo_plano(
-                os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686"),
-                self.policy.tenant_id,
+        self._url_backend = os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686")
+        # Cada cuanto se vuelve a pedir la politica. Un minuto alcanza: lo que
+        # la web guarda tarda eso en aplicar, sin martillar el backend.
+        try:
+            self._intervalo_refresco = float(
+                os.environ.get("AEGIS_REFRESCO_POLITICA", "60")
             )
+        except ValueError:
+            self._intervalo_refresco = 60.0
+
+        if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
+            # El refresco corre en bucle y aplica en caliente: la politica que
+            # la web edita cambia el comportamiento sin reiniciar el agente.
+            threading.Thread(target=self._refrescar_en_bucle, daemon=True).start()
             # La lista negra se sincroniza sola al arrancar y despues cada
             # tanto: nunca en el camino de una decision, que sigue siendo
             # 100% local (suffixes.py).
@@ -251,6 +261,28 @@ class Aegis:
             conocido = None
         return conocido or Proceso()
 
+    def _refrescar_politica(self) -> None:
+        """Un tick del hot-reload: pedir, persistir y aplicar la politica.
+
+        El swap es una asignacion de referencia (atomica en CPython) y solo
+        pasa cuando la politica realmente cambio: el cache del ruleset es por
+        identidad, y reemplazar el objeto sin necesidad recompilaria las
+        regex en cada tick.
+        """
+
+        nueva = refrescar_ahora(self._url_backend, self.policy.tenant_id)
+        if nueva is not None and nueva != self.policy:
+            self.policy = nueva
+
+    def _refrescar_en_bucle(self) -> None:
+        while True:
+            try:
+                self._refrescar_politica()
+            except Exception:
+                # Un tick roto no puede matar el hilo: el proximo lo reintenta.
+                pass
+            time.sleep(self._intervalo_refresco)
+
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
         if flow.response is None:
@@ -265,9 +297,13 @@ class Aegis:
         message = flow.websocket.messages[-1]
         if message.from_client:
             host = flow.request.pretty_host
-            classification = classify(host, self.policy)
+            politica = self.policy
+            classification = classify(host, politica)
             if classification not in ("passthrough", "non_ai"):
-                result = scan_payload(message.content if isinstance(message.content, bytes) else str(message.content).encode())
+                result = scan_payload(
+                    message.content if isinstance(message.content, bytes) else str(message.content).encode(),
+                    ruleset=ruleset_de(politica),
+                )
                 if result.findings:
                     worst = result.findings[0]
                     message.content = _WS_REDACTED.encode("utf-8")
@@ -491,6 +527,11 @@ class Aegis:
     def _inspect(
         self, flow: http.HTTPFlow, host: str, classification: Classification
     ) -> None:
+        # Un snapshot por request: el hot-reload puede cambiar self.policy en
+        # cualquier momento, y un mismo envio no puede escanearse con una
+        # politica y decidirse con otra.
+        politica = self.policy
+        conjunto = ruleset_de(politica)
         # get_content decodifica gzip/brotli. Con raw_content, comprimir el body
         # alcanzaria para pasar cualquier secreto sin que ninguna regla lo vea.
         body = flow.request.get_content(strict=False) or b""
@@ -558,8 +599,16 @@ class Aegis:
             if self._inyeccion_en_el_envio(flow, host, classification, body, proceso):
                 return
 
+            # Las reglas COMPILADAS de la politica y no las de fabrica: es lo
+            # que hace que apagar una regla o agregar una regex propia cambie
+            # algo. El compilado se cachea por identidad del objeto Policy, asi
+            # que el hot-reload recompila una vez y no en cada request.
             result = scan_payload(
-                body, query, self.policy.company_terms, self.policy.ocr_enabled
+                body,
+                query,
+                self.policy.company_terms,
+                ruleset_de(self.policy),
+                self.policy.ocr_enabled,
             )
             # Una credencial que viaja hacia su propio dueno no es una fuga: es
             # su uso normal. Claude Code manda su token a api.anthropic.com en

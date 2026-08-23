@@ -69,6 +69,28 @@ def modo_pedido_por_el_entorno() -> str | None:
 
 
 @dataclass(frozen=True)
+class CustomRule:
+    """Una regla de deteccion escrita por la empresa, no por nosotros.
+
+    El patron viaja como texto y se compila recien en detect/ruleset.py: si la
+    regex es invalida, la regla se descarta ahi sin tumbar al agente. Es una
+    dataclass congelada para que Policy siga siendo hashable.
+    """
+
+    id: str
+    pattern: str
+    category: str = "internal_data"
+    severity: str = "high"
+
+
+# Los valores que el motor entiende. Cualquier otra cosa que llegue de la web
+# se corrige al default en vez de propagarse: una severidad desconocida hace
+# KeyError en el orden de severidad del engine.
+_CATEGORIAS_VALIDAS = frozenset({"secret", "pii", "internal_data"})
+_SEVERIDADES_VALIDAS = frozenset({"critical", "high", "medium", "low"})
+
+
+@dataclass(frozen=True)
 class Policy:
     """Politica de la empresa. En produccion llega del backend y se cachea en disco."""
 
@@ -110,9 +132,6 @@ class Policy:
     # como se tratan las reglas deterministas.
     model_block_categories: frozenset[str] = field(
         default_factory=lambda: frozenset({"secret", "internal_data"})
-    )
-    model_warn_categories: frozenset[str] = field(
-        default_factory=lambda: frozenset({"pii"})
     )
     # Que etiquetas le pide la empresa al modelo y con que umbral de confianza.
     # Hoy son las medidas en detect/model.py, pero una empresa con sus propios
@@ -233,6 +252,28 @@ class Policy:
     # la empresa ya decidio para una IA no aprobada (unapproved_ai_action) en
     # vez de inventar un camino nuevo.
     foreign_account_action: str = "warn"
+    # --- lo que la empresa configura sobre QUE se detecta (rama nico) --------
+    #
+    # OJO CON LA DUPLICACION, que es real y esta resuelta en detect/ruleset.py:
+    # `disabled_rules` dice lo mismo que `rule_actions[id] == "off"`, y
+    # `forbidden_terms` lo mismo que `company_terms`. Se conservan las cuatro
+    # porque las dos formas ya tienen tests y pantalla, pero el motor las
+    # reconcilia en UN solo lugar al compilar: dos maneras de escribirlo, una
+    # sola de decidirlo.
+    # Reglas T1 que la empresa apago por id (por ejemplo "email_address" si
+    # mandar correos a la IA es parte del trabajo). Tambien alcanza a los
+    # hallazgos sinteticos (bulk_pii_export, archivo_critico); no toca lo que
+    # encuentra el modelo, que tiene sus propias perillas arriba.
+    disabled_rules: frozenset[str] = field(default_factory=frozenset)
+    # Terminos literales que no pueden salir: el nombre del proyecto secreto,
+    # el cliente que nadie puede nombrar. En la web esto es un textarea. La
+    # accion no se configura por termino: todos comparten una categoria y la
+    # categoria ya decide via block_categories/warn_categories.
+    forbidden_terms: tuple[str, ...] = ()
+    forbidden_terms_category: str = "internal_data"
+    # Reglas regex escritas por la empresa. Mas poder que los terminos (y mas
+    # riesgo): una regex invalida se descarta al compilar, no aca.
+    custom_rules: tuple[CustomRule, ...] = ()
 
     def a_dict(self) -> dict[str, Any]:
         """Serializa la politica a tipos JSON, estable y diffeable.
@@ -248,7 +289,6 @@ class Policy:
             "unapproved_ai_action": self.unapproved_ai_action,
             "model_action": self.model_action,
             "model_block_categories": sorted(self.model_block_categories),
-            "model_warn_categories": sorted(self.model_warn_categories),
             "model_block_labels": sorted(self.model_block_labels),
             "block_categories": sorted(self.block_categories),
             "warn_categories": sorted(self.warn_categories),
@@ -267,6 +307,18 @@ class Policy:
             "area_actions": dict(sorted(self.area_actions.items())),
             "corporate_accounts": sorted(self.corporate_accounts),
             "foreign_account_action": self.foreign_account_action,
+            "disabled_rules": sorted(self.disabled_rules),
+            "forbidden_terms": list(self.forbidden_terms),
+            "forbidden_terms_category": self.forbidden_terms_category,
+            "custom_rules": [
+                {
+                    "id": regla.id,
+                    "pattern": regla.pattern,
+                    "category": regla.category,
+                    "severity": regla.severity,
+                }
+                for regla in self.custom_rules
+            ],
         }
 
     @classmethod
@@ -291,14 +343,14 @@ class Policy:
         campos_frozenset = (
             "approved_ai",
             "model_block_categories",
-            "model_warn_categories",
             "model_block_labels",
             "block_categories",
             "warn_categories",
             "blocked_domains",
             "corporate_accounts",
+            "disabled_rules",
         )
-        campos_tupla = ("model_labels",)
+        campos_tupla = ("model_labels", "forbidden_terms")
         campos_dict = (
             "app_actions",
             "company_terms",
@@ -318,6 +370,7 @@ class Policy:
             "foreign_account_action",
             "ocr_action",
             "ocr_enabled",
+            "forbidden_terms_category",
         )
 
         valores: dict[str, Any] = {}
@@ -335,8 +388,53 @@ class Policy:
             valores[campo] = (
                 dict(datos[campo]) if campo in datos else dict(getattr(base, campo))
             )
+        valores["custom_rules"] = _custom_rules_tolerantes(
+            datos.get("custom_rules", ())
+        )
 
         return cls(**valores)
+
+
+def _custom_rules_tolerantes(entradas: Any) -> tuple[CustomRule, ...]:
+    """Convierte lo que haya mandado la web en reglas utilizables.
+
+    Una entrada rota se salta y una categoria o severidad que el motor no
+    conoce se corrige al default: la politica la edita gente, y un formulario
+    a medio guardar no puede dejar a la empresa sin proteccion.
+    """
+
+    reglas: list[CustomRule] = []
+    if not isinstance(entradas, (list, tuple)):
+        return ()
+    for entrada in entradas:
+        if isinstance(entrada, CustomRule):
+            entrada = {
+                "id": entrada.id,
+                "pattern": entrada.pattern,
+                "category": entrada.category,
+                "severity": entrada.severity,
+            }
+        if not isinstance(entrada, dict):
+            continue
+        rule_id = entrada.get("id")
+        patron = entrada.get("pattern")
+        if not rule_id or not patron:
+            continue
+        categoria = entrada.get("category", "internal_data")
+        if categoria not in _CATEGORIAS_VALIDAS:
+            categoria = "internal_data"
+        severidad = entrada.get("severity", "high")
+        if severidad not in _SEVERIDADES_VALIDAS:
+            severidad = "high"
+        reglas.append(
+            CustomRule(
+                id=str(rule_id),
+                pattern=str(patron),
+                category=categoria,
+                severity=severidad,
+            )
+        )
+    return tuple(reglas)
 
 
 # Un dominio que nadie clasifico todavia igual se delata por la forma del

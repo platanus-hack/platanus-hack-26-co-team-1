@@ -16,7 +16,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aegis_agent import policy_store
-from aegis_agent.policy import Policy, decide
+from aegis_agent.policy import CustomRule, Policy, decide
 
 
 class TestIdaYVuelta(unittest.TestCase):
@@ -28,13 +28,23 @@ class TestIdaYVuelta(unittest.TestCase):
             unapproved_ai_action="block_destination",
             model_action="warn",
             model_block_categories=frozenset({"secret"}),
-            model_warn_categories=frozenset({"pii", "internal_data"}),
             model_block_labels=frozenset({"nombre de cliente"}),
             block_categories=frozenset({"secret", "internal_data"}),
             warn_categories=frozenset({"pii"}),
             model_labels=("nombre de cliente", "empresa"),
             model_threshold=0.6,
             blind_spot_action="block",
+            disabled_rules=frozenset({"email_address"}),
+            forbidden_terms=("proyecto orion", "cliente estrella"),
+            forbidden_terms_category="secret",
+            custom_rules=(
+                CustomRule(
+                    id="ticket_interno",
+                    pattern=r"TKT-\d{6}",
+                    category="internal_data",
+                    severity="high",
+                ),
+            ),
         )
 
         reconstruida = Policy.desde_dict(original.a_dict())
@@ -74,6 +84,54 @@ class TestClavesAusentesYDesconocidas(unittest.TestCase):
 
     def test_diccionario_vacio_da_los_defaults(self):
         self.assertEqual(Policy.desde_dict({}), Policy())
+
+
+class TestReglasPersonalizadasTolerantes(unittest.TestCase):
+    """Lo que la web mande en custom_rules no puede tumbar al agente.
+
+    La politica la edita gente, no codigo: una entrada a medio guardar, una
+    categoria inventada o una severidad que el motor no conoce tienen que
+    corregirse o saltarse en silencio. Una severidad desconocida en particular
+    haria KeyError en el orden de severidad del engine, asi que se corrige
+    aca, antes de que un Finding la toque.
+    """
+
+    def test_una_entrada_que_no_es_dict_se_salta(self):
+        politica = Policy.desde_dict({"custom_rules": ["esto no es un dict", 42]})
+        self.assertEqual(politica.custom_rules, ())
+
+    def test_una_entrada_sin_id_o_sin_patron_se_salta(self):
+        politica = Policy.desde_dict(
+            {
+                "custom_rules": [
+                    {"pattern": r"\d+"},
+                    {"id": "sin_patron"},
+                    {"id": "", "pattern": r"\d+"},
+                    {"id": "valida", "pattern": r"TKT-\d+"},
+                ]
+            }
+        )
+        self.assertEqual(len(politica.custom_rules), 1)
+        self.assertEqual(politica.custom_rules[0].id, "valida")
+
+    def test_categoria_invalida_se_corrige_a_internal_data(self):
+        politica = Policy.desde_dict(
+            {"custom_rules": [{"id": "x", "pattern": "a", "category": "inventada"}]}
+        )
+        self.assertEqual(politica.custom_rules[0].category, "internal_data")
+
+    def test_severidad_invalida_se_corrige_a_high(self):
+        politica = Policy.desde_dict(
+            {"custom_rules": [{"id": "x", "pattern": "a", "severity": "apocaliptica"}]}
+        )
+        self.assertEqual(politica.custom_rules[0].severity, "high")
+
+    def test_custom_rules_van_y_vuelven_del_json(self):
+        original = Policy(
+            custom_rules=(CustomRule(id="x", pattern=r"a\d+", category="secret", severity="critical"),)
+        )
+        recargada = Policy.desde_dict(json.loads(json.dumps(original.a_dict())))
+        self.assertEqual(recargada, original)
 
 
 class TestAlmacen(unittest.TestCase):

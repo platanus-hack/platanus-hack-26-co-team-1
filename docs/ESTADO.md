@@ -28,6 +28,8 @@ salir, y convierte cada bloqueo en una lección para esa persona.
 | Sensor de puntos ciegos (capa D) | Funciona | `agent/aegis_agent/sensor.py` |
 | Corte del punto ciego por firewall | Funciona, requiere administrador | `agent/aegis_agent/install/firewall.py` |
 | Política como dato, editable desde el backend | Funciona | `agent/aegis_agent/policy_store.py` |
+| Detección configurable por política: reglas apagadas, términos prohibidos, regex propias, perillas de T2 | Funciona | `agent/aegis_agent/detect/ruleset.py` |
+| Hot-reload de la política: lo que la web guarda aplica en ~60s sin reiniciar | Funciona | `addon.py` `_refrescar_politica`, `AEGIS_REFRESCO_POLITICA` |
 | Verificación de cobertura de escritorio | Funciona | `install/windows.py verificar` |
 | Normalización anti-evasión (base64, gzip, docx, UTF-16…) | Funciona | `agent/aegis_agent/detect/payload.py` |
 | Proxy de intercepción (mitmproxy) | Funciona | `agent/aegis_agent/proxy/` |
