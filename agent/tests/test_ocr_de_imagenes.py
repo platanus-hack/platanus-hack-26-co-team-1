@@ -209,7 +209,7 @@ class TestPorLaCascadaConMotorFalso(unittest.TestCase):
 
     def _reglas(self, cuerpo: bytes) -> set[str]:
         with patch.dict(os.environ, {"AEGIS_OCR": "1"}):
-            with patch.object(ocr, "vistas", return_value=[self.TEXTO_LEIDO]):
+            with patch.object(ocr, "vistas", return_value=([self.TEXTO_LEIDO], False)):
                 return {f.rule_id for f in scan_payload(cuerpo).findings}
 
     def test_el_pantallazo_a_openai_ahora_se_ve(self):
@@ -226,7 +226,7 @@ class TestPorLaCascadaConMotorFalso(unittest.TestCase):
 
     def test_un_ocr_que_devuelve_vacio_no_rompe_nada(self):
         with patch.dict(os.environ, {"AEGIS_OCR": "1"}):
-            with patch.object(ocr, "vistas", return_value=[]):
+            with patch.object(ocr, "vistas", return_value=([], True)):
                 scan_payload(CUERPO_OPENAI)
 
     def test_un_ocr_que_revienta_no_se_lleva_puesto_el_escaneo(self):

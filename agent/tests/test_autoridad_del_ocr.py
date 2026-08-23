@@ -127,7 +127,7 @@ class TestElOrigenLlegaDesdeElEscaneo(unittest.TestCase):
              patch("aegis_agent.detect.payload.extraer_imagenes", return_value=[b"png"]), \
              patch(
                  "aegis_agent.detect.payload.ocr.vistas",
-                 return_value=["la contrasena del servidor es Verano2026Bogota"],
+                 return_value=(["la contrasena del servidor es Verano2026Bogota"], False),
              ):
             resultado = scan_payload(b'{"mensaje":"mira esta captura"}')
 
@@ -147,12 +147,57 @@ class TestElOrigenLlegaDesdeElEscaneo(unittest.TestCase):
         frase = "la contrasena del servidor es Verano2026Bogota"
         with patch("aegis_agent.detect.payload.ocr.habilitado", return_value=True), \
              patch("aegis_agent.detect.payload.extraer_imagenes", return_value=[b"png"]), \
-             patch("aegis_agent.detect.payload.ocr.vistas", return_value=[frase]):
+             patch("aegis_agent.detect.payload.ocr.vistas", return_value=([frase], False)):
             resultado = scan_payload(frase.encode())
 
         credenciales = [f for f in resultado.findings if f.category == "secret"]
         self.assertTrue(credenciales)
         self.assertEqual(credenciales[0].origen, ORIGEN_TEXTO)
+
+
+class TestElDescarteNoEsSilencioso(unittest.TestCase):
+    """Una imagen que no se alcanzo a leer no es una imagen sin nada adentro.
+
+    El presupuesto por defecto era de 4000 ms y la PRIMERA inferencia de una
+    captura de 1920x1080 cuesta 4225 ms en esta maquina, asi que la primera
+    imagen que mandaba cualquiera se descartaba entera. Y en silencio: el panel
+    decia "se escaneo y no habia nada". En una demo, donde siempre hay una
+    primera imagen, el OCR no encontraba nada nunca.
+    """
+
+    def test_una_imagen_que_no_se_leyo_marca_el_escaneo_como_incompleto(self):
+        from unittest.mock import patch
+
+        from aegis_agent.detect.payload import scan_payload
+
+        with patch("aegis_agent.detect.payload.ocr.habilitado", return_value=True), \
+             patch("aegis_agent.detect.payload.extraer_imagenes", return_value=[b"png"]), \
+             patch("aegis_agent.detect.payload.ocr.vistas", return_value=([], True)):
+            resultado = scan_payload(b'{"mensaje":"mira esta captura"}')
+
+        self.assertTrue(
+            resultado.truncated,
+            "el OCR descarto una imagen y el resultado no lo dice",
+        )
+
+    def test_leerlas_todas_no_marca_nada(self):
+        from unittest.mock import patch
+
+        from aegis_agent.detect.payload import scan_payload
+
+        with patch("aegis_agent.detect.payload.ocr.habilitado", return_value=True), \
+             patch("aegis_agent.detect.payload.extraer_imagenes", return_value=[b"png"]), \
+             patch("aegis_agent.detect.payload.ocr.vistas", return_value=(["hola"], False)):
+            resultado = scan_payload(b'{"mensaje":"mira esta captura"}')
+
+        self.assertFalse(resultado.truncated)
+
+    def test_el_presupuesto_cubre_la_primera_inferencia_medida(self):
+        """4225 ms es lo medido; el default tiene que dejarlo pasar con margen."""
+
+        from aegis_agent.detect import ocr
+
+        self.assertGreater(ocr.PRESUPUESTO_MS, 4225)
 
 
 if __name__ == "__main__":

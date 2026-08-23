@@ -637,8 +637,13 @@ def scan_payload(
                 # De cual vista salio cada hallazgo decide cuanta autoridad
                 # tiene (ver types.ORIGEN_IMAGEN).
                 desde = len(views)
-                views.extend(ocr.vistas(imagenes))
+                leidas, incompleto = ocr.vistas(imagenes)
+                views.extend(leidas)
                 indices_de_imagen.update(range(desde, len(views)))
+                # Una imagen que no se alcanzo a leer es un escaneo incompleto,
+                # igual que una vista que quedo sin recorrer. Decirlo es lo que
+                # separa "no habia nada" de "no se llego a mirar".
+                truncated = truncated or incompleto
 
     # El espanol de verdad lleva tildes y enes. Las reglas estan escritas sin
     # ellas, asi que una regla veia "la contrasena del servidor" y NINGUNA veia
