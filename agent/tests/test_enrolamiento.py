@@ -164,24 +164,21 @@ class TestElTokenDeEquipo(unittest.TestCase):
         claim de tipo lo convertia en una sesion administradora.
         """
 
-        import hashlib
-        import hmac
-        import json
         import time
 
         from aegis_backend import cuentas
 
-        cuerpo = {
-            "tipo": "equipo",
-            "tenant": "acme",
-            "jti": "AEGISXXXXYYYY",
-            "vence": int(time.time()) + 9999,
-        }
-        crudo = enrolamiento._b64(json.dumps(cuerpo, separators=(",", ":")).encode())
-        firma = hmac.new(
-            cuentas._firma_del_servidor(), crudo.encode(), hashlib.sha256
-        ).digest()
-        self.assertIsNone(cuentas.leer(f"{crudo}.{enrolamiento._b64(firma)}"))
+        # Firmado con la llave de verdad: el ataque no es falsificar la firma
+        # --no se puede-- sino usar una credencial legitima donde no va.
+        falso = cuentas.firmar(
+            {
+                "tipo": "equipo",
+                "tenant": "acme",
+                "jti": "AEGISXXXXYYYY",
+                "vence": int(time.time()) + 9999,
+            }
+        )
+        self.assertIsNone(cuentas.leer(falso))
 
     def test_un_token_de_equipo_no_abre_el_panel(self):
         from aegis_backend import cuentas
@@ -249,18 +246,9 @@ class TestDarDeBajaUnEquipo(unittest.TestCase):
 def _sin_jti(tenant: str) -> str:
     """Un token de equipo del formato viejo, firmado de verdad."""
 
-    import hashlib
-    import hmac
-    import json
-
     from aegis_backend import cuentas
 
-    cuerpo = {"tipo": "equipo", "tenant": tenant, "desde": 0}
-    crudo = enrolamiento._b64(json.dumps(cuerpo, separators=(",", ":")).encode())
-    firma = hmac.new(
-        cuentas._firma_del_servidor(), crudo.encode(), hashlib.sha256
-    ).digest()
-    return f"{crudo}.{enrolamiento._b64(firma)}"
+    return cuentas.firmar({"tipo": "equipo", "tenant": tenant, "desde": 0})
 
 
 class TestElAislamiento(unittest.TestCase):

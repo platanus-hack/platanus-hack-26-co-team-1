@@ -70,6 +70,64 @@ def ejecutable_del_agente() -> list[str]:
     return comando
 
 
+def lanzar_desprendido(argumentos: list[str], extra: dict | None = None):
+    """Arranca al propio agente en un proceso que sobrevive a este. None si no.
+
+    Estaba escrito dos veces --`cli._arrancar_en_segundo_plano` y
+    `guardian.lanzar`-- y las dos copias YA habian empezado a separarse: una
+    pasaba `env` y la otra no. Un proceso que hay que desprender bien es
+    exactamente la clase de detalle que no conviene tener en dos lados.
+
+    Sin CREATE_NO_WINDOW aparece una consola negra en la cara de la persona cada
+    vez que inicia sesion, y eso no dura instalado una semana. DETACHED_PROCESS
+    es lo que hace que siga vivo cuando quien lo lanzo se muere, que es todo el
+    punto del guardian.
+    """
+
+    import subprocess
+
+    banderas = 0
+    if os.name == "nt":
+        banderas = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+            subprocess, "DETACHED_PROCESS", 0
+        )
+    try:
+        proceso = subprocess.Popen(
+            ejecutable_del_agente() + argumentos,
+            env={**os.environ, **(extra or {})},
+            creationflags=banderas,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+    except OSError:
+        proceso = None
+    return proceso
+
+
+def windows_apunta_a_aegis(puerto_esperado: int) -> bool:
+    """Si el proxy configurado en Windows es este Aegis y no otra cosa.
+
+    Tambien estaba dos veces, con dos nombres que no se parecian en nada
+    --`cli.windows_apunta_a_aegis` y `guardian.hay_que_actuar`-- y cuerpos
+    identicos byte a byte. Importa que sea uno solo: el guardian APAGA el proxy
+    cuando esto da True, asi que el dia que la definicion de "es Aegis" cambie y
+    solo cambie de un lado, el guardian apagaria el proxy que la persona
+    configuro a mano hacia otra cosa.
+    """
+
+    try:
+        from .install import windows
+
+        estado = windows.read_proxy_settings()
+        apunta = bool(estado["enabled"]) and estado["server"] == f"127.0.0.1:{puerto_esperado}"
+    except Exception:
+        # Sin registro que leer --otro sistema operativo, permisos-- la
+        # respuesta honesta es "no se sabe", y no se toca nada.
+        apunta = False
+    return apunta
+
+
 def generar_ca() -> bool:
     """Crea la autoridad certificadora si no existe. Sin arrancar ningun proceso.
 

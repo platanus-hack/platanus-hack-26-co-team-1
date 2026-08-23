@@ -582,15 +582,29 @@ def _decide_destino_desconocido(categories: set[str], policy: Policy) -> Action:
         action: Action = "allow"
     else:
         if modo == "block_content":
-            if categories & policy.block_categories:
-                action = "block_content"
-            else:
-                if categories & policy.warn_categories:
-                    action = "warn"
-                else:
-                    action = "allow"
+            action = _por_categoria(categories, policy)
         else:
             action = "warn"
+    return action
+
+
+def _por_categoria(categories: set[str], policy: Policy) -> Action:
+    """Que hacer con un contenido, mirando SOLO lo que se encontro adentro.
+
+    Es la escalera de siempre --bloquear, avisar, dejar pasar-- y estaba escrita
+    dos veces en este mismo archivo: una para el destino desconocido y otra para
+    la IA conocida. Que el nucleo de la decision del producto estuviera copiado
+    significa que cambiar la politica en un lado y no en el otro daba dos
+    respuestas distintas para el mismo contenido, segun a donde iba.
+    """
+
+    if categories & policy.block_categories:
+        action: Action = "block_content"
+    else:
+        if categories & policy.warn_categories:
+            action = "warn"
+        else:
+            action = "allow"
     return action
 
 
@@ -612,13 +626,7 @@ def decide(classification: Classification, categories: set[str], policy: Policy)
             if classification == "ai_unapproved" and policy.unapproved_ai_action == "block_destination":
                 action = "block_destination"
             else:
-                if categories & policy.block_categories:
-                    action = "block_content"
-                else:
-                    if categories & policy.warn_categories:
-                        action = "warn"
-                    else:
-                        action = "allow"
+                action = _por_categoria(categories, policy)
     return action
 
 

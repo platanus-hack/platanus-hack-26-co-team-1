@@ -41,7 +41,7 @@ def como_prompt(texto: str) -> str:
 
 class TestInvisibles(unittest.TestCase):
     def test_ancho_cero_adentro_del_secreto(self):
-        partido = "AKIA​IOSFODNN7EXAMPLE"
+        partido = "AKIA\u200bIOSFODNN7EXAMPLE"
         self.assertIn("aws_access_key_id", reglas(como_prompt(f"mi llave es {partido}")))
 
     def test_guion_suave_adentro_del_secreto(self):
@@ -49,7 +49,7 @@ class TestInvisibles(unittest.TestCase):
         self.assertIn("aws_access_key_id", reglas(como_prompt(f"mi llave es {partido}")))
 
     def test_varios_invisibles_a_la_vez(self):
-        partido = "A​K‌I‍A⁠IOSFODNN7EXAMPLE"
+        partido = "A\u200bK‌I‍A⁠IOSFODNN7EXAMPLE"
         self.assertIn("aws_access_key_id", reglas(como_prompt(f"llave: {partido}")))
 
 

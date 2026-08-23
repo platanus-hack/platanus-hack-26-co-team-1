@@ -19,6 +19,7 @@ import { SesionService } from './sesion.service';
 export interface Registro {
   tenant: string;
   token: string;
+  rol: string;
   /** El código para el primer equipo. Se muestra una vez, al terminar. */
   codigo: string;
 }
@@ -46,7 +47,7 @@ export class RegistroService {
       if (respuesta.ok) {
         // Se entra directo: pedirle a alguien que se loguee justo después de
         // elegir su contraseña es hacerle escribir dos veces lo mismo.
-        this.sesion.adoptar(datos.token, datos.tenant, usuario);
+        this.sesion.adoptar(datos.token, datos.tenant, usuario, datos.rol);
         this.codigoInicial.set(datos.codigo ?? null);
         ok = true;
       } else {

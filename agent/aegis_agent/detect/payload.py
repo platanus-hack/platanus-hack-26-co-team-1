@@ -56,7 +56,12 @@ MAX_CONTENEDORES = 3
 # Un secreto partido con espacios o saltos deja de matchear cualquier regex. La
 # vista compacta lo vuelve a unir; va limitada por tamano porque recorre todo.
 MAX_COMPACT_INPUT = 200_000
-_WHITESPACE = re.compile(r"[\s​ ]+")
+# Los dos invisibles van escapados y no literales: escritos tal cual son dos
+# caracteres que no se ven, y cualquier reformateo --o un copiar y pegar por
+# un editor que los normaliza-- los borra sin dejar rastro y sin romper la
+# sintaxis. La evasion mas barata que existe dejaria de detectarse en
+# silencio. Escapados hacen exactamente lo mismo y se pueden leer.
+_WHITESPACE = re.compile(r"[\s\u200b\u00a0]+")
 
 BASE64_MAX_DEPTH = 2
 

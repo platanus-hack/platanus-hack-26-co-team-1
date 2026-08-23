@@ -13,13 +13,16 @@ services:
     # Node esta disponible en el runtime de Python de Render, asi que el front
     # se compila aca mismo y el servicio sirve el resultado desde disco.
     #
-    # npm install y no npm ci: el package-lock.json quedo desincronizado con el
-    # package.json (le faltan @emnapi/core y @emnapi/runtime) y `npm ci` se
-    # niega a instalar. Cuando el lock se actualice, esto deberia volver a
-    # `npm ci`, que es lo unico que da builds reproducibles.
+    # npm ci y no npm install: instala EXACTAMENTE lo que dice el lock y falla
+    # si el lock y el package.json no coinciden, en vez de resolver versiones
+    # nuevas en silencio. Un rato estuvo en `npm install` porque al lock le
+    # faltaban @emnapi/core y @emnapi/runtime; ya estan, y para un producto de
+    # seguridad "lo que se desplego es lo que dice el repositorio" no es un
+    # lujo. Si esto vuelve a fallar, la respuesta es arreglar el lock
+    # (`npm install --package-lock-only`) y no bajar la exigencia.
     buildCommand: |
       pip install -r requirements.txt
-      cd frontend && npm install && npm run build
+      cd frontend && npm ci && npm run build
     startCommand: python web/app.py
     # Render reinicia el servicio si esta ruta deja de responder. Es barata: no
     # toca el almacen mas alla de contar lo que ya esta cargado.

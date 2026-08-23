@@ -56,6 +56,11 @@ PAUSA_USO = 600
 # esta en el camino de ninguna decision y no tiene por que competir por CPU.
 INTERVALO_DEL_SENSOR = 10
 
+# Cuantas pasadas seguidas tiene que fallar el sensor antes de avisar. Tres y no
+# una: un error aislado --la tabla de conexiones ocupada, un permiso que va y
+# viene-- es ruido, y avisar de eso ensena a ignorar el aviso.
+FALLAS_PARA_AVISAR = 3
+
 
 def _ruta_del_proceso(pid: int) -> str:
     try:
@@ -184,14 +189,29 @@ class Aegis:
         from ..catalog import AI_DOMAINS
 
         self.sensor.cargar_catalogo(sorted(AI_DOMAINS))
+        seguidas = 0
         while True:
             try:
                 for punto in self.sensor.revisar():
                     self._reportar_punto_ciego(punto)
-            except Exception:
+                seguidas = 0
+            except Exception as error:
                 # El sensor es visibilidad, no proteccion: que falle no puede
                 # llevarse puesto al proxy, que es lo que si esta protegiendo.
-                pass
+                # Por eso se traga la excepcion.
+                #
+                # Pero tragarsela SIEMPRE Y EN SILENCIO tiene su propio costo:
+                # un sensor roto para siempre se ve igual que uno que no
+                # encuentra nada, y la unica senal es que los puntos ciegos
+                # dejan de aparecer -- que es justo lo que uno esperaria de una
+                # red sana. Se avisa una sola vez, al cruzar el umbral, para no
+                # convertir un bucle roto en un diluvio de mensajes.
+                seguidas += 1
+                if seguidas == FALLAS_PARA_AVISAR:
+                    print(
+                        f"[aegis] el sensor de puntos ciegos fallo "
+                        f"{seguidas} veces seguidas: {error}"
+                    )
             time.sleep(INTERVALO_DEL_SENSOR)
 
     def _reportar_punto_ciego(self, punto) -> None:

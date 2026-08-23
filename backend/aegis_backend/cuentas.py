@@ -137,23 +137,27 @@ def _des64(texto: str) -> bytes:
     return base64.urlsafe_b64decode(texto + "=" * (-len(texto) % 4))
 
 
-def emitir(usuario: str, tenant: str, rol: str, ahora: float | None = None) -> str:
-    """Un token firmado: quien es, de que empresa, y hasta cuando."""
+def firmar(cuerpo: dict) -> str:
+    """Un cuerpo en un token firmado: `base64(json).base64(hmac)`.
 
-    cuerpo = {
-        "tipo": TIPO,
-        "usuario": usuario,
-        "tenant": tenant,
-        "rol": rol,
-        "vence": int((ahora or time.time()) + VIGENCIA),
-    }
+    Vive aca --y no una copia en cada modulo que emite algo-- porque escribir la
+    misma primitiva de seguridad dos veces significa arreglarla en un lado y no
+    en el otro. Estaba duplicada palabra por palabra en `enrolamiento.py`.
+    """
+
     crudo = _b64(json.dumps(cuerpo, separators=(",", ":")).encode())
     firma = hmac.new(_firma_del_servidor(), crudo.encode(), hashlib.sha256).digest()
     return f"{crudo}.{_b64(firma)}"
 
 
-def leer(token: str, ahora: float | None = None) -> dict | None:
-    """El contenido del token si la firma es buena y no vencio. None si no."""
+def cuerpo_firmado(token: str) -> dict | None:
+    """Lo que dice el token si la firma es buena. None si no.
+
+    NO decide si el token sirve: eso depende de para que se lo pida cada quien
+    --una sesion mira `vence`, un equipo mira que no lo hayan dado de baja-- y
+    esa parte se queda en cada modulo. Lo que se comparte es lo que no puede
+    salir distinto en dos lados: verificar la firma.
+    """
 
     resultado = None
     partes = (token or "").split(".")
@@ -166,15 +170,35 @@ def leer(token: str, ahora: float | None = None) -> dict | None:
         # que byte se rompio la igualdad, y con eso se adivinan de a un byte.
         if hmac.compare_digest(_b64(esperada), firma):
             try:
-                cuerpo = json.loads(_des64(crudo))
+                resultado = json.loads(_des64(crudo))
             except (ValueError, TypeError):
-                cuerpo = None
-            vigente = bool(cuerpo) and cuerpo.get("vence", 0) > (
-                ahora or time.time()
-            )
-            # El tipo se exige, no se infiere. Ver TIPO arriba.
-            if vigente and cuerpo.get("tipo") == TIPO:
-                resultado = cuerpo
+                resultado = None
+    return resultado if isinstance(resultado, dict) else None
+
+
+def emitir(usuario: str, tenant: str, rol: str, ahora: float | None = None) -> str:
+    """Un token firmado: quien es, de que empresa, y hasta cuando."""
+
+    cuerpo = {
+        "tipo": TIPO,
+        "usuario": usuario,
+        "tenant": tenant,
+        "rol": rol,
+        "vence": int((ahora or time.time()) + VIGENCIA),
+    }
+    return firmar(cuerpo)
+
+
+def leer(token: str, ahora: float | None = None) -> dict | None:
+    """El contenido del token si la firma es buena y no vencio. None si no."""
+
+    cuerpo = cuerpo_firmado(token)
+    resultado = None
+    if cuerpo is not None:
+        vigente = cuerpo.get("vence", 0) > (ahora or time.time())
+        # El tipo se exige, no se infiere. Ver TIPO arriba.
+        if vigente and cuerpo.get("tipo") == TIPO:
+            resultado = cuerpo
     return resultado
 
 

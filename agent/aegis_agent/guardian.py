@@ -30,7 +30,6 @@ trabajo perdida no se recupera.
 
 from __future__ import annotations
 
-import os
 import socket
 import subprocess
 import time
@@ -70,16 +69,14 @@ def hay_que_actuar(puerto: int) -> bool:
     """El navegador apunta a Aegis y Aegis no esta.
 
     Las DOS condiciones. Sin la primera, el guardian apagaria un proxy que la
-    persona configuro a mano hacia otra cosa.
+    persona configuro a mano hacia otra cosa. La primera la contesta
+    `entorno.windows_apunta_a_aegis`, que es la misma que usa el CLI: tenerla
+    dos veces era tener dos definiciones de "es Aegis" que podian separarse.
     """
 
-    try:
-        from .install import windows
+    from . import entorno
 
-        estado = windows.read_proxy_settings()
-        return bool(estado["enabled"]) and estado["server"] == f"127.0.0.1:{puerto}"
-    except Exception:
-        return False
+    return entorno.windows_apunta_a_aegis(puerto)
 
 
 def vigilar(puerto: int) -> int:
@@ -109,23 +106,7 @@ def lanzar(puerto: int) -> subprocess.Popen | None:
 
     from . import entorno
 
-    comando = entorno.ejecutable_del_agente() + ["guardian"]
-    banderas = 0
-    if os.name == "nt":
-        banderas = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-            subprocess, "DETACHED_PROCESS", 0
-        )
-    try:
-        return subprocess.Popen(
-            comando,
-            env={**os.environ, "AEGIS_PORT": str(puerto)},
-            creationflags=banderas,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-        )
-    except OSError:
-        return None
+    return entorno.lanzar_desprendido(["guardian"], {"AEGIS_PORT": str(puerto)})
 
 
 def reconciliar(puerto: int) -> str:

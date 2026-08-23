@@ -93,24 +93,10 @@ def _arrancar_en_segundo_plano(puerto: int) -> bool:
     vez que inicia sesion, y eso no dura instalado una semana.
     """
 
-    import subprocess
     import time
 
-    comando = entorno.ejecutable_del_agente() + ["servicio"]
-    banderas = 0
-    if os.name == "nt":
-        banderas = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-            subprocess, "DETACHED_PROCESS", 0
-        )
-    try:
-        subprocess.Popen(
-            comando,
-            creationflags=banderas,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-        )
-    except OSError:
+    arrancado = entorno.lanzar_desprendido(["servicio"])
+    if arrancado is None:
         return False
 
     from .install import windows
@@ -213,13 +199,7 @@ def _servicio(puerto: int) -> int:
 def windows_apunta_a_aegis(puerto: int) -> bool:
     """Si no le apunta, no hace falta guardian: no hay nada que devolver."""
 
-    try:
-        from .install import windows
-
-        estado = windows.read_proxy_settings()
-        return bool(estado["enabled"]) and estado["server"] == f"127.0.0.1:{puerto}"
-    except Exception:
-        return False
+    return entorno.windows_apunta_a_aegis(puerto)
 
 
 def _guardian(puerto: int) -> int:

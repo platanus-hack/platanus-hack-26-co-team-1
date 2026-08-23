@@ -85,11 +85,42 @@ def revisar() -> int:
     return resultado
 
 
+def frontend() -> int:
+    """Los tests del panel en Angular. Opcional, igual que ruff.
+
+    Es opcional por lo mismo: exigir node para poder correr la suite de Python
+    cambiaria la promesa de que el agente arranca con Python pelado por una
+    comodidad. Si node no esta, se dice y se sigue.
+
+    Existe porque durante un tiempo no existio: el front tenia 5.478 lineas,
+    vitest y jsdom instalados, `npm test` definido, y cero specs. Un runner que
+    no lo llama es la forma mas facil de volver a ese estado sin que se note.
+    """
+
+    print("\n=== panel (frontend) ===")
+    front = RAIZ / "frontend"
+    resultado = 0
+    if not (front / "node_modules").exists():
+        print("  node_modules no esta; se omite (cd frontend && npm ci)")
+    else:
+        try:
+            completado = subprocess.run(
+                ["npm", "test", "--", "--no-watch"],
+                cwd=str(front),
+                shell=(os.name == "nt"),
+            )
+            resultado = completado.returncode
+        except (OSError, ValueError):
+            print("  npm no esta; se omite")
+    return resultado
+
+
 def main() -> int:
     fallos = correr("agente", RAIZ / "agent")
     backend = RAIZ / "backend" / "tests"
     if backend.exists():
         fallos += correr("backend", RAIZ / "backend")
+    fallos += frontend()
     fallos += revisar()
     return 1 if fallos else 0
 

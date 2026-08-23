@@ -49,10 +49,6 @@ que lo origino. Con eso la baja del codigo alcanza al equipo que ya se enrolo.
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
-import json
 import secrets
 import time
 
@@ -190,14 +186,6 @@ def listar(tenant: str) -> list[dict]:
 TIPO = "equipo"
 
 
-def _b64(datos: bytes) -> str:
-    return base64.urlsafe_b64encode(datos).decode().rstrip("=")
-
-
-def _des64(texto: str) -> bytes:
-    return base64.urlsafe_b64decode(texto + "=" * (-len(texto) % 4))
-
-
 def emitir_equipo(tenant: str, codigo: str, ahora: float | None = None) -> str:
     """El token que lleva cada equipo enrolado.
 
@@ -206,17 +194,14 @@ def emitir_equipo(tenant: str, codigo: str, ahora: float | None = None) -> str:
     permite darlo de baja.
     """
 
-    cuerpo = {
-        "tipo": TIPO,
-        "tenant": tenant,
-        "jti": _normalizar(codigo),
-        "desde": int(time.time() if ahora is None else ahora),
-    }
-    crudo = _b64(json.dumps(cuerpo, separators=(",", ":")).encode())
-    firma = hmac.new(
-        cuentas._firma_del_servidor(), crudo.encode(), hashlib.sha256
-    ).digest()
-    return f"{crudo}.{_b64(firma)}"
+    return cuentas.firmar(
+        {
+            "tipo": TIPO,
+            "tenant": tenant,
+            "jti": _normalizar(codigo),
+            "desde": int(time.time() if ahora is None else ahora),
+        }
+    )
 
 
 def _dado_de_baja(jti: str) -> bool:
@@ -238,27 +223,16 @@ def _dado_de_baja(jti: str) -> bool:
 def leer_equipo(token: str) -> dict | None:
     """El contenido del token de equipo si la firma es buena. None si no."""
 
+    cuerpo = cuentas.cuerpo_firmado(token)
     resultado = None
-    partes = (token or "").split(".")
-    if len(partes) == 2:
-        crudo, firma = partes
-        esperada = hmac.new(
-            cuentas._firma_del_servidor(), crudo.encode(), hashlib.sha256
-        ).digest()
-        # compare_digest y no ==: comparar firmas con == filtra por tiempo en
-        # que byte se rompio la igualdad.
-        if hmac.compare_digest(_b64(esperada), firma):
-            try:
-                cuerpo = json.loads(_des64(crudo))
-            except (ValueError, TypeError):
-                cuerpo = None
-            # `jti` se exige: un token sin el es de antes de que la revocacion
-            # existiera y no se puede atar a ninguna fila. Aceptarlo seria
-            # dejar viva justo la credencial que no se puede dar de baja.
-            propio = bool(cuerpo) and cuerpo.get("tipo") == TIPO
-            completo = propio and bool(cuerpo.get("tenant")) and bool(cuerpo.get("jti"))
-            if completo and not _dado_de_baja(cuerpo["jti"]):
-                resultado = cuerpo
+    if cuerpo is not None:
+        # `jti` se exige: un token sin el es de antes de que la revocacion
+        # existiera y no se puede atar a ninguna fila. Aceptarlo seria dejar
+        # viva justo la credencial que no se puede dar de baja.
+        propio = cuerpo.get("tipo") == TIPO
+        completo = propio and bool(cuerpo.get("tenant")) and bool(cuerpo.get("jti"))
+        if completo and not _dado_de_baja(cuerpo["jti"]):
+            resultado = cuerpo
     return resultado
 
 

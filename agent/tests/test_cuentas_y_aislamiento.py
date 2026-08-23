@@ -17,14 +17,10 @@ Lo que se prueba aca, por orden de lo que duele si se rompe:
 
 from __future__ import annotations
 
-import http.client
 import json
-import socket
 import sys
-import threading
 import time
 import unittest
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,6 +28,7 @@ REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO / "backend"))
 sys.path.insert(0, str(REPO / "web"))
 
+from tests.panel import PanelLevantado  # noqa: E402
 from aegis_backend import cuentas  # noqa: E402
 
 
@@ -156,26 +153,11 @@ class TestAutenticar(unittest.TestCase):
         self.assertIsNotNone(cuentas.autenticar("admin", "una-contrasena-nueva"))
 
 
-class ServicioConCuentas(unittest.TestCase):
-    """Levanta el servicio de verdad con dos empresas cargadas."""
-
-    @classmethod
-    def setUpClass(cls):
-        import app as servicio
-
-        cls.servicio = servicio
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            cls.puerto = s.getsockname()[1]
-        cls.servidor = ThreadingHTTPServer(("127.0.0.1", cls.puerto), servicio.Handler)
-        threading.Thread(target=cls.servidor.serve_forever, daemon=True).start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.servidor.shutdown()
-        cls.servidor.server_close()
+class ServicioConCuentas(PanelLevantado):
+    """El panel de verdad, con dos empresas cargadas."""
 
     def setUp(self):
+        super().setUp()
         cuentas._memoria.clear()
         self.addCleanup(cuentas._memoria.clear)
         cuentas.guardar("admin", "admin", "acme")
@@ -187,32 +169,6 @@ class ServicioConCuentas(unittest.TestCase):
         # Dos empresas, dos eventos, dominios distintos para poder distinguirlos.
         self.servicio._memoria.insert(0, _evento("de-acme", "acme", "chatgpt.com"))
         self.servicio._memoria.insert(0, _evento("de-otra", "la-competencia", "gemini.google.com"))
-
-    def pedir(self, metodo, ruta, cuerpo=None, token=None):
-        conexion = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=10)
-        try:
-            cabeceras = {"Content-Type": "application/json"}
-            if token:
-                cabeceras["Authorization"] = f"Bearer {token}"
-            conexion.request(
-                metodo,
-                ruta,
-                json.dumps(cuerpo).encode() if cuerpo is not None else None,
-                cabeceras,
-            )
-            respuesta = conexion.getresponse()
-            crudo = respuesta.read()
-            try:
-                datos = json.loads(crudo)
-            except ValueError:
-                datos = None
-            return respuesta.status, datos
-        finally:
-            conexion.close()
-
-    def entrar(self, usuario, password):
-        estado, datos = self.pedir("POST", "/v1/login", {"usuario": usuario, "password": password})
-        return datos["token"] if estado == 200 else None
 
 
 class TestSinSesionNoSeVeNada(ServicioConCuentas):

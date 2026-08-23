@@ -1,0 +1,10 @@
+# Vacio a proposito, y no por olvido.
+#
+# El backend y el panel corren con la biblioteca estandar y nada mas: el cliente
+# de Supabase es urllib, el servidor es http.server, y los hashes son hashlib.
+# Es la misma promesa que hace el agente (ver agent/requirements.txt) y la razon
+# por la que este servicio arranca en cualquier lado sin resolver un arbol de
+# dependencias que despues hay que auditar.
+#
+# `render.yaml` le hace `pip install -r` igual: cuesta nada y deja el lugar
+# preparado para el dia que haga falta algo.

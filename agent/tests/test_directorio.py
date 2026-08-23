@@ -19,19 +19,15 @@ Lo que se prueba, por orden de lo que importa:
 
 from __future__ import annotations
 
-import http.client
-import json
-import socket
 import sys
-import threading
 import unittest
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO / "backend"))
 sys.path.insert(0, str(REPO / "web"))
 
+from tests.panel import PanelLevantado  # noqa: E402
 from aegis_backend import cuentas, directorio  # noqa: E402
 
 
@@ -182,24 +178,9 @@ class TestLaShadowAiSeDescubreSola(unittest.TestCase):
                 self.assertEqual(directorio.inventario("acme"), [])
 
 
-class TestPorElApi(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        import app as servicio
-
-        cls.servicio = servicio
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            cls.puerto = s.getsockname()[1]
-        cls.servidor = ThreadingHTTPServer(("127.0.0.1", cls.puerto), servicio.Handler)
-        threading.Thread(target=cls.servidor.serve_forever, daemon=True).start()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.servidor.shutdown()
-        cls.servidor.server_close()
-
+class TestPorElApi(PanelLevantado):
     def setUp(self):
+        super().setUp()
         directorio._memoria.clear()
         cuentas._memoria.clear()
         self.addCleanup(directorio._memoria.clear)
@@ -210,32 +191,6 @@ class TestPorElApi(unittest.TestCase):
         self.servicio._memoria.clear()
         self.servicio._cache = {}
         self.addCleanup(self.servicio._memoria.clear)
-
-    def pedir(self, metodo, ruta, cuerpo=None, token=None):
-        conexion = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=10)
-        try:
-            cabeceras = {"Content-Type": "application/json"}
-            if token:
-                cabeceras["Authorization"] = f"Bearer {token}"
-            conexion.request(
-                metodo,
-                ruta,
-                json.dumps(cuerpo).encode() if cuerpo is not None else None,
-                cabeceras,
-            )
-            respuesta = conexion.getresponse()
-            crudo = respuesta.read()
-            try:
-                datos = json.loads(crudo)
-            except ValueError:
-                datos = None
-            return respuesta.status, datos
-        finally:
-            conexion.close()
-
-    def entrar(self, usuario, password):
-        _, datos = self.pedir("POST", "/v1/login", {"usuario": usuario, "password": password})
-        return datos["token"]
 
     def test_las_tres_rutas_nuevas_piden_sesion(self):
         # Cada tabla nueva es una superficie nueva por donde una empresa podria

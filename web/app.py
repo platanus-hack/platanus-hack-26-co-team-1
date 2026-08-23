@@ -523,7 +523,17 @@ class Handler(BaseHTTPRequestHandler):
             )
 
     def _salud(self) -> None:
-        self._json(200, {"ok": True, "almacen": almacen(), "eventos": len(eventos())})
+        """Vive o no vive. Nada mas, y eso es a proposito.
+
+        Render la consulta sin credencial para decidir si reinicia el servicio,
+        asi que lo que conteste es publico. Devolvia ademas `len(eventos())`
+        --sin tenant, o sea el total de TODAS las empresas-- y eso es un numero
+        de negocio: quien la consulte cada hora dibuja la curva de uso de la
+        plataforma sin tener cuenta. El estado del almacen se queda porque dice
+        si el servicio esta sano, no cuanto lo usan.
+        """
+
+        self._json(200, {"ok": True, "almacen": almacen()})
 
     def _politica_por_defecto(self) -> None:
         self._json(200, rutas.politica_por_defecto())
@@ -769,7 +779,8 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "tenant": empresa,
-                    "token": cuentas.emitir(usuario, empresa, "admin"),
+                    "rol": cuentas.ADMIN,
+                    "token": cuentas.emitir(usuario, empresa, cuentas.ADMIN),
                     "codigo": enrolamiento.crear(empresa)["codigo"],
                 },
             )

@@ -63,10 +63,12 @@ export class SesionService {
    * elegir su contraseña es hacerle escribir dos veces lo mismo, y es donde
    * más gente abandona un alta.
    */
-  adoptar(token: string, tenant: string, usuario: string): void {
-    const sesion: Sesion = { token, tenant, usuario } as Sesion;
-    this.actual.set(sesion);
-    this.guardar(sesion);
+  adoptar(token: string, tenant: string, usuario: string, rol: string): void {
+    // Sin `rol` esto era `{ token, tenant, usuario } as Sesion`, y el cast
+    // tapaba que la sesión recién creada no tenía rol: quien se registraba
+    // quedaba con `rol` undefined hasta volver a entrar por el login.
+    this.actual.set({ token, tenant, usuario, rol });
+    this.guardar({ token, tenant, usuario, rol });
   }
 
   salir(): void {
