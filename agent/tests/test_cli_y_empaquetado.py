@@ -421,10 +421,57 @@ class TestLoQueRecibeQuienDescarga(unittest.TestCase):
 
         for nombre in self._lanzadores():
             with self.subTest(lanzador=nombre):
-                self.assertIn(nombre, self.build.LEEME)
+                self.assertIn(nombre, self.build.leeme())
 
     def test_el_leeme_no_promete_lo_que_ya_no_es_asi(self):
         """El OCR se prende desde el panel; decir que es una variable de entorno
         manda a la persona a un lugar donde no hay nada que tocar."""
 
-        self.assertNotIn("AEGIS_OCR=1", self.build.LEEME)
+        self.assertNotIn("AEGIS_OCR=1", self.build.leeme())
+
+    def test_el_leeme_dice_la_verdad_sobre_el_modelo(self):
+        """Los dos paquetes traen cosas distintas y el LEEME tiene que saberlo.
+
+        Decia SIEMPRE que el modelo no venia incluido, incluso adentro del
+        paquete completo, que existe para traerlo. La persona que baja 1 GB
+        justamente por el modelo abre el archivo que le explica el producto y lo
+        primero que lee es que eso que bajo no esta.
+        """
+
+        liviano = self.build.LEEME.format(modelo=self.build.MODELO_NO_VIENE)
+        completo = self.build.LEEME.format(modelo=self.build.MODELO_VIENE)
+
+        # Marcadores que no cruzan un salto de linea: el texto va justificado a
+        # mano y "YA VIENE en este paquete" se parte en dos.
+        self.assertIn("NO viene en esta compilacion", liviano)
+        self.assertNotIn("YA VIENE", liviano)
+
+        self.assertIn("YA VIENE", completo)
+        self.assertNotIn("NO viene en esta compilacion", completo)
+
+    def test_lo_que_se_publica_trae_el_modelo(self):
+        """El default es el paquete que baja la gente, no el comodo de compilar.
+
+        Estuvo al reves: habia que acordarse de `AEGIS_COMPLETO=1`, y si no,
+        `publicar.sh` subia el liviano con el mismo nombre de siempre. Nadie
+        podia saber desde afuera si lo que bajaba veia los datos de empresa o
+        no, que es lo unico que distingue a los dos paquetes.
+        """
+
+        import importlib.util
+        import os
+        from pathlib import Path
+
+        ruta = Path(__file__).resolve().parents[2] / "packaging" / "build_windows.py"
+        previo = os.environ.pop("AEGIS_COMPLETO", None)
+        try:
+            spec = importlib.util.spec_from_file_location("build_limpio", ruta)
+            limpio = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(limpio)
+            self.assertTrue(
+                limpio.COMPLETO,
+                "sin AEGIS_COMPLETO en el entorno, el paquete tiene que ser el completo",
+            )
+        finally:
+            if previo is not None:
+                os.environ["AEGIS_COMPLETO"] = previo

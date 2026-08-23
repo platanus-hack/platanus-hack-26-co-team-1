@@ -18,7 +18,7 @@ RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$RAIZ"
 
 INSTALADOR="dist/Aegis-windows.zip"
-MODELO="dist/Aegis-modelo-local.zip"
+# El modelo ya no se publica aparte: viaja adentro del instalador (ver 4/4).
 
 echo "==> 1/4  Comprobando que no se suba nada a medias"
 if [ -n "$(git status --porcelain)" ]; then
@@ -49,16 +49,23 @@ else
 fi
 echo "    OK: $(du -h "$INSTALADOR" | cut -f1)"
 
-echo "==> 4/4  Publicando el modelo local (opcional)"
-# Va aparte del instalador y no adentro: son 880 MB contra 109, y la mayoria de
-# la gente quiere probar el producto antes de decidir si le paga esa descarga.
-# El agente lo baja cuando la empresa lo prende desde el panel.
-if [ -f "$MODELO" ]; then
-  gh release upload v0.1.0 "$MODELO" --repo "$ORG" --clobber
-  echo "    OK: $(du -h "$MODELO" | cut -f1)"
-else
-  echo "    (no esta $MODELO, se omite)"
+echo "==> 4/4  Comprobando que lo que se subio traiga el modelo"
+# El modelo ya NO va aparte: viaja adentro del instalador. Iba separado cuando
+# habia dos paquetes, y el liviano se retiro porque no ve los datos de empresa
+# --lo que no tiene forma de credencial-- que es justo lo que el producto
+# promete cuidar. Quien probaba el liviano no se enteraba de que estaba a medias.
+#
+# Lo que queda aca es la comprobacion, no la subida: un instalador de ~110 MB
+# es el liviano compilado por error, y publicarlo se ve exactamente igual que
+# publicar el bueno hasta que alguien lo instala y no lo protege.
+_bytes=$(wc -c < "$INSTALADOR")
+if [ "$_bytes" -lt 500000000 ]; then
+  echo "    ATENCION: $INSTALADOR pesa $(du -h "$INSTALADOR" | cut -f1)."
+  echo "    Eso es el paquete SIN modelo. Recompila sin AEGIS_COMPLETO=0:"
+  echo "        python packaging/build_windows.py --probar"
+  exit 1
 fi
+echo "    OK: $(du -h "$INSTALADOR" | cut -f1), con el modelo adentro"
 
 echo
 echo "Listo:"

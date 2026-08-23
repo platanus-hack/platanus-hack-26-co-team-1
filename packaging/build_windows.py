@@ -22,6 +22,7 @@ Windows-- pero no se puede compilar en Linux y esperar que corra.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,24 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 DIST = RAIZ / "dist"
 CARPETA = DIST / "Aegis"
+
+# HAY UN SOLO PAQUETE Y TRAE EL MODELO.
+#
+# Hubo dos un rato -- liviano y completo -- con el argumento de que la mayoria
+# de la gente quiere probar el producto antes de pagar la descarga grande. El
+# problema es lo que eso significa para quien lo prueba: el liviano NO ve los
+# datos de empresa, que no tienen forma de credencial y son justamente lo que
+# este producto promete cuidar. Alguien lo instalaba, pegaba el nombre de un
+# cliente en ChatGPT, no pasaba nada, y concluia que Aegis no sirve. Bajar mas
+# se nota una vez; protegerse a medias sin saberlo no se nota nunca.
+#
+# El interruptor sigue existiendo para compilar rapido mientras se desarrolla
+# (AEGIS_COMPLETO=0), pero el default es el paquete que se publica. Un default
+# tiene que ser lo que se usa, no lo que es comodo de construir.
+COMPLETO = os.environ.get("AEGIS_COMPLETO", "1").strip() not in ("0", "false", "no")
+
+# Un solo nombre, porque es un solo artefacto. Llamarlo "-completo" solo tenia
+# sentido cuando habia otro al lado del que distinguirlo.
 ZIP = DIST / "Aegis-windows.zip"
 
 # Los .bat existen para que el usuario no tenga que abrir una consola ni escribir
@@ -218,10 +237,39 @@ LO OPCIONAL
     Deteccion. Sirve para lo que nadie transcribe a mano: la foto de una
     pantalla con una contrasena o una cedula.
 
-  * El modelo local que detecta datos sin formato (nombres de clientes, cifras
-    de contratos) NO viene en este paquete: necesita 442 MB de dependencias.
-    Aegis protege igual sin el.
+{modelo}
 """
+
+# El parrafo del modelo depende del paquete, y hasta aca no dependia de nada:
+# el LEEME afirmaba SIEMPRE que el modelo no venia incluido, incluso dentro del
+# paquete completo, que existe justamente para traerlo. Un archivo que le miente
+# a la persona sobre lo que acaba de bajar es peor que uno que no dice nada.
+# Este texto NO describe ningun paquete publicado: el que se publica siempre
+# trae el modelo. Existe para las compilaciones de desarrollo (AEGIS_COMPLETO=0),
+# que son las unicas que salen sin el, y para que ese zip no mienta si alguien
+# lo comparte por error.
+MODELO_NO_VIENE = """  * El modelo local que detecta datos sin formato (nombres de clientes, cifras
+    de contratos) NO viene en esta compilacion. Las reglas, el diccionario de
+    tu empresa y el OCR funcionan igual, pero lo que no tiene forma de
+    credencial pasa sin que nadie lo vea.
+
+    Esta no es la version que se publica. Si la bajaste de la pagina de tu
+    empresa, avisales: te dieron la equivocada."""
+
+MODELO_VIENE = """  * El modelo local que detecta datos sin formato --nombres de clientes, cifras
+    de contratos, lo que no tiene forma de credencial-- YA VIENE en este
+    paquete, y ya esta funcionando. No hay nada que activar y no descarga nada
+    la primera vez: por eso el archivo pesa lo que pesa.
+
+    Es lo unico que ve lo que no tiene forma de contrasena, asi que es lo que
+    hace que "no pegues el nombre de un cliente en un chat" sea algo que Aegis
+    pueda notar."""
+
+
+def leeme() -> str:
+    """El LEEME que corresponde a ESTE paquete."""
+
+    return LEEME.format(modelo=MODELO_VIENE if COMPLETO else MODELO_NO_VIENE)
 
 
 def _requisitos() -> list[str]:
@@ -276,7 +324,7 @@ def agregar_lanzadores() -> None:
     (CARPETA / "Estado de Aegis.bat").write_text(ESTADO_BAT, encoding="utf-8")
     (CARPETA / "Conectar con mi empresa.bat").write_text(ENROLAR_BAT, encoding="utf-8")
     (CARPETA / "Panel de Aegis.bat").write_text(PANEL_BAT, encoding="utf-8")
-    (CARPETA / "LEEME.txt").write_text(LEEME, encoding="utf-8")
+    (CARPETA / "LEEME.txt").write_text(leeme(), encoding="utf-8")
 
 
 def probar() -> bool:

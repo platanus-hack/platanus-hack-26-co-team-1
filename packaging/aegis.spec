@@ -99,7 +99,17 @@ ocultos = [
 # modelo no se carga ni en ONNX. Y correr el ONNX a mano -- sin gliner -- obliga
 # a reimplementar el armado de spans y el decodificado, donde un desajuste sutil
 # no falla: detecta cero, en silencio. Queda anotado para hacerlo bien.
-COMPLETO = os.environ.get("AEGIS_COMPLETO", "").strip() in ("1", "true", "si")
+#
+# EL DEFAULT ES CON MODELO. Arriba se explica por que existian los dos; lo que
+# decidio quedarse con uno es que el liviano no ve los datos de empresa -- lo
+# que no tiene forma de credencial -- y esa es justamente la promesa del
+# producto. Quien probaba el liviano pegaba el nombre de un cliente, no pasaba
+# nada, y concluia que Aegis no sirve. Bajar mas se nota una vez; protegerse a
+# medias sin enterarse no se nota nunca.
+#
+# `AEGIS_COMPLETO=0` sigue armando el liviano, para compilar rapido mientras se
+# desarrolla. No es lo que se publica.
+COMPLETO = os.environ.get("AEGIS_COMPLETO", "1").strip() not in ("0", "false", "no")
 
 _solo_en_el_liviano = [
     "torch",           # 432 MB, solo lo necesita T2
