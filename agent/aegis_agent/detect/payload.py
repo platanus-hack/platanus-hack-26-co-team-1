@@ -618,7 +618,7 @@ def scan_payload(
     query: str = "",
     terminos: dict[str, str] | None = None,
     ruleset: RuleSet | None = None,
-    leer_imagenes: bool = False,
+    leer_imagenes: bool | None = None,
 ) -> ScanResult:
     """Escanea un request completo, incluidas sus formas ofuscadas.
 
@@ -660,7 +660,19 @@ def scan_payload(
         # que todo lo de arriba ya se resolvio antes de considerar pagarla. La
         # extraccion de las imagenes es barata y siempre corre; lo que esta
         # apagado por defecto es leerlas.
-        if leer_imagenes or ocr.habilitado():
+        # `leer_imagenes` tiene tres estados y no dos, y hace falta que asi sea.
+        # None es "decida el entorno", que es lo que hacia siempre. True la
+        # prende aunque el entorno no la pida. Y False la APAGA aunque el
+        # entorno la pida, que es el caso nuevo: cuando la imagen ya se esta
+        # leyendo en segundo plano (ver adjuntos.py), este request no puede
+        # volver a pagarla. Con un booleano, `False or ocr.habilitado()` daba
+        # True y el OCR corria igual -- lo encontro un test de latencia.
+        if leer_imagenes is None:
+            mirar = ocr.habilitado()
+        else:
+            mirar = leer_imagenes
+
+        if mirar:
             imagenes = extraer_imagenes(payload, principal)
             if imagenes:
                 # De cual vista salio cada hallazgo decide cuanta autoridad

@@ -1,0 +1,189 @@
+<header class="relative overflow-hidden border-b border-aegis-border bg-aegis-surface px-4 py-8 sm:px-8">
+  <div class="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-aegis-accent/10 blur-3xl"></div>
+  <div class="relative">
+    <p class="aegis-label">Acceso</p>
+    <h1 class="mt-1 font-display text-2xl font-semibold text-aegis-text">Equipo del panel</h1>
+    <p class="mt-1.5 max-w-2xl text-sm text-aegis-dim">
+      Quién puede entrar a esta consola y qué puede hacer adentro. Un
+      <strong class="text-aegis-text">admin</strong> cambia políticas, emite códigos y administra
+      este equipo; un <strong class="text-aegis-text">lector</strong> ve lo mismo y no cambia nada.
+    </p>
+  </div>
+</header>
+
+<main class="flex-1 px-4 py-6 sm:px-8">
+  @if (error()) {
+    <div class="mb-5 flex items-start gap-2.5 rounded-lg border border-aegis-red/30 bg-aegis-red/5 px-4 py-3">
+      <svg viewBox="0 0 20 20" fill="none" class="mt-0.5 h-4 w-4 shrink-0 text-aegis-red">
+        <circle cx="10" cy="10" r="7.25" stroke="currentColor" stroke-width="1.4" />
+        <path d="M10 6.5v4M10 13.5h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+      </svg>
+      <p class="text-sm text-aegis-text">{{ error() }}</p>
+    </div>
+  }
+
+  @if (recienCreado) {
+    <div class="mb-5 rounded-lg border border-aegis-green/30 bg-aegis-green/5 px-4 py-3">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="font-display text-sm font-semibold text-aegis-text">
+            Cuenta creada para {{ recienCreado.usuario }}
+          </p>
+          <p class="mt-1 text-sm text-aegis-dim">
+            Pasale estos datos ahora: la contraseña no se vuelve a mostrar y el panel no manda mails.
+          </p>
+          <p class="mt-2 select-all rounded border border-aegis-border bg-aegis-surface px-3 py-2 font-mono text-sm text-aegis-text">
+            {{ recienCreado.usuario }} · {{ recienCreado.clave }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="shrink-0 rounded-lg p-1.5 text-aegis-dim transition hover:bg-aegis-surface2 hover:text-aegis-text"
+          (click)="cerrarAviso()"
+          aria-label="Cerrar aviso"
+        >
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4">
+            <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  }
+
+  <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+    <!-- El alta, en la misma vista: es lo primero que se viene a hacer acá. -->
+    <section class="aegis-card p-6 lg:order-2">
+      <div class="flex items-center gap-2.5">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4">
+            <circle cx="8" cy="7" r="2.75" stroke="currentColor" stroke-width="1.4" />
+            <path d="M3.5 15.5c0-2.2 2-3.75 4.5-3.75s4.5 1.55 4.5 3.75" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            <path d="M15.5 6.5v4M13.5 8.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
+        </span>
+        <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Sumar a alguien</h2>
+      </div>
+
+      <form class="mt-5 flex flex-col gap-4" (ngSubmit)="sumar()">
+        <label class="flex flex-col gap-1.5">
+          <span class="aegis-label">Usuario</span>
+          <input
+            type="text"
+            name="usuario"
+            autocomplete="off"
+            class="rounded-lg border border-aegis-border bg-aegis-surface px-3 py-2 text-sm text-aegis-text outline-none transition focus:border-aegis-accent"
+            [(ngModel)]="nuevoUsuario"
+          />
+        </label>
+
+        <label class="flex flex-col gap-1.5">
+          <span class="aegis-label">Contraseña</span>
+          <input
+            type="text"
+            name="clave"
+            autocomplete="new-password"
+            class="rounded-lg border border-aegis-border bg-aegis-surface px-3 py-2 font-mono text-sm text-aegis-text outline-none transition focus:border-aegis-accent"
+            [(ngModel)]="nuevaClave"
+          />
+          <span class="text-xs text-aegis-dim">
+            Ocho caracteres o más. Se muestra en claro a propósito: se la tenés que pasar vos.
+          </span>
+        </label>
+
+        <label class="flex flex-col gap-1.5">
+          <span class="aegis-label">Permiso</span>
+          <select
+            name="rol"
+            class="rounded-lg border border-aegis-border bg-aegis-surface px-3 py-2 text-sm text-aegis-text outline-none transition focus:border-aegis-accent"
+            [(ngModel)]="nuevoRol"
+          >
+            <option value="lector">Lector — mira y no cambia nada</option>
+            <option value="admin">Admin — cambia políticas y el equipo</option>
+          </select>
+        </label>
+
+        <button
+          type="submit"
+          class="rounded-lg bg-aegis-accent px-4 py-2 font-display text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          [disabled]="!puedeSumar || guardando()"
+        >
+          {{ guardando() ? 'Guardando…' : 'Sumar al equipo' }}
+        </button>
+      </form>
+    </section>
+
+    <!-- La lista. -->
+    <section class="aegis-card overflow-hidden lg:order-1 lg:col-span-2">
+      <div class="flex items-center gap-2.5 border-b border-aegis-border px-6 py-4">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+          <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4">
+            <circle cx="7" cy="7" r="2.5" stroke="currentColor" stroke-width="1.4" />
+            <circle cx="14" cy="8" r="2" stroke="currentColor" stroke-width="1.4" />
+            <path d="M2.5 15.5c0-2.1 2-3.5 4.5-3.5s4.5 1.4 4.5 3.5M13 12.2c2 .2 3.5 1.5 3.5 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
+        </span>
+        <div>
+          <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Cuentas</h2>
+          <p class="mt-0.5 text-sm text-aegis-dim">{{ usuarios().length }} con acceso · {{ admins() }} pueden administrar</p>
+        </div>
+      </div>
+
+      @if (cargando() && usuarios().length === 0) {
+        <p class="px-6 py-8 text-sm text-aegis-dim">Cargando…</p>
+      } @else {
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="aegis-label border-b border-aegis-border">
+                <th class="px-6 py-3 font-medium">Usuario</th>
+                <th class="px-6 py-3 font-medium">Permiso</th>
+                <th class="px-6 py-3 text-right font-medium">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (u of usuarios(); track u.usuario) {
+                <tr class="border-b border-aegis-border/60 transition-colors last:border-0 hover:bg-aegis-surface2/60">
+                  <td class="px-6 py-3.5 font-medium text-aegis-text">
+                    {{ u.usuario }}
+                    @if (u.usuario === yo()) {
+                      <span class="ml-1.5 text-xs font-normal text-aegis-dim">(vos)</span>
+                    }
+                  </td>
+                  <td class="px-6 py-3.5">
+                    <app-badge [tone]="u.rol === 'admin' ? 'accent' : 'neutral'">
+                      {{ u.rol === 'admin' ? 'Admin' : 'Lector' }}
+                    </app-badge>
+                  </td>
+                  <td class="px-6 py-3.5">
+                    <div class="flex items-center justify-end gap-2">
+                      @if (motivoBloqueado(u.usuario, u.rol); as motivo) {
+                        <span class="text-xs text-aegis-dim" [title]="motivo">{{ motivo }}</span>
+                      } @else {
+                        <button
+                          type="button"
+                          class="rounded-lg border border-aegis-border px-3 py-1.5 text-xs font-medium text-aegis-text transition hover:bg-aegis-surface2 disabled:opacity-40"
+                          [disabled]="guardando()"
+                          (click)="alternarRol(u.usuario, u.rol)"
+                        >
+                          {{ u.rol === 'admin' ? 'Pasar a lector' : 'Hacer admin' }}
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded-lg border border-aegis-red/30 px-3 py-1.5 text-xs font-medium text-aegis-red transition hover:bg-aegis-red/5 disabled:opacity-40"
+                          [disabled]="guardando()"
+                          (click)="darDeBaja(u.usuario)"
+                        >
+                          Dar de baja
+                        </button>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+  </div>
+</main>

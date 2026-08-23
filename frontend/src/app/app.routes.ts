@@ -41,6 +41,11 @@ export const routes: Routes = [
           import('./features/admin/panel-colaborador/panel-colaborador.component').then((m) => m.PanelColaboradorComponent),
       },
       {
+        path: 'equipo',
+        loadComponent: () =>
+          import('./features/admin/equipo/equipo.component').then((m) => m.EquipoComponent),
+      },
+      {
         path: 'inventario',
         loadComponent: () =>
           import('./features/admin/inventario/inventario.component').then((m) => m.InventarioComponent),

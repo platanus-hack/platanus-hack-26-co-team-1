@@ -459,6 +459,7 @@ class Handler(BaseHTTPRequestHandler):
             "/v1/inventario": self._listar_inventario,
             "/v1/tenant": self._leer_tenant,
             "/v1/enrolamiento": self._listar_codigos,
+            "/v1/usuarios": self._listar_usuarios,
             "/descargar": self._descargar,
         }
 
@@ -645,6 +646,71 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
 
+    def _listar_usuarios(self) -> None:
+        """Quien puede entrar al panel de esta empresa, y con que permiso.
+
+        Leer la lista NO pide ser admin: un lector tiene que poder ver a quien
+        pedirle un cambio que el no puede hacer. Lo que pide admin es
+        escribirla, y de eso se encarga `_con_sesion`.
+        """
+
+        sesion = self._sesion()
+        if sesion is None:
+            self._json(401, {"error": "sesion requerida"})
+        else:
+            self._json(
+                200,
+                {
+                    "usuarios": cuentas.del_equipo(sesion["tenant"]),
+                    "yo": sesion.get("usuario", ""),
+                },
+            )
+
+    def _guardar_usuario(self, tenant: str, datos: dict) -> None:
+        """Suma, cambia el rol o da de baja. Una ruta, tres verbos.
+
+        Van juntas porque son la misma pantalla y el mismo permiso, y separarlas
+        en tres rutas solo multiplica los lugares donde olvidarse del tenant.
+        El tenant lo entrega `_con_sesion` desde el TOKEN: sin eso, el admin de
+        una empresa administra el equipo de otra escribiendo su nombre.
+        """
+
+        usuario = str(datos.get("usuario", ""))
+        rol = str(datos.get("rol", cuentas.LECTOR))
+
+        if datos.get("baja"):
+            if cuentas.sacar_del_equipo(tenant, usuario):
+                self._json(200, {"baja": usuario})
+            else:
+                # Un solo motivo, igual que en el resto: distinguir "no existe"
+                # de "es de otra empresa" confirma que ese usuario existe.
+                self._json(
+                    409, {"error": "no se puede dar de baja esa cuenta"}
+                )
+        elif datos.get("password"):
+            nueva = cuentas.sumar_al_equipo(
+                tenant, usuario, str(datos["password"]), rol
+            )
+            if nueva is None:
+                self._json(
+                    409,
+                    {
+                        "error": (
+                            "revisá el usuario, el rol, y que la contraseña "
+                            f"tenga {cuentas.LARGO_MINIMO_DE_CONTRASENA} "
+                            "caracteres o más"
+                        )
+                    },
+                )
+            else:
+                self._json(200, nueva)
+        else:
+            cambiada = cuentas.cambiar_rol(tenant, usuario, rol)
+            if cambiada is None:
+                self._json(409, {"error": "no se puede cambiar ese rol"})
+            else:
+                self._json(200, cambiada)
+
     def _listar_codigos(self) -> None:
         """Los codigos de la empresa de quien pregunta. De ninguna otra."""
 
@@ -697,6 +763,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._enrolar(datos)
             elif ruta == "/v1/enrolamiento":
                 self._con_sesion(datos, self._crear_codigo)
+            elif ruta == "/v1/usuarios":
+                self._con_sesion(datos, self._guardar_usuario)
             elif ruta == "/v1/lessons":
                 self._json(*rutas.leccion(datos, MODELO, _LECCIONES))
             elif ruta == "/v1/colaboradores":

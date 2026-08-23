@@ -567,8 +567,45 @@ class Aegis:
         # que hacer con ese envio lo decide unknown_domain_action y no las
         # reglas de una IA confirmada.
         sospechoso = False
-        # Cierto cuando las imagenes de ESTE request ya se estan leyendo aparte.
+
+        # ¿Esto es un archivo yendose hacia una IA, y hacia cual?
+        #
+        # Se pregunta ACA --antes de mirar la clasificacion-- porque la
+        # respuesta no depende de ella: sale de las cabeceras y del cuerpo. La
+        # primera version preguntaba adentro de la rama `non_ai` y ahi solo
+        # llegan los hosts de blobs que el catalogo no conoce, asi que la subida
+        # mas comun de todas se la perdia: `files.oaiusercontent.com` SI esta en
+        # el catalogo. Lo encontro un test de latencia.
+        adjunto_hacia = subida_hacia_una_ia(
+            flow.request.headers.get("Content-Type", ""),
+            body,
+            flow.request.headers.get("Origin", ""),
+            flow.request.headers.get("Referer", ""),
+            lambda candidato: classify(candidato, politica)
+            not in ("non_ai", "passthrough"),
+        )
+
+        # La imagen se lee FUERA de este request. El archivo en el blob todavia
+        # no es una fuga --nadie lo mira, ningun modelo lo leyo-- asi que la
+        # proteccion no esta en frenar la subida sino en frenar el turno que le
+        # pide al modelo que lo lea, y entre los dos hay una ventana real: la
+        # persona todavia tiene que escribir y apretar enviar. Ver adjuntos.py.
         en_segundo_plano = False
+        if politica.ocr_enabled and adjunto_hacia is not None:
+            leidas = adjuntos.registrar(
+                adjunto_hacia,
+                body,
+                body[:PREVIEW_BYTES].decode("utf-8", errors="replace"),
+                lambda texto: scan_payload(
+                    texto.encode("utf-8"),
+                    terminos=politica.company_terms,
+                    ruleset=conjunto,
+                ).findings,
+            )
+            # Si la lectura se fue al fondo, este request no la paga de nuevo:
+            # seria hacer el OCR dos veces y encima en el camino critico, que es
+            # exactamente lo que se vino a sacar.
+            en_segundo_plano = leidas > 0
 
         if classification == "non_ai":
             preview = body[:PREVIEW_BYTES].decode("utf-8", errors="replace")
@@ -584,36 +621,8 @@ class Aegis:
                 # files.oaiusercontent.com y no tienen forma de conversacion ni
                 # texto donde una regex encuentre nada; con el barrido primero,
                 # el adjunto se iba entero por el `return` de mas abajo.
-                origen = subida_hacia_una_ia(
-                    flow.request.headers.get("Content-Type", ""),
-                    body,
-                    flow.request.headers.get("Origin", ""),
-                    flow.request.headers.get("Referer", ""),
-                    lambda candidato: classify(candidato, politica)
-                    not in ("non_ai", "passthrough"),
-                )
-                if origen is not None:
+                if adjunto_hacia is not None:
                     classification = "ai_unknown"
-                    # La imagen se lee FUERA de este request. El archivo en el
-                    # blob todavia no es una fuga --nadie lo mira, ningun modelo
-                    # lo leyo-- asi que la proteccion no esta en frenar esto
-                    # sino en frenar el turno que le pide al modelo que lo lea,
-                    # y entre los dos hay una ventana real: la persona todavia
-                    # tiene que escribir y apretar enviar. Ver adjuntos.py.
-                    leidas = adjuntos.registrar(
-                        origen,
-                        body,
-                        preview,
-                        lambda texto: scan_payload(
-                            texto.encode("utf-8"),
-                            terminos=politica.company_terms,
-                            ruleset=conjunto,
-                        ).findings,
-                    )
-                    # Si la lectura se fue al fondo, este request no la paga de
-                    # nuevo: seria hacer el OCR dos veces y encima en el camino
-                    # critico, que es exactamente lo que se vino a sacar.
-                    en_segundo_plano = leidas > 0
                 else:
                     # "allow" es la salida de emergencia: reproduce el embudo de
                     # siempre sin gastar ni el barrido barato. Es lo que le queda
@@ -645,12 +654,21 @@ class Aegis:
             # que hace que apagar una regla o agregar una regex propia cambie
             # algo. El compilado se cachea por identidad del objeto Policy, asi
             # que el hot-reload recompila una vez y no en cada request.
+            # Tres estados, no dos (ver scan_payload): si la lectura ya se
+            # fue al fondo se APAGA aunque el entorno la pida, si la politica
+            # la pide se PRENDE, y si nadie dice nada se deja decidir a
+            # `AEGIS_OCR`, que es el interruptor de siempre.
+            if en_segundo_plano:
+                mirar_imagenes = False
+            else:
+                mirar_imagenes = True if politica.ocr_enabled else None
+
             result = scan_payload(
                 body,
                 query,
                 politica.company_terms,
                 conjunto,
-                politica.ocr_enabled and not en_segundo_plano,
+                mirar_imagenes,
             )
             # Lo que se subio antes a este mismo destino y se leyo mientras la
             # persona escribia. Se cobra ACA --en el turno, no en la subida--
