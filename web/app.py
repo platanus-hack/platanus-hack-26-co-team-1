@@ -224,6 +224,18 @@ def eventos(tenant: str | None = None) -> list[dict]:
 
 
 
+# A donde manda el boton de descarga si nadie configuro otra cosa.
+#
+# Apunta al repo de la hackaton y no al personal por una razon concreta: el
+# personal es PRIVADO, y un asset de release en un repo privado contesta 404 a
+# quien no sea colaborador. O sea que el boton "descargar" funcionaba para
+# nosotros y para nadie mas, que es la peor forma de que algo falle: no se nota
+# probandolo.
+DESCARGA_POR_DEFECTO = (
+    "https://github.com/platanus-hack/platanus-hack-26-co-team-1/releases/latest"
+)
+
+
 def _url_publica(host: str) -> str:
     """A donde tiene que reportar un agente, deducido de por donde entro.
 
@@ -561,7 +573,9 @@ class Handler(BaseHTTPRequestHandler):
         que parece un error del producto.
         """
 
-        destino = os.environ.get("AEGIS_DESCARGA_URL", "").strip()
+        destino = (
+            os.environ.get("AEGIS_DESCARGA_URL", "").strip() or DESCARGA_POR_DEFECTO
+        )
         if destino:
             self.send_response(302)
             self.send_header("Location", destino)

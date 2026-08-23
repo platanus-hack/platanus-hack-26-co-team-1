@@ -76,6 +76,10 @@ ocultos = [
     # roto que solo se descubre usandolo.
     "aegis_agent.identidad",
     "aegis_agent.detect.ruleset",
+    # El enrolamiento: `aegis enrolar` lo importa dentro de la funcion, igual
+    # que el panel. Sin esto el instalador se descarga, protege el equipo, y no
+    # puede afiliarse a ninguna empresa -- que es justo para lo que se publica.
+    "aegis_agent.enrolar",
 ]
 
 # Lo que NO va. Cada uno con su motivo, porque una lista de exclusiones sin

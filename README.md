@@ -1,3 +1,19 @@
+<img src="./project-logo.png" alt="Aegis" width="140" />
+
+**Platanus Hack 26: Bogotá — Track: AI Security — team-1**
+
+- Juan Canchala ([@juanmcanchala](https://github.com/juanmcanchala))
+- Isabella Pacheco ([@isabella-pacheco-m](https://github.com/isabella-pacheco-m))
+- Nicolás Carreño ([@nx01-600](https://github.com/nx01-600))
+
+## Descargar
+
+[**Aegis para Windows**](https://github.com/platanus-hack/platanus-hack-26-co-team-1/releases/latest) — descomprimir y doble clic en `Instalar Aegis.bat`.
+
+Panel: <https://aegis-panel.onrender.com>
+
+---
+
 # Aegis
 
 **DLP conversacional con enfoque pedagógico para el uso seguro de IA en la empresa.**
