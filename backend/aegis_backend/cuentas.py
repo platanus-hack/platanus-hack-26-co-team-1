@@ -44,6 +44,50 @@ TABLA = "aegis_cuentas"
 # pantalla; mas largo deja sesiones vivas de gente que ya no trabaja aca.
 VIGENCIA = 8 * 3600
 
+# Que clase de credencial es esta, DENTRO de la firma.
+#
+# Las sesiones de persona y los tokens de equipo (enrolamiento.py) comparten
+# llave y formato de cable. Hasta aca lo unico que impedia usar uno como el otro
+# eran dos chequeos que no se pusieron para eso: a la sesion se le exige `vence`
+# --que el token de equipo no lleva-- y al de equipo se le exige `tipo`. Es
+# decir que la separacion era una casualidad, no una decision.
+#
+# Y era una casualidad a punto de romperse: darle expiracion al token de equipo
+# es la mitad natural de hacerlo revocable, y el dia que alguien la agregue ese
+# token pasa a ser una sesion valida. Sin `rol`, ademas, que es peor de lo que
+# suena. Un claim explicito que los dos lectores exigen lo cierra de una vez.
+TIPO = "sesion"
+
+# Los roles que existen, y cual se supone cuando la fila no dice.
+#
+# El default es el de MENOS permiso a proposito. Antes era "admin" --
+# `cuenta.get("rol", "admin")`-- y eso es un default abierto: una fila a la que
+# le falte el campo, por una migracion a medias o por una escritura directa a la
+# tabla, sale administradora. El sentido de un default es cubrir el caso que no
+# se penso, y el caso que no se penso no deberia poder escribir.
+ADMIN = "admin"
+LECTOR = "lector"
+ROL_POR_DEFECTO = LECTOR
+
+
+def rol_de(cuenta: dict | None) -> str:
+    """El rol de una cuenta o de una sesion, con el default cerrado."""
+
+    return (cuenta or {}).get("rol") or ROL_POR_DEFECTO
+
+
+def puede_escribir(sesion: dict | None) -> bool:
+    """Si esta sesion puede cambiar algo, y no solo mirarlo.
+
+    Existe porque hasta aca el rol se emitia, se guardaba y se devolvia, y no se
+    comparaba en ningun lado: cualquier sesion valida podia llamar cualquier
+    escritura, incluida la que emite codigos de enrolamiento nuevos. No era
+    explotable --todas las cuentas se crean admin-- pero un campo de
+    autorizacion que existe invita a confiar en el, y el frontend lo recibe.
+    """
+
+    return rol_de(sesion) == ADMIN
+
 # Parametros de scrypt. n=16384 tarda ~50 ms por intento en un portatil, que es
 # invisible para quien entra una vez al dia y carisimo para quien prueba una
 # lista de contrasenas.
@@ -97,6 +141,7 @@ def emitir(usuario: str, tenant: str, rol: str, ahora: float | None = None) -> s
     """Un token firmado: quien es, de que empresa, y hasta cuando."""
 
     cuerpo = {
+        "tipo": TIPO,
         "usuario": usuario,
         "tenant": tenant,
         "rol": rol,
@@ -124,7 +169,11 @@ def leer(token: str, ahora: float | None = None) -> dict | None:
                 cuerpo = json.loads(_des64(crudo))
             except (ValueError, TypeError):
                 cuerpo = None
-            if cuerpo and cuerpo.get("vence", 0) > (ahora or time.time()):
+            vigente = bool(cuerpo) and cuerpo.get("vence", 0) > (
+                ahora or time.time()
+            )
+            # El tipo se exige, no se infiere. Ver TIPO arriba.
+            if vigente and cuerpo.get("tipo") == TIPO:
                 resultado = cuerpo
     return resultado
 

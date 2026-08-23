@@ -255,7 +255,7 @@ class TestSinSesionNoSeVeNada(ServicioConCuentas):
     def test_el_agente_sube_eventos_con_su_token_de_equipo(self):
         from aegis_backend import enrolamiento
 
-        equipo = enrolamiento.emitir_equipo("acme")
+        equipo = enrolamiento.canjear(enrolamiento.crear("acme")["codigo"])["token"]
         estado, _ = self.pedir(
             "POST", "/v1/events", _evento("nuevo", "acme", "chatgpt.com"), token=equipo
         )
@@ -266,7 +266,7 @@ class TestSinSesionNoSeVeNada(ServicioConCuentas):
 
         from aegis_backend import enrolamiento
 
-        equipo = enrolamiento.emitir_equipo("acme")
+        equipo = enrolamiento.canjear(enrolamiento.crear("acme")["codigo"])["token"]
         self.pedir(
             "POST",
             "/v1/events",

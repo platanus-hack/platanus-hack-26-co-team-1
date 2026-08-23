@@ -35,7 +35,14 @@ sys.path.insert(0, str(RAIZ / "backend"))
 from aegis_agent.panel.demo_data import semana_simulada  # noqa: E402
 from aegis_agent.panel.metrics import compute, repeat_offenders  # noqa: E402
 from aegis_agent.panel.render import render  # noqa: E402
-from aegis_backend import cuentas, directorio, enrolamiento, rutas, supabase  # noqa: E402
+from aegis_backend import (  # noqa: E402
+    cuentas,
+    directorio,
+    enrolamiento,
+    intentos,
+    rutas,
+    supabase,
+)
 from aegis_backend.classifier import anthropic_model  # noqa: E402
 from aegis_backend.store import DomainStore, PolicyStore  # noqa: E402
 
@@ -403,6 +410,20 @@ class Handler(BaseHTTPRequestHandler):
 
         return cuentas.del_encabezado(self.headers.get("Authorization"))
 
+    def _de_donde_viene(self) -> str:
+        """La IP a la que se le cuentan los intentos. Ver intentos.py."""
+
+        return intentos.desde_donde(
+            self.client_address[0] if self.client_address else "",
+            self.headers.get("X-Forwarded-For"),
+        )
+
+    def _sin_turno(self) -> None:
+        """El 429. Dice que hay que esperar y no cuantos intentos quedan: eso
+        ultimo le mide el limite a quien esta probando."""
+
+        self._json(429, {"error": "demasiados intentos, esperá unos minutos"})
+
     def _cuerpo(self) -> dict | None:
         largo = int(self.headers.get("Content-Length", "0") or 0)
         try:
@@ -511,16 +532,40 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"domains": DOMINIOS.count()})
 
     def _leer_politica(self, ruta: str) -> None:
-        """El agente pide su politica sin token, y esta bien.
+        """La politica de una empresa: para su panel, o para sus agentes.
 
-        No tiene con quien loguearse, y la politica es la configuracion que el
-        agente OBEDECE, no datos de nadie. Con sesion manda la sesion, y asi el
-        panel no puede leer la de otra empresa.
+        ESTO NO PEDIA NADA, y el argumento para no pedirlo --"la politica es la
+        configuracion que el agente OBEDECE, no datos de nadie"-- se quedo viejo
+        dos veces.
+
+        Primero porque dejo de ser cierto que no fueran datos de nadie: la
+        politica lleva `company_terms`, el diccionario de nombres de proyecto,
+        sistemas internos y archivos que la empresa carga a mano. `render.yaml`
+        lo llama "la lista mas sensible del sistema" y la escritura de aca abajo
+        ya la protegia por eso mismo. Con el nombre del tenant --que publica el
+        registro y muestra el panel-- cualquiera se bajaba la lista de lo que la
+        empresa considera secreto, de un producto que existe para que esa lista
+        no salga. Era el producto al reves, igual que el panel publico que
+        cuentas.py vino a cerrar.
+
+        Y segundo porque dejo de ser cierto que el agente no tuviera con quien
+        loguearse: desde el enrolamiento tiene token de equipo. Por eso valen
+        las dos credenciales -- son los dos lectores legitimos-- y en las dos el
+        tenant sale del token y nunca de la ruta.
         """
 
         sesion = self._sesion()
-        pedido = _tenant_de(ruta, "/v1/policy/")
-        self._json(200, POLITICAS.get(sesion["tenant"] if sesion else pedido))
+        if sesion is not None:
+            tenant = sesion["tenant"]
+        else:
+            tenant = enrolamiento.tenant_del_encabezado(
+                self.headers.get("Authorization")
+            )
+
+        if tenant is None:
+            self._json(401, {"error": "hace falta una sesion o un equipo enrolado"})
+        else:
+            self._json(200, POLITICAS.get(tenant))
 
     def _listar_colaboradores(self) -> None:
         sesion = self._sesion()
@@ -698,7 +743,17 @@ class Handler(BaseHTTPRequestHandler):
         usuario = str(datos.get("usuario", "")).strip().lower()
         contrasena = str(datos.get("password", ""))
 
-        if not (empresa and usuario and len(contrasena) >= 8):
+        # Aca se cuenta TODO intento y no solo los fallidos: en login y en
+        # enrolar el abuso es acertar, en este el abuso es acertar MUCHAS veces
+        # -- ocupar nombres de empresa hasta que el producto no sirva.
+        marca = f"registro:{self._de_donde_viene()}"
+        con_turno = intentos.permitido(marca)
+        if con_turno:
+            intentos.anotar(marca)
+
+        if not con_turno:
+            self._sin_turno()
+        elif not (empresa and usuario and len(contrasena) >= 8):
             self._json(
                 400,
                 {"error": "hace falta empresa, usuario y una contrasena de 8 o mas"},
@@ -727,8 +782,21 @@ class Handler(BaseHTTPRequestHandler):
         mandar los eventos. Nada del panel, nada de la politica.
         """
 
-        canje = enrolamiento.canjear(str(datos.get("codigo", "")))
-        if canje is None:
+        # Solo por IP, y no por codigo: contar por codigo le daria a cualquiera
+        # la forma de dejar sin canjear un codigo ajeno gastandole los intentos
+        # antes de que lo use su dueno.
+        marca = f"enrolar:{self._de_donde_viene()}"
+        con_turno = intentos.permitido(marca)
+
+        canje = None
+        if con_turno:
+            canje = enrolamiento.canjear(str(datos.get("codigo", "")))
+            if canje is None:
+                intentos.anotar(marca)
+
+        if not con_turno:
+            self._sin_turno()
+        elif canje is None:
             # Un solo motivo, igual que en el login: distinguir "no existe" de
             # "vencio" le confirma a quien prueba codigos cuales existieron.
             self._json(400, {"error": "codigo invalido o vencido"})
@@ -763,32 +831,52 @@ class Handler(BaseHTTPRequestHandler):
         mitad del trabajo de entrar.
         """
 
-        cuenta = cuentas.autenticar(
-            str(datos.get("usuario", "")), str(datos.get("password", ""))
-        )
-        if cuenta is None:
-            self._json(401, {"error": "usuario o contrasena incorrectos"})
+        usuario = str(datos.get("usuario", "")).strip().lower()
+        # Por IP Y por usuario: ver intentos.py. Quien rota IPs choca con el
+        # contador del usuario, y quien ataca a un usuario desde muchas IPs
+        # choca con el de la IP.
+        marcas = (f"login:{self._de_donde_viene()}", f"login:usuario:{usuario}")
+
+        if not intentos.permitido(*marcas):
+            self._sin_turno()
         else:
-            self._json(
-                200,
-                {
-                    "token": cuentas.emitir(
-                        cuenta["usuario"], cuenta["tenant"], cuenta.get("rol", "admin")
-                    ),
-                    "usuario": cuenta["usuario"],
-                    "tenant": cuenta["tenant"],
-                    "rol": cuenta.get("rol", "admin"),
-                },
-            )
+            cuenta = cuentas.autenticar(usuario, str(datos.get("password", "")))
+            if cuenta is None:
+                intentos.anotar(*marcas)
+                self._json(401, {"error": "usuario o contrasena incorrectos"})
+            else:
+                # Entrar bien limpia la cuenta: si no, quien se equivoca cuatro
+                # veces y acierta a la quinta arrastra el castigo cinco minutos.
+                intentos.olvidar(*marcas)
+                rol = cuentas.rol_de(cuenta)
+                self._json(
+                    200,
+                    {
+                        "token": cuentas.emitir(
+                            cuenta["usuario"], cuenta["tenant"], rol
+                        ),
+                        "usuario": cuenta["usuario"],
+                        "tenant": cuenta["tenant"],
+                        "rol": rol,
+                    },
+                )
 
     # -- escrituras ---------------------------------------------------------
 
     def _con_sesion(self, datos: dict | None, hacer) -> None:
-        """Casi toda escritura es igual: pedir sesion, validar cuerpo, actuar.
+        """Casi toda escritura es igual: pedir sesion, mirar el rol, actuar.
 
         Escrito una vez para que agregar una ruta no sea otra oportunidad de
         olvidarse del 401. Lo que llega a `hacer` ya tiene tenant y cuerpo
         validados, y el tenant viene del token: nunca del pedido.
+
+        El rol se mira ACA y no en cada handler por el mismo motivo por el que
+        se mira la sesion aca: es el unico lugar por el que pasan todas las
+        escrituras, y el unico donde olvidarse cuesta una sola vez. Hasta este
+        cambio el rol se emitia, se guardaba y se devolvia al frontend sin que
+        nadie lo comparara nunca -- cualquier sesion valida podia emitir codigos
+        de enrolamiento. Hoy no cambia nada porque todas las cuentas se crean
+        admin; cambia el dia que exista la primera que no.
 
         El cuerpo se recibe ya parseado y no se lee aca: `rfile` es un socket y
         se consume una sola vez, asi que leerlo de nuevo devolveria vacio.
@@ -798,7 +886,9 @@ class Handler(BaseHTTPRequestHandler):
         if sesion is None:
             self._json(401, {"error": "sesion requerida"})
         else:
-            if datos is None:
+            if not cuentas.puede_escribir(sesion):
+                self._json(403, {"error": "tu cuenta puede mirar, no cambiar"})
+            elif datos is None:
                 self._json(400, {"error": "cuerpo invalido"})
             else:
                 hacer(sesion["tenant"], datos)

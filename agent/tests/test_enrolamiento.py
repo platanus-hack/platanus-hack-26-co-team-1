@@ -106,16 +106,28 @@ class TestElCanje(unittest.TestCase):
         self.assertIsNone(enrolamiento.tenant_del_encabezado(f"Bearer {codigo}"))
 
 
+def _equipo(tenant: str = "acme", **kwargs) -> str:
+    """Un token de equipo como sale en la vida real: canjeando un codigo.
+
+    Existe porque `emitir_equipo` pide el codigo, y lo pide para poder darlo de
+    baja despues. Fabricar el token sin fila detras probaria un camino que en
+    produccion no ocurre.
+    """
+
+    codigo = enrolamiento.crear(tenant)["codigo"]
+    return enrolamiento.emitir_equipo(tenant, codigo, **kwargs)
+
+
 class TestElTokenDeEquipo(unittest.TestCase):
     def test_dice_de_que_empresa_es_el_equipo(self):
-        token = enrolamiento.emitir_equipo("acme")
+        token = _equipo()
         self.assertEqual(enrolamiento.tenant_del_encabezado(f"Bearer {token}"), "acme")
 
     def test_un_token_manoseado_no_vale(self):
-        token = enrolamiento.emitir_equipo("acme")
+        token = _equipo()
         crudo, firma = token.split(".")
         # Se cambia el cuerpo dejando la firma vieja: es el ataque obvio.
-        otro = enrolamiento.emitir_equipo("bancolombia").split(".")[0]
+        otro = _equipo("bancolombia").split(".")[0]
         self.assertIsNone(enrolamiento.leer_equipo(f"{otro}.{firma}"))
 
     def test_una_sesion_de_persona_no_sirve_como_equipo(self):
@@ -126,10 +138,55 @@ class TestElTokenDeEquipo(unittest.TestCase):
         sesion = cuentas.emitir("admin", "acme", "admin")
         self.assertIsNone(enrolamiento.leer_equipo(sesion))
 
+    def test_los_dos_formatos_dicen_que_son_adentro_de_la_firma(self):
+        """Y no se distinguen por casualidad, que es como estaban antes.
+
+        Los dos tokens comparten llave y formato de cable. Lo unico que impedia
+        cruzarlos eran dos chequeos que no se pusieron para eso: a la sesion se
+        le pedia `vence` --que el de equipo no lleva-- y al de equipo `tipo`.
+        Bastaba con darle expiracion al token de equipo, que es la mitad natural
+        de hacerlo revocable, para que pasara a ser una sesion valida. Y sin
+        `rol`. Este caso fija que la separacion sea el claim y no el descuido.
+        """
+
+        from aegis_backend import cuentas
+
+        self.assertEqual(cuentas.leer(cuentas.emitir("a", "acme", "admin"))["tipo"],
+                         cuentas.TIPO)
+        self.assertEqual(enrolamiento.leer_equipo(_equipo())["tipo"],
+                         enrolamiento.TIPO)
+        self.assertNotEqual(cuentas.TIPO, enrolamiento.TIPO)
+
+    def test_un_token_de_equipo_con_expiracion_sigue_sin_abrir_el_panel(self):
+        """La trampa concreta: agregarle `vence` al token de equipo.
+
+        Es lo primero que va a hacer quien quiera acortarle la vida, y antes del
+        claim de tipo lo convertia en una sesion administradora.
+        """
+
+        import hashlib
+        import hmac
+        import json
+        import time
+
+        from aegis_backend import cuentas
+
+        cuerpo = {
+            "tipo": "equipo",
+            "tenant": "acme",
+            "jti": "AEGISXXXXYYYY",
+            "vence": int(time.time()) + 9999,
+        }
+        crudo = enrolamiento._b64(json.dumps(cuerpo, separators=(",", ":")).encode())
+        firma = hmac.new(
+            cuentas._firma_del_servidor(), crudo.encode(), hashlib.sha256
+        ).digest()
+        self.assertIsNone(cuentas.leer(f"{crudo}.{enrolamiento._b64(firma)}"))
+
     def test_un_token_de_equipo_no_abre_el_panel(self):
         from aegis_backend import cuentas
 
-        equipo = enrolamiento.emitir_equipo("acme")
+        equipo = _equipo()
         self.assertIsNone(cuentas.leer(equipo))
 
     def test_el_token_de_equipo_no_vence(self):
@@ -141,8 +198,69 @@ class TestElTokenDeEquipo(unittest.TestCase):
         tiempo.
         """
 
-        token = enrolamiento.emitir_equipo("acme", ahora=0)
+        token = _equipo(ahora=0)
         self.assertEqual(enrolamiento.tenant_del_encabezado(f"Bearer {token}"), "acme")
+
+
+class TestDarDeBajaUnEquipo(unittest.TestCase):
+    """Que el token no venza obliga a que revocarlo funcione de verdad.
+
+    El modulo siempre dijo "se revoca por codigo, no por tiempo". Durante un
+    tiempo la primera mitad estaba y la segunda no: `revocar` frenaba canjes
+    futuros y el equipo YA enrolado seguia reportando para siempre, porque el
+    token no guardaba de que codigo habia salido. Estos casos son esa promesa,
+    escrita como test para que no se pueda volver a perder.
+    """
+
+    def test_revocar_el_codigo_deja_afuera_al_equipo_ya_enrolado(self):
+        codigo = enrolamiento.crear("acme")["codigo"]
+        token = enrolamiento.canjear(codigo)["token"]
+        self.assertEqual(enrolamiento.tenant_del_encabezado(f"Bearer {token}"), "acme")
+
+        self.assertTrue(enrolamiento.revocar(codigo))
+
+        self.assertIsNone(enrolamiento.leer_equipo(token))
+        self.assertIsNone(enrolamiento.tenant_del_encabezado(f"Bearer {token}"))
+
+    def test_revocar_un_codigo_no_toca_a_los_equipos_de_otro(self):
+        """La baja tiene que ser del codigo revocado y de ninguno mas."""
+
+        vivo = enrolamiento.canjear(enrolamiento.crear("acme")["codigo"])["token"]
+        condenado = enrolamiento.crear("acme")["codigo"]
+        enrolamiento.canjear(condenado)
+
+        enrolamiento.revocar(condenado)
+
+        self.assertEqual(enrolamiento.tenant_del_encabezado(f"Bearer {vivo}"), "acme")
+
+    def test_un_token_sin_jti_no_vale(self):
+        """Los de antes de que la revocacion existiera.
+
+        Se rechazan y no se toleran: un token que no se puede atar a ninguna
+        fila es exactamente la credencial imposible de dar de baja que este
+        cambio vino a sacar. El equipo se vuelve a enrolar, que son diez
+        segundos.
+        """
+
+        antiguo = _sin_jti("acme")
+        self.assertIsNone(enrolamiento.leer_equipo(antiguo))
+
+
+def _sin_jti(tenant: str) -> str:
+    """Un token de equipo del formato viejo, firmado de verdad."""
+
+    import hashlib
+    import hmac
+    import json
+
+    from aegis_backend import cuentas
+
+    cuerpo = {"tipo": "equipo", "tenant": tenant, "desde": 0}
+    crudo = enrolamiento._b64(json.dumps(cuerpo, separators=(",", ":")).encode())
+    firma = hmac.new(
+        cuentas._firma_del_servidor(), crudo.encode(), hashlib.sha256
+    ).digest()
+    return f"{crudo}.{enrolamiento._b64(firma)}"
 
 
 class TestElAislamiento(unittest.TestCase):

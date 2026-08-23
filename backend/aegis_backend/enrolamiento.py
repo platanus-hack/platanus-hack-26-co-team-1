@@ -36,6 +36,15 @@ token no serviria de nada -- bastaria con mandar otro numero.
 porque hay alguien para volver a entrar; un equipo instalado no tiene a nadie
 que lo renueve, y un agente que deja de reportar en silencio es exactamente el
 estado que este archivo existe para evitar. Se revoca por codigo, no por tiempo.
+
+**Y revocar por codigo tiene que revocar de verdad.** La primera version de esto
+decia justo lo de arriba y no lo cumplia: `revocar` marcaba la fila y solo
+frenaba canjes FUTUROS, porque el token emitido no guardaba ninguna referencia
+al codigo del que habia salido y `leer_equipo` no tenia contra que compararlo.
+Un equipo enrolado quedaba afuera de todo mecanismo de baja, para siempre, y lo
+unico que quedaba era rotar la llave del servidor -- que desloguea a todas las
+personas de todas las empresas a la vez. Por eso el token lleva `jti`: el codigo
+que lo origino. Con eso la baja del codigo alcanza al equipo que ya se enrolo.
 """
 
 from __future__ import annotations
@@ -142,7 +151,7 @@ def canjear(codigo: str, ahora: float | None = None) -> dict | None:
     fila["usos"] = int(fila.get("usos", 0)) + 1
     supabase.guardar_enrolamiento(fila)
     tenant = fila["tenant"]
-    return {"tenant": tenant, "token": emitir_equipo(tenant)}
+    return {"tenant": tenant, "token": emitir_equipo(tenant, fila["codigo"])}
 
 
 def revocar(codigo: str) -> bool:
@@ -175,6 +184,11 @@ def listar(tenant: str) -> list[dict]:
 # que no hay una segunda credencial que rotar ni un segundo lugar donde
 # equivocarse. Lo que cambia es lo que lleva adentro y que no vence.
 
+# Compartir la llave obliga a que el tipo viaje adentro de la firma: ver el
+# comentario de `cuentas.TIPO`, que explica por que no alcanza con que a cada
+# formato le falte un campo del otro.
+TIPO = "equipo"
+
 
 def _b64(datos: bytes) -> str:
     return base64.urlsafe_b64encode(datos).decode().rstrip("=")
@@ -184,10 +198,18 @@ def _des64(texto: str) -> bytes:
     return base64.urlsafe_b64decode(texto + "=" * (-len(texto) % 4))
 
 
-def emitir_equipo(tenant: str, ahora: float | None = None) -> str:
+def emitir_equipo(tenant: str, codigo: str, ahora: float | None = None) -> str:
+    """El token que lleva cada equipo enrolado.
+
+    `codigo` es obligatorio a proposito: un token de equipo que no salio de un
+    enrolamiento no deberia poder existir, y es la referencia que despues
+    permite darlo de baja.
+    """
+
     cuerpo = {
-        "tipo": "equipo",
+        "tipo": TIPO,
         "tenant": tenant,
+        "jti": _normalizar(codigo),
         "desde": int(time.time() if ahora is None else ahora),
     }
     crudo = _b64(json.dumps(cuerpo, separators=(",", ":")).encode())
@@ -195,6 +217,22 @@ def emitir_equipo(tenant: str, ahora: float | None = None) -> str:
         cuentas._firma_del_servidor(), crudo.encode(), hashlib.sha256
     ).digest()
     return f"{crudo}.{_b64(firma)}"
+
+
+def _dado_de_baja(jti: str) -> bool:
+    """Si el enrolamiento del que salio un token esta revocado.
+
+    Cuando la fila no aparece --Supabase caido, o el proceso recien arrancado y
+    sin cache-- el token se ACEPTA. Es fail-open a proposito y vale la pena
+    decir por que: la alternativa es que todos los agentes dejen de reportar
+    cada vez que la base hipa, y un agente mudo es el estado que este modulo
+    existe para evitar. La ventana ademas es angosta: `crear` deja la fila en
+    `_memoria` y `revocar` la actualiza ahi mismo, asi que en la instancia que
+    atiende los eventos la respuesta sale de memoria.
+    """
+
+    fila = _buscar(jti)
+    return bool(fila and fila.get("revocado"))
 
 
 def leer_equipo(token: str) -> dict | None:
@@ -214,7 +252,12 @@ def leer_equipo(token: str) -> dict | None:
                 cuerpo = json.loads(_des64(crudo))
             except (ValueError, TypeError):
                 cuerpo = None
-            if cuerpo and cuerpo.get("tipo") == "equipo" and cuerpo.get("tenant"):
+            # `jti` se exige: un token sin el es de antes de que la revocacion
+            # existiera y no se puede atar a ninguna fila. Aceptarlo seria
+            # dejar viva justo la credencial que no se puede dar de baja.
+            propio = bool(cuerpo) and cuerpo.get("tipo") == TIPO
+            completo = propio and bool(cuerpo.get("tenant")) and bool(cuerpo.get("jti"))
+            if completo and not _dado_de_baja(cuerpo["jti"]):
                 resultado = cuerpo
     return resultado
 

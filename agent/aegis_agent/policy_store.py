@@ -88,8 +88,17 @@ def refrescar_ahora(
     """
 
     try:
+        # El token de equipo, igual que al subir eventos (ver events.py). La
+        # politica lleva el diccionario de terminos de la empresa, asi que el
+        # backend dejo de repartirla sin credencial; sin esta cabecera el
+        # hot-reload contesta 401 y el agente se queda con la del disco.
+        cabeceras = {}
+        token = os.environ.get("AEGIS_EVENTS_TOKEN", "").strip()
+        if token:
+            cabeceras["Authorization"] = f"Bearer {token}"
+
         peticion = urllib.request.Request(
-            f"{url_base.rstrip('/')}/v1/policy/{tenant_id}"
+            f"{url_base.rstrip('/')}/v1/policy/{tenant_id}", headers=cabeceras
         )
         with urllib.request.urlopen(peticion, timeout=REQUEST_TIMEOUT) as respuesta:
             if respuesta.status == 200:
