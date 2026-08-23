@@ -8,8 +8,9 @@ lea el estado real sin modificarlo, y que install y uninstall sean simetricos.
 
 import os
 import unittest
+from unittest.mock import MagicMock, patch
 
-from aegis_agent.install import windows
+from aegis_agent.install import firewall, windows
 from aegis_agent.policy import PASSTHROUGH_DOMAINS
 
 ES_WINDOWS = os.name == "nt"
@@ -93,3 +94,60 @@ class TestEstadoReal(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSeEncuentraParaDesinstalar(unittest.TestCase):
+    """Donde la gente busca para desinstalar algo no es una terminal.
+
+    Sin la entrada en "Agregar o quitar programas", la unica forma de sacar
+    Aegis era acordarse de un comando -- y quien quiere desinstalar algo suele
+    ser justo quien no quiere aprender su CLI. En un producto que toca el proxy
+    del sistema eso termina mal: el que no encuentra como sacarlo borra el .exe,
+    y el proxy queda apuntando a un puerto muerto. Sin internet y sin nada que
+    apretar.
+    """
+
+    def test_instalar_lo_deja_en_la_lista_de_programas(self):
+        from aegis_agent.install import windows
+
+        with patch.object(windows, "ensure_ca", return_value=True), \
+             patch.object(windows, "trust_ca", return_value=True), \
+             patch.object(windows, "set_env_vars"), \
+             patch.object(windows, "registrar_arranque", return_value=True), \
+             patch.object(windows, "registrar_en_programas", return_value=True) as registrar:
+            hechos = windows.install(8899)
+        registrar.assert_called_once()
+        self.assertTrue(any("quitar programas" in h for h in hechos))
+
+    def test_desinstalar_lo_saca_de_la_lista(self):
+        from aegis_agent.install import windows
+
+        with patch.object(windows, "write_proxy_settings"), \
+             patch.object(windows, "untrust_ca", return_value=False), \
+             patch.object(windows, "clear_env_vars"), \
+             patch.object(windows, "quitar_arranque", return_value=True), \
+             patch.object(windows, "quitar_de_programas", return_value=True) as quitar, \
+             patch.object(firewall, "reglas_puestas", return_value=[]):
+            hechos = windows.uninstall()
+        quitar.assert_called_once()
+        self.assertTrue(any("quitar programas" in h for h in hechos))
+
+    def test_el_comando_de_desinstalacion_es_el_que_se_puede_correr(self):
+        """Si el UninstallString estuviera mal, el boton de Windows no haria nada."""
+
+        from aegis_agent import entorno
+        from aegis_agent.install import windows
+
+        guardados = {}
+        winreg = MagicMock()
+        winreg.CreateKey.return_value.__enter__ = lambda s: "clave"
+        winreg.CreateKey.return_value.__exit__ = lambda *a: None
+        winreg.SetValueEx.side_effect = lambda c, n, r, t, v: guardados.__setitem__(n, v)
+
+        with patch.object(windows, "_registry", return_value=winreg):
+            self.assertTrue(windows.registrar_en_programas())
+
+        self.assertIn("desinstalar", guardados["UninstallString"])
+        self.assertTrue(
+            any(p in guardados["UninstallString"] for p in entorno.ejecutable_del_agente())
+        )

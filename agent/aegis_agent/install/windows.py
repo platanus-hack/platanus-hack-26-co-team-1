@@ -365,6 +365,72 @@ def comando_de_arranque(port: int) -> str:
     return " ".join(f'"{parte}"' if " " in parte else parte for parte in partes)
 
 
+# -- "Agregar o quitar programas" -------------------------------------------
+#
+# Donde la gente BUSCA para desinstalar algo no es una terminal: es esa lista.
+# Sin esta entrada, la unica forma de sacar Aegis era acordarse de un comando --
+# y quien quiere desinstalar algo suele ser justo quien no quiere aprender su
+# CLI. Peor todavia en un producto que toca el proxy del sistema: alguien que no
+# encuentra como sacarlo termina borrando el .exe, y eso deja el proxy apuntando
+# a un puerto muerto. O sea, sin internet y sin nada que apretar.
+#
+# Va en HKCU y no en HKLM porque Aegis se instala por USUARIO: no pide
+# administrador para nada -- la CA va al almacen del usuario y el proxy es de su
+# perfil -- y una entrada en la lista de toda la maquina prometeria un alcance
+# que la instalacion no tiene.
+CLAVE_DE_DESINSTALACION = (
+    "Software" "\\" "Microsoft" "\\" "Windows" "\\" "CurrentVersion"
+    "\\" "Uninstall" "\\" "Aegis"
+)
+
+VERSION_MOSTRADA = "0.1.0"
+
+
+def registrar_en_programas() -> bool:
+    """Deja a Aegis en la lista de programas del usuario, con su desinstalador."""
+
+    winreg = _registry()
+    comando = " ".join(entorno.ejecutable_del_agente() + ["desinstalar"])
+    try:
+        with winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER, CLAVE_DE_DESINSTALACION
+        ) as clave:
+            for nombre, valor in (
+                ("DisplayName", "Aegis - proteccion de datos hacia IA"),
+                ("UninstallString", comando),
+                ("Publisher", "Aegis"),
+                ("DisplayVersion", VERSION_MOSTRADA),
+                ("InstallLocation", str(entorno.DIRECTORIO_CA)),
+            ):
+                winreg.SetValueEx(clave, nombre, 0, winreg.REG_SZ, valor)
+            # No hay reparar ni modificar: un boton que no hace nada es peor que
+            # un boton que no esta.
+            for nombre in ("NoModify", "NoRepair"):
+                winreg.SetValueEx(clave, nombre, 0, winreg.REG_DWORD, 1)
+        return True
+    except OSError:
+        return False
+
+
+def quitar_de_programas() -> bool:
+    winreg = _registry()
+    try:
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, CLAVE_DE_DESINSTALACION)
+        return True
+    except OSError:
+        return False
+
+
+def registrado_en_programas() -> bool:
+    winreg = _registry()
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, CLAVE_DE_DESINSTALACION):
+            return True
+    except OSError:
+        return False
+
+
+
 def registrar_arranque(port: int) -> bool:
     winreg = _registry()
     try:
@@ -431,6 +497,8 @@ def install(port: int, mitmdump: str | None = None) -> list[str]:
     # El orden no es un detalle de estilo: es el invariante.
     set_env_vars(port)
     hechos.append("Variables de entorno configuradas para los CLIs")
+    if registrar_en_programas():
+        hechos.append("Aegis aparece en 'Agregar o quitar programas'")
     if registrar_arranque(port):
         hechos.append("Aegis va a arrancar solo cuando inicies sesion")
     else:
@@ -481,6 +549,8 @@ def uninstall() -> list[str]:
     hechos.append("Variables de entorno eliminadas")
     if quitar_arranque():
         hechos.append("Arranque automatico quitado")
+    if quitar_de_programas():
+        hechos.append("Quitado de 'Agregar o quitar programas'")
     hechos.extend(_liberar_el_firewall())
     return hechos
 

@@ -219,6 +219,57 @@ def _demo(puerto: int) -> int:
     return run.main() or 0
 
 
+def _inicio(puerto: int) -> int:
+    """Lo que pasa al hacer DOBLE CLIC en Aegis.exe, que es como se abre esto.
+
+    Antes, sin argumentos, se imprimia la tabla de estado. Para quien acaba de
+    descargar el programa eso son ocho lineas de vocabulario interno que
+    terminan en "Aegis no esta activo": describe el problema y no ofrece la
+    salida. Nadie abre un instalador para leer un diagnostico.
+
+    Ahora hay una sola pregunta en cada momento:
+
+      - sin instalar  -> se dice que va a hacer y se ofrece hacerlo
+      - ya instalado  -> se abre el panel, que es donde se mira y se opera
+
+    Y si nadie esta mirando la consola (un script, una tarea programada, un
+    test) NO se pregunta nada: se cae al estado de siempre. Un instalador que
+    se queda esperando una tecla que nunca llega es un instalador colgado.
+    """
+
+    from . import control
+
+    situacion = control.estado(puerto)["situacion"]
+
+    if situacion != control.SIN_INSTALAR:
+        return _panel(puerto)
+
+    if not sys.stdin or not sys.stdin.isatty():
+        return _estado(puerto)
+
+    from .install import windows
+
+    print("  Aegis todavia no esta instalado en este equipo.")
+    print()
+    print("  Esto es lo que va a hacer:")
+    for paso in windows.plan(puerto):
+        print(f"    - {paso.description}")
+    print()
+    print("  Windows te va a pedir permiso para el certificado. Hay que aceptar:")
+    print("  sin eso Aegis no puede revisar nada y cada sitio seguro te avisa.")
+    print()
+    try:
+        respuesta = input("  Instalar ahora? [s/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        respuesta = ""
+    if respuesta not in ("s", "si", "y", "yes"):
+        print("  No se toco nada. Cuando quieras: aegis instalar")
+        return 0
+    print()
+    return _instalar(puerto)
+
+
+
 def _panel(puerto: int) -> int:
     """Levanta el panel local y abre el navegador ahi.
 
@@ -299,6 +350,7 @@ ACCIONES: dict[str, str] = {
     "run": "_servicio",
     "estado": "_estado",
     "status": "_estado",
+    "inicio": "_inicio",
     "panel": "_panel",
     "prender": "_prender",
     "encender": "_prender",
@@ -314,7 +366,7 @@ ACCIONES: dict[str, str] = {
 
 def main(argv: list[str] | None = None) -> int:
     argumentos = list(sys.argv[1:] if argv is None else argv)
-    accion = argumentos[0].lower() if argumentos else "estado"
+    accion = argumentos[0].lower() if argumentos else "inicio"
 
     if accion in ("-h", "--help", "help", "ayuda"):
         print(AYUDA)
