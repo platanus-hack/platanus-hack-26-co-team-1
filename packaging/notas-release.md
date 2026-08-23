@@ -2,21 +2,29 @@ Aegis se pone entre tu computadora y los servicios de IA —ChatGPT, Claude, Cop
 
 Cuando encuentra algo, te lo explica antes de que salga.
 
-## Cuál descargar
+## Qué se descarga
 
-| | Peso | Qué detecta |
-|---|---|---|
-| **`Aegis-windows.zip`** | 103 MB | Credenciales, documentos, tarjetas, capturas de pantalla. Es el que querés para probar. |
-| `Aegis-windows-completo.zip` | 1,2 GB | Todo lo anterior **más el modelo local**, que es lo único que ve los datos de empresa: *"el margen con Alpina quedó en 4%"*. Las reglas ven 0 de 14 de esos casos; el modelo es lo que los cubre. |
+`Aegis-windows-completo.zip` — 1,2 GB.
 
-El completo trae el modelo adentro y viene prendido: no descarga nada en el primer uso.
+Trae las reglas deterministas, el diccionario de tu empresa, la lectura de texto en imágenes **y el modelo local**, que es lo único que ve los datos de negocio: *"el margen con Alpina quedó en 4%"*. Sobre el banco de pruebas, las reglas ven 0 de 14 de esos casos y el modelo es lo que los cubre.
+
+El modelo viaja adentro y viene prendido: no descarga nada la primera vez que lo usás, ni te sorprende con un giga en el primer envío.
 
 ## Para instalarlo
 
 1. Descargá el zip y descomprimilo donde quieras.
 2. Doble clic en **`Instalar Aegis.bat`**.
-3. Windows te va a pedir permiso para confiar en el certificado de Aegis. Hay que **aceptar**: sin eso, cada sitio seguro te muestra una advertencia.
-4. Si tu empresa te dio un código, pegalo cuando te lo pida. Ese equipo empieza a reportar a su panel.
+3. Windows te va a pedir permiso para confiar en el certificado de Aegis. Hay que **aceptar**: sin eso, cada sitio seguro te muestra una advertencia y Aegis no se activa.
+
+Desde ahí ya estás protegido, y arranca solo cada vez que iniciás sesión.
+
+## Para conectarlo con tu empresa
+
+Si tu empresa usa Aegis, pedile el código al administrador —son cuatro letras o números, un guion, y otros cuatro— y hacé doble clic en **`Conectar con mi empresa.bat`**.
+
+Son dos pasos separados a propósito: **instalar** decide si este equipo está protegido, **conectar** decide a quién le reporta y de quién recibe la configuración. Podés hacerlos en cualquier orden.
+
+Sin conectar, Aegis igual te protege: bloquea, avisa y te explica. Lo que no pasa es que tu empresa se entere, ni que te lleguen sus políticas —sus términos internos, qué herramientas están aprobadas, qué se bloquea y qué solo se avisa—.
 
 ## Los otros lanzadores
 
@@ -40,4 +48,4 @@ Si en algún momento no tenés internet, es porque el navegador apunta a Aegis y
 
 ---
 
-Requiere Windows. 109 MB comprimido, 249 MB en disco. Incluye la lectura de texto en imágenes (apagada por defecto, se prende desde el panel).
+Requiere Windows. 1,2 GB comprimido. Incluye el modelo local (prendido) y la lectura de texto en imágenes (apagada por defecto, se prende desde el panel).

@@ -17,8 +17,16 @@ ORG="platanus-hack/platanus-hack-26-co-team-1"
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$RAIZ"
 
-INSTALADOR="dist/Aegis-windows.zip"
-# El modelo ya no se publica aparte: viaja adentro del instalador (ver 4/4).
+# El COMPLETO y no el liviano: es el unico que se publica.
+#
+# El liviano se retiro porque no ve los datos de empresa -lo que no tiene forma
+# de credencial-, que es justo lo que el producto promete cuidar. Quien lo
+# probaba no se enteraba de que estaba a medias: bloquea claves y pasa por alto
+# "el margen con Alpina quedo en 4%". Ofrecer los dos era ofrecer una version
+# que falla en silencio, y la mayoria elige por peso.
+#
+# El modelo tampoco se publica aparte: viaja adentro (ver 4/4).
+INSTALADOR="dist/Aegis-windows-completo.zip"
 
 echo "==> 1/4  Comprobando que no se suba nada a medias"
 if [ -n "$(git status --porcelain)" ]; then
