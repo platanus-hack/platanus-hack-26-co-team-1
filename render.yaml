@@ -45,5 +45,16 @@ services:
       # Clasificar dominios y escribir lecciones. Tambien a mano.
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Con que se firman los tokens. SIN ESTO se genera una al azar en cada
+      # arranque, y el plan gratuito de Render duerme el servicio por
+      # inactividad: cada vez que despierta caducan todas las sesiones Y todos
+      # los tokens de equipo, porque se firman con la misma llave. Un agente
+      # enrolado ayer deja de poder reportar hoy, y en silencio -- subir eventos
+      # es telemetria y su fallo no se le muestra a nadie.
+      #
+      # Se pone a mano, una vez, con cualquier cadena larga al azar:
+      #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+      - key: AEGIS_FIRMA
+        sync: false
       # Con un plan de pago se monta un disco y se apunta AEGIS_DATA_DIR ahi
       # para que los eventos sobrevivan a los reinicios aun sin Supabase.
