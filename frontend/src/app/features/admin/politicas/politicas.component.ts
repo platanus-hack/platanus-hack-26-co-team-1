@@ -6,6 +6,7 @@ import { BadgeComponent } from '../../../shared/ui/badge/badge.component';
 import { colorForName } from '../../../shared/utils/color-hash';
 import { PoliticaService } from '../../../shared/data/politica.service';
 import { DirectorioService } from '../../../shared/data/directorio.service';
+import { EnrolamientoService } from '../../../shared/data/enrolamiento.service';
 
 interface Herramienta {
   nombre: string;
@@ -41,6 +42,11 @@ export class PoliticasComponent implements OnInit {
   protected readonly colorForName = colorForName;
   private readonly servicio = inject(PoliticaService);
   private readonly directorio = inject(DirectorioService);
+  private readonly enrolamiento = inject(EnrolamientoService);
+
+  readonly codigos = this.enrolamiento.codigos;
+  readonly generandoCodigo = this.enrolamiento.generando;
+  readonly ultimoCodigo = this.enrolamiento.ultimo;
 
   readonly politica = this.servicio.politica;
   readonly guardando = this.servicio.guardando;
@@ -52,6 +58,7 @@ export class PoliticasComponent implements OnInit {
     // Las apps de la lista salen del inventario y no de una constante: son las
     // que de verdad corren en la empresa, descubiertas por su propio tráfico.
     void this.directorio.cargarInventario();
+    void this.enrolamiento.cargar();
   }
 
   /** Las aplicaciones que Aegis vio corriendo, para poder tratarlas distinto. */
@@ -61,6 +68,14 @@ export class PoliticasComponent implements OnInit {
       .inventario()
       .filter((f) => f.clase === 'agente')
       .map((f) => ({ nombre: f.nombre, modo: modos[f.nombre] ?? 'bloquear' }));
+  }
+
+  presentable(codigo: string): string {
+    return this.enrolamiento.presentable(codigo);
+  }
+
+  async generarCodigo(): Promise<void> {
+    await this.enrolamiento.generar();
   }
 
   async cambiarModoDeApp(nombre: string, modo: string): Promise<void> {

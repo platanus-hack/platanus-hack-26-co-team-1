@@ -31,8 +31,11 @@
         </div>
 
         <div class="mt-8 flex flex-wrap items-center gap-4 animate-riseIn" style="animation-delay: 240ms">
-          <a routerLink="/colaborador/login" class="aegis-shine inline-flex items-center gap-2 bg-aegis-accent px-5 py-3 text-sm font-semibold text-white transition hover:bg-aegis-accentdeep">
+          <!-- Decia "Descargar Aegis" y llevaba al login: un boton que miente
+               sobre lo que hace. Ahora descarga. -->
+          <a href="/descargar" class="aegis-shine inline-flex items-center gap-2 bg-aegis-accent px-5 py-3 text-sm font-semibold text-white transition hover:bg-aegis-accentdeep">
             Descargar Aegis
+            <span class="opacity-70">para Windows</span>
           </a>
           <a href="#como-funciona" class="inline-flex items-center gap-1.5 text-sm font-medium text-aegis-text">
             Ver cómo funciona

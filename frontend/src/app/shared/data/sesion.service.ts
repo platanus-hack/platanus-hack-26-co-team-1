@@ -56,6 +56,19 @@ export class SesionService {
     return error;
   }
 
+  /**
+   * Adopta una sesión que ya vino armada, sin volver a pedir credenciales.
+   *
+   * La usa el registro: pedirle a alguien que se loguee justo después de
+   * elegir su contraseña es hacerle escribir dos veces lo mismo, y es donde
+   * más gente abandona un alta.
+   */
+  adoptar(token: string, tenant: string, usuario: string): void {
+    const sesion: Sesion = { token, tenant, usuario } as Sesion;
+    this.actual.set(sesion);
+    this.guardar(sesion);
+  }
+
   salir(): void {
     this.actual.set(null);
     try {

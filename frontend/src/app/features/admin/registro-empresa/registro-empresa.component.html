@@ -112,6 +112,39 @@
         </div>
       }
 
+      @if (step === 3) {
+        <div class="text-center">
+          <span class="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-aegis-green/10 text-aegis-green">
+            <svg viewBox="0 0 24 24" fill="none" class="h-6 w-6"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <h2 class="font-display text-xl font-semibold text-aegis-text">Tu empresa ya existe en Aegis</h2>
+          <p class="mx-auto mt-2 max-w-md text-sm text-aegis-dim">
+            Este es el código del primer equipo. Quien instale Aegis lo pega una vez y ese equipo empieza a
+            reportar acá. Podés generar más desde el panel cuando quieras.
+          </p>
+
+          <p class="mx-auto my-6 w-fit select-all rounded-xl border border-aegis-accent/30 bg-aegis-accent/[0.06] px-8 py-4 font-mono text-2xl font-semibold tracking-widest text-aegis-accent">
+            {{ codigoInicial() }}
+          </p>
+
+          <p class="mx-auto max-w-md text-xs text-aegis-faint">
+            Guardalo ahora: el código se puede volver a ver en el panel, pero esta pantalla no vuelve.
+          </p>
+
+          <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <a class="aegis-btn-secondary" href="/descargar">Descargar Aegis para Windows</a>
+            <button type="button" class="aegis-btn-primary" (click)="irAlPanel()">Ir al panel ↗</button>
+          </div>
+        </div>
+      }
+
+      @if (error() && step < 3) {
+        <p class="mt-6 rounded-lg border border-aegis-red/25 bg-aegis-red/[0.06] px-3 py-2 text-sm text-aegis-red">
+          {{ error() }}
+        </p>
+      }
+
+      @if (step < 3) {
       <div class="mt-10 flex items-center justify-between border-t border-aegis-border pt-6">
         @if (step > 0) {
           <button type="button" class="aegis-btn-ghost" (click)="back()">← Atrás</button>
@@ -122,9 +155,12 @@
         @if (step < steps.length - 1) {
           <button type="button" class="aegis-btn-primary" (click)="next()">Continuar ↗</button>
         } @else {
-          <button type="button" class="aegis-btn-primary" (click)="crearCuenta()">Crear cuenta de empresa ↗</button>
+          <button type="button" class="aegis-btn-primary" [disabled]="creando()" (click)="crearCuenta()">
+            {{ creando() ? 'Creando…' : 'Crear cuenta de empresa ↗' }}
+          </button>
         }
       </div>
+      }
     </div>
   </div>
 </div>

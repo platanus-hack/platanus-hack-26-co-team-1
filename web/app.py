@@ -426,6 +426,7 @@ class Handler(BaseHTTPRequestHandler):
             "/v1/inventario": self._listar_inventario,
             "/v1/tenant": self._leer_tenant,
             "/v1/enrolamiento": self._listar_codigos,
+            "/descargar": self._descargar,
         }
 
         if ruta == "/panel" or (ruta == "/" and not hay_front()):
@@ -548,6 +549,33 @@ class Handler(BaseHTTPRequestHandler):
             datos = directorio.tenant(sesion["tenant"])
             self._json(200, datos or {"tenant": sesion["tenant"], "areas": []})
 
+    def _descargar(self) -> None:
+        """El boton de descarga. Redirige, no sirve el archivo.
+
+        El paquete pesa 109 MB y el disco de Render es efimero: servirlo desde
+        aca significaria meterlo en el repositorio y volver a subirlo en cada
+        deploy. Se redirige a donde de verdad vive -- un release de GitHub -- y
+        `AEGIS_DESCARGA_URL` lo apunta a otro lado sin tocar codigo.
+
+        Si nadie lo configuro se DICE, en vez de mandar a la persona a un 404
+        que parece un error del producto.
+        """
+
+        destino = os.environ.get("AEGIS_DESCARGA_URL", "").strip()
+        if destino:
+            self.send_response(302)
+            self.send_header("Location", destino)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        else:
+            self._json(
+                503,
+                {
+                    "error": "todavia no hay una version publicada para descargar",
+                    "como": "definir AEGIS_DESCARGA_URL con el enlace al paquete",
+                },
+            )
+
     def _listar_codigos(self) -> None:
         """Los codigos de la empresa de quien pregunta. De ninguna otra."""
 
@@ -594,6 +622,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._entrar(datos)
             elif ruta in ("/v1/events", "/api/events"):
                 self._recibir_evento(datos)
+            elif ruta == "/v1/registro":
+                self._registrar_empresa(datos)
             elif ruta == "/v1/enrolar":
                 self._enrolar(datos)
             elif ruta == "/v1/enrolamiento":
@@ -635,6 +665,45 @@ class Handler(BaseHTTPRequestHandler):
             # correcto.
             guardar({**datos, "tenant_id": tenant})
             self._json(202, {"accepted": datos.get("event_id")})
+
+    def _registrar_empresa(self, datos: dict) -> None:
+        """Crea una empresa, su primer admin, y el codigo para su primer equipo.
+
+        Las tres cosas juntas y no en tres pantallas: una empresa sin admin no
+        se puede mirar y un admin sin codigo no tiene como sumar un equipo, asi
+        que separarlas solo produce estados a medias que alguien tiene que
+        recordar completar.
+
+        No pide sesion -- es el unico endpoint que crea una -- asi que lo unico
+        que lo protege es que el nombre de empresa no exista. Alcanza para el
+        alta autoservicio; una instalacion seria pone esto detras de una
+        invitacion.
+        """
+
+        empresa = str(datos.get("empresa", "")).strip().lower()
+        usuario = str(datos.get("usuario", "")).strip().lower()
+        contrasena = str(datos.get("password", ""))
+
+        if not (empresa and usuario and len(contrasena) >= 8):
+            self._json(
+                400,
+                {"error": "hace falta empresa, usuario y una contrasena de 8 o mas"},
+            )
+        elif cuentas.buscar(usuario) is not None:
+            # No se dice si lo que existe es el usuario o la empresa: es la
+            # misma discrecion del login.
+            self._json(409, {"error": "ese usuario ya existe"})
+        else:
+            cuentas.guardar(usuario, contrasena, empresa, rol="admin")
+            directorio.guardar_tenant({"tenant": empresa, "areas": []})
+            self._json(
+                200,
+                {
+                    "tenant": empresa,
+                    "token": cuentas.emitir(usuario, empresa, "admin"),
+                    "codigo": enrolamiento.crear(empresa)["codigo"],
+                },
+            )
 
     def _enrolar(self, datos: dict) -> None:
         """Canjea el codigo por el token de equipo y por a donde reportar.

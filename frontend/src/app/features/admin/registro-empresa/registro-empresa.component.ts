@@ -1,7 +1,8 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { RegistroService } from '../../../shared/data/registro.service';
 import { GradientWavesComponent } from '../../../shared/effects/gradient-waves/gradient-waves.component';
 import { VerticalStepperComponent } from '../../../shared/ui/vertical-stepper/vertical-stepper.component';
 import { LogoComponent } from '../../../shared/ui/logo/logo.component';
@@ -46,6 +47,12 @@ export class RegistroEmpresaComponent {
   areas: string[] = ['Marketing', 'Contabilidad', 'RR.HH.'];
   nuevaArea = '';
 
+  private readonly registro = inject(RegistroService);
+
+  readonly creando = this.registro.creando;
+  readonly error = this.registro.error;
+  readonly codigoInicial = this.registro.codigoInicial;
+
   constructor(private router: Router) {}
 
   agregarArea(): void {
@@ -68,7 +75,22 @@ export class RegistroEmpresaComponent {
     if (this.step > 0) this.step--;
   }
 
-  crearCuenta(): void {
+  /** Antes esto navegaba y no creaba nada: tres pasos que no dejaban rastro. */
+  async crearCuenta(): Promise<void> {
+    if (this.admin.password !== this.admin.confirmar) {
+      this.error.set('Las contraseñas no coinciden.');
+      return;
+    }
+    const empresa = this.empresa.nombre.trim().toLowerCase().replace(/\s+/g, '-');
+    const usuario = this.admin.email.trim().toLowerCase();
+    if (await this.registro.crear(empresa, usuario, this.admin.password)) {
+      // Al paso del código, que es lo único que la persona todavía necesita
+      // de esta pantalla: sin él no puede sumar su primer equipo.
+      this.step = this.steps.length;
+    }
+  }
+
+  irAlPanel(): void {
     this.router.navigateByUrl('/admin/colaboradores');
   }
 }

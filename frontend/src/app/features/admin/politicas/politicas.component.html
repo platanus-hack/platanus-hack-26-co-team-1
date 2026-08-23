@@ -78,6 +78,56 @@
           <div class="mb-1 flex items-center gap-2.5">
             <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
               <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4">
+                <path d="M11.5 3.5l5 5-6 6-5-5v-5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+                <circle cx="13" cy="7" r="1" fill="currentColor"/>
+                <path d="M3.5 12.5l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <h2 class="font-display text-sm font-semibold uppercase tracking-wide text-aegis-text">Sumar equipos</h2>
+          </div>
+          <p class="mb-4 text-sm text-aegis-dim">
+            Cada equipo se suma con un código. Quien instale Aegis lo pega una vez y ese equipo empieza a reportar
+            acá. Sin código, el agente protege el equipo pero este panel no lo ve.
+          </p>
+
+          @if (ultimoCodigo()) {
+            <p class="mb-4 w-fit select-all rounded-lg border border-aegis-accent/30 bg-aegis-accent/[0.06] px-5 py-3 font-mono text-lg font-semibold tracking-widest text-aegis-accent">
+              {{ presentable(ultimoCodigo()!) }}
+            </p>
+          }
+
+          <div class="mb-4 flex flex-wrap gap-2">
+            @for (c of codigos(); track c.codigo) {
+              <!-- La clase entera por rama y no `[class.x/25]`: un nombre de
+                   clase con barra no es un identificador que Angular parsee. -->
+              <span class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-xs"
+                    [ngClass]="c.revocado
+                      ? 'border-aegis-border bg-aegis-surface2 text-aegis-faint line-through'
+                      : 'border-aegis-border text-aegis-dim'">
+                {{ presentable(c.codigo) }}
+                <span class="text-aegis-faint">{{ c.usos }} equipo(s)</span>
+              </span>
+            } @empty {
+              <p class="text-sm text-aegis-faint">Todavía no generaste ningún código.</p>
+            }
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button type="button" class="aegis-btn-secondary" [disabled]="generandoCodigo()" (click)="generarCodigo()">
+              {{ generandoCodigo() ? 'Generando…' : 'Generar un código' }}
+            </button>
+            <a class="aegis-btn-ghost" href="/descargar">Descargar el instalador</a>
+          </div>
+          <p class="mt-2 text-xs text-aegis-faint">
+            El código sirve para sumar un equipo, no para leer lo que reporta: para entrar a este panel hace falta
+            una cuenta. Se puede pasar por chat sin riesgo.
+          </p>
+        </div>
+
+        <div class="aegis-card p-6">
+          <div class="mb-1 flex items-center gap-2.5">
+            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-aegis-accent/10 text-aegis-accent">
+              <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4">
                 <rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.4"/>
                 <circle cx="7.5" cy="9.5" r="1.75" stroke="currentColor" stroke-width="1.4"/>
                 <path d="M11.5 8.5h4M11.5 11.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
