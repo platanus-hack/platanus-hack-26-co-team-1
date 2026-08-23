@@ -185,3 +185,57 @@ class TestLoQueQuedaFuera(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestElPdfAdjuntoDeVerdad(unittest.TestCase):
+    """Un PDF viaja con cabeceras alrededor, y una de ellas lo escondia.
+
+    El regex de streams buscaba `stream...endstream` en el cuerpo entero, y la
+    cabecera con la que viaja la mayoria de los adjuntos dice
+    `Content-Type: application/octet-stream`. Esa palabra daba el PRIMER match:
+    el `.*?endstream` se tragaba el PDF completo desde la cabecera, zlib fallaba
+    sobre esos bytes y el texto de verdad no se extraia nunca.
+
+    Lo peor no es que no detectara: es que `truncated` seguia en False. El
+    evento decia que el escaneo habia sido completo, o sea que un contrato con
+    una credencial adentro se subia entero y el panel lo mostraba limpio.
+    """
+
+    SECRETO = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"
+
+    def _pdf(self) -> bytes:
+        flujo = zlib.compress(f"BT (llave: {self.SECRETO}) Tj ET".encode())
+        return (
+            b"%PDF-1.4\n1 0 obj\n<< /Length " + str(len(flujo)).encode()
+            + b" /Filter /FlateDecode >>\nstream\n" + flujo
+            + b"\nendstream\nendobj\n%%EOF"
+        )
+
+    def _adjunto(self, content_type: str) -> bytes:
+        return (
+            f'--x\r\nContent-Disposition: form-data; name="file"; '
+            f'filename="contrato.pdf"\r\nContent-Type: {content_type}\r\n\r\n'
+        ).encode() + self._pdf()
+
+    def _reglas(self, datos: bytes) -> set[str]:
+        return {f.rule_id for f in scan_payload(datos).findings}
+
+    def test_como_octet_stream_que_es_lo_mas_comun(self):
+        self.assertIn(
+            "aws_access_key_id", self._reglas(self._adjunto("application/octet-stream"))
+        )
+
+    def test_como_application_pdf(self):
+        self.assertIn(
+            "aws_access_key_id", self._reglas(self._adjunto("application/pdf"))
+        )
+
+    def test_cualquier_cabecera_con_la_palabra_stream(self):
+        """El arreglo es general, no un parche para un content-type."""
+
+        for tipo in ("application/x-stream", "video/x-flv-stream", "text/event-stream"):
+            with self.subTest(tipo=tipo):
+                self.assertIn("aws_access_key_id", self._reglas(self._adjunto(tipo)))
+
+    def test_y_el_pdf_pelado_sigue_funcionando(self):
+        self.assertIn("aws_access_key_id", self._reglas(self._pdf()))

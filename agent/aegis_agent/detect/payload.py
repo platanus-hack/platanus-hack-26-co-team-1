@@ -122,8 +122,16 @@ MAX_PDF_STREAMS = 20
 # barras invertidas en una expresion regular a traves de una herramienta de
 # edicion es la trampa que documenta ESTADO.md seccion 6.
 _TRAS_STREAM = bytes([13, 10, 9, 32])
+# `(?<![-\w])` es el arreglo de un bug real y no una precaucion teorica.
+#
+# Sin eso, la palabra "stream" de `Content-Type: application/octet-stream` --la
+# cabecera con la que viaja la mayoria de los adjuntos-- daba el primer match.
+# El `.*?endstream` se tragaba el PDF entero desde la cabecera, zlib fallaba
+# sobre esos bytes, y el texto de verdad no se extraia NUNCA. Un contrato con
+# una credencial adentro se subia entero y el escaneo decia que estaba limpio.
 _PDF_STREAM = re.compile(
-    b"stream[" + re.escape(_TRAS_STREAM) + b"]{0,2}(.*?)endstream", re.DOTALL
+    rb"(?<![-\w])stream[" + re.escape(_TRAS_STREAM) + b"]{0,2}(.*?)endstream",
+    re.DOTALL,
 )
 
 
@@ -461,8 +469,14 @@ def _pdf_views(payload: bytes) -> list[str]:
     """
 
     views: list[str] = []
-    if b"%PDF" in payload[:1024]:
-        for match in _PDF_STREAM.finditer(payload):
+    # Se busca DESDE el %PDF y no desde el arranque del cuerpo: lo que hay antes
+    # son las cabeceras del multipart, que no son parte del documento y solo
+    # pueden ensuciar. Es el cinturon del guardia de arriba -- cualquier palabra
+    # de una cabecera futura tampoco va a poder confundir al regex.
+    inicio = payload.find(b"%PDF", 0, 1024)
+    if inicio >= 0:
+        documento = payload[inicio:]
+        for match in _PDF_STREAM.finditer(documento):
             if len(views) >= MAX_PDF_STREAMS:
                 break
             crudo = match.group(1)
