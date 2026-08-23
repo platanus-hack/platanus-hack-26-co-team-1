@@ -10,13 +10,14 @@ from mitmproxy import http
 from .. import cert_siblings
 from ..detect import model
 from ..detect.payload import scan_payload, scan_preview
+from ..detect.ruleset import ruleset_de
 from ..domains import DomainClient
 from ..detect.types import Finding
 from ..events import DEFAULT_QUEUE, build_event, enqueue
 from ..lessons import lesson_for
 from ..policy import Classification, Policy, classify, decide, looks_like_ai_api
 from ..policy_store import cargar as cargar_politica
-from ..policy_store import refrescar_en_segundo_plano
+from ..policy_store import refrescar_ahora
 from ..sensor import SensorDePuntosCiegos
 from ..signals import SignalCollector
 from . import blockpage
@@ -122,11 +123,20 @@ class Aegis:
         if model.habilitado():
             threading.Thread(target=model.cargar, daemon=True).start()
 
-        if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
-            refrescar_en_segundo_plano(
-                os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686"),
-                self.policy.tenant_id,
+        self._url_backend = os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686")
+        # Cada cuanto se vuelve a pedir la politica. Un minuto alcanza: lo que
+        # la web guarda tarda eso en aplicar, sin martillar el backend.
+        try:
+            self._intervalo_refresco = float(
+                os.environ.get("AEGIS_REFRESCO_POLITICA", "60")
             )
+        except ValueError:
+            self._intervalo_refresco = 60.0
+
+        if os.environ.get("AEGIS_BACKEND_DISABLED") != "1":
+            # El refresco corre en bucle y aplica en caliente: la politica que
+            # la web edita cambia el comportamiento sin reiniciar el agente.
+            threading.Thread(target=self._refrescar_en_bucle, daemon=True).start()
             # La lista negra se sincroniza sola al arrancar y despues cada
             # tanto: nunca en el camino de una decision, que sigue siendo
             # 100% local (suffixes.py).
@@ -205,6 +215,28 @@ class Aegis:
         if ruta:
             firewall.bloquear_programa(ruta, self.sensor.ips_conocidas())
 
+    def _refrescar_politica(self) -> None:
+        """Un tick del hot-reload: pedir, persistir y aplicar la politica.
+
+        El swap es una asignacion de referencia (atomica en CPython) y solo
+        pasa cuando la politica realmente cambio: el cache del ruleset es por
+        identidad, y reemplazar el objeto sin necesidad recompilaria las
+        regex en cada tick.
+        """
+
+        nueva = refrescar_ahora(self._url_backend, self.policy.tenant_id)
+        if nueva is not None and nueva != self.policy:
+            self.policy = nueva
+
+    def _refrescar_en_bucle(self) -> None:
+        while True:
+            try:
+                self._refrescar_politica()
+            except Exception:
+                # Un tick roto no puede matar el hilo: el proximo lo reintenta.
+                pass
+            time.sleep(self._intervalo_refresco)
+
     def request(self, flow: http.HTTPFlow) -> None:
         # Otro addon (el upstream simulado de los tests) pudo responder antes.
         if flow.response is None:
@@ -219,9 +251,13 @@ class Aegis:
         message = flow.websocket.messages[-1]
         if message.from_client:
             host = flow.request.pretty_host
-            classification = classify(host, self.policy)
+            politica = self.policy
+            classification = classify(host, politica)
             if classification not in ("passthrough", "non_ai"):
-                result = scan_payload(message.content if isinstance(message.content, bytes) else str(message.content).encode())
+                result = scan_payload(
+                    message.content if isinstance(message.content, bytes) else str(message.content).encode(),
+                    ruleset=ruleset_de(politica),
+                )
                 if result.findings:
                     worst = result.findings[0]
                     message.content = _WS_REDACTED.encode("utf-8")
@@ -340,6 +376,11 @@ class Aegis:
     def _inspect(
         self, flow: http.HTTPFlow, host: str, classification: Classification
     ) -> None:
+        # Un snapshot por request: el hot-reload puede cambiar self.policy en
+        # cualquier momento, y un mismo envio no puede escanearse con una
+        # politica y decidirse con otra.
+        politica = self.policy
+        conjunto = ruleset_de(politica)
         # get_content decodifica gzip/brotli. Con raw_content, comprimir el body
         # alcanzaria para pasar cualquier secreto sin que ninguna regla lo vea.
         body = flow.request.get_content(strict=False) or b""
@@ -361,7 +402,7 @@ class Aegis:
                 # siempre sin gastar ni el barrido barato. Es lo que le queda
                 # a una empresa que decide que un destino sin clasificar nunca
                 # merece la pena, ni para investigarlo.
-                if self.policy.unknown_domain_action == "allow":
+                if politica.unknown_domain_action == "allow":
                     return
                 # El request no tiene forma de llamada a un modelo, pero eso
                 # no dice nada de lo que lleva adentro: un shadow AI interno
@@ -369,7 +410,7 @@ class Aegis:
                 # (regex puro, sin contenedores) decide si vale la pena pagar
                 # el escaneo completo; si no encuentra nada, el embudo termina
                 # aca, igual que siempre.
-                if not scan_preview(preview):
+                if not scan_preview(preview, ruleset=conjunto):
                     return
                 # Salio un dato sensible hacia un destino que todavia no se
                 # sabe si es una IA. Eso solo alcanza para investigar el
@@ -379,9 +420,9 @@ class Aegis:
                 self.signals.observe_sensitive_egress(host)
                 self._maybe_classify(host)
 
-        result = scan_payload(body, query)
+        result = scan_payload(body, query, ruleset=conjunto)
         categories = {finding.category for finding in result.findings}
-        action = decide(classification, categories, self.policy)
+        action = decide(classification, categories, politica)
         worst = result.findings[0] if result.findings else None
 
         # Lo que vio el modelo no bloquea a ciegas: manda la categoria. Una
@@ -391,15 +432,15 @@ class Aegis:
         # autoridad que una llave de AWS con formato reconocido.
         del_modelo = worst is not None and worst.rule_id.startswith("modelo:")
         if del_modelo and action == "block_content":
-            if self.policy.model_action == "warn":
+            if politica.model_action == "warn":
                 # Interruptor general: la empresa no confia en el modelo y
                 # ningun hallazgo suyo bloquea, sin importar la categoria.
                 action = "warn"
             else:
                 etiqueta = model.etiqueta_de(worst.rule_id)
                 autorizada = (
-                    worst.category in self.policy.model_block_categories
-                    and etiqueta in self.policy.model_block_labels
+                    worst.category in politica.model_block_categories
+                    and etiqueta in politica.model_block_labels
                 )
                 if not autorizada:
                     action = "warn"
