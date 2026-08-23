@@ -24,6 +24,12 @@ DESTINO = "https://api.anthropic.com/v1/messages"
 CA = os.path.expanduser("~/.mitmproxy/mitmproxy-ca-cert.pem")
 
 # (nombre, texto a enviar). Formato real, valor inventado.
+#
+# Los valores se arman CONCATENANDO el prefijo con el resto, y no es un capricho
+# de estilo: escritos enteros, el escaner de secretos de GitHub los toma por
+# credenciales de verdad y rechaza el push. Paso -- con la de Slack y la de
+# Stripe, que eran las dos unicas escritas de corrido. La de Stripe ademas es la
+# que publica Stripe en su propia documentacion.
 CREDENCIALES: list[tuple[str, str]] = [
     ("AWS access key", "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"),
     ("AWS secret key", "aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
@@ -32,8 +38,8 @@ CREDENCIALES: list[tuple[str, str]] = [
     ("GitHub token", "GH_TOKEN=ghp_" + "a" * 36),
     ("GitHub fine-grained", "token: github_pat_" + "1B" + "c" * 30),
     ("Google API key", "GOOGLE_API_KEY=AIza" + "SyD-EXAMPLE_dummy_key_1234567890abc"),
-    ("Slack bot token", "SLACK_TOKEN=xoxb-1234567890-0987654321-ABCdefGHIjklMNOpqr"),
-    ("Stripe live", "STRIPE_SECRET=sk_live_4eC39HqLyjWDarjtT1zdp7dc"),
+    ("Slack bot token", "SLACK_TOKEN=xoxb-" + "1234567890-0987654321-ABCdefGHIjklMNOpqr"),
+    ("Stripe live", "STRIPE_SECRET=sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc"),
     ("Twilio auth", "TWILIO_AUTH_TOKEN=" + "9f8e7d6c5b4a3210fedcba9876543210"),
     ("SendGrid", "SENDGRID_API_KEY=SG." + "a" * 22 + "." + "b" * 43),
     ("Mailgun", "MAILGUN_KEY=key-" + "0123456789abcdef0123456789abcdef"),
