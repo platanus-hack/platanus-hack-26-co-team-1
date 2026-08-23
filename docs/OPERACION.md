@@ -181,6 +181,7 @@ corriendo.
 | `GET /v1/policy` | La política por defecto, para un agente sin la suya |
 | `GET`/`PUT /v1/policy/{tenant}` | La política de una empresa. El PUT es lo que escribe el panel |
 | `GET /v1/domains/{dominio}` | Veredicto compartido, o 202 mientras se averigua |
+| `GET /v1/domains/sync?desde=` | El delta que cada agente baja a su caché cada 5 min |
 | `POST /v1/lessons` | La lección de un corte (422 si trae contenido) |
 | `GET /v1/stats` | Cuántos dominios hay clasificados |
 | `POST /v1/login` | Entrar al panel. Devuelve el token firmado |
