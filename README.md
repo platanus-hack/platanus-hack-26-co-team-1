@@ -2,7 +2,7 @@
 
 **Current project logo:** project-logo.png
 
-<img src="./project-logo.png" alt="Project Logo" width="200" />
+<img src="./aegis-logo.png" alt="Aegis Logo" width="200" />
 
 Track: 🛡️ AI Security
 
