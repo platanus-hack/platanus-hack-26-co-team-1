@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { sesionGuard } from './shared/data/sesion.guard';
+import { adminGuard, sesionGuard } from './shared/data/sesion.guard';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'colaborador/landing' },
@@ -12,10 +12,11 @@ export const routes: Routes = [
 
   {
     path: 'admin',
-    // Sin sesion, al login. Es comodidad y no seguridad: lo que protege los
-    // datos es que /api/metrics devuelve 401 sin token y saca el tenant de
-    // adentro del token firmado, no este guard.
-    canActivate: [sesionGuard],
+    // Sin sesion, al login; con sesion de colaborador, a su propia pantalla.
+    // Es comodidad y no seguridad: lo que protege los datos es que /api/metrics
+    // devuelve 401 sin token (y 403 con un rol que no es admin) mirando lo que
+    // hay adentro del token firmado, no este guard.
+    canActivate: [adminGuard],
     loadComponent: () =>
       import('./features/admin/shell/admin-shell.component').then((m) => m.AdminShellComponent),
     children: [
@@ -70,11 +71,13 @@ export const routes: Routes = [
       },
       {
         path: 'onboarding',
+        canActivate: [sesionGuard],
         loadComponent: () =>
           import('./features/colaborador/onboarding/onboarding.component').then((m) => m.OnboardingComponent),
       },
       {
         path: 'actividad',
+        canActivate: [sesionGuard],
         loadComponent: () =>
           import('./features/colaborador/actividad/actividad.component').then((m) => m.ActividadComponent),
       },

@@ -105,8 +105,12 @@ const NOMBRE_DE_REGLA: Record<string, string> = {
  * El agente normaliza a un identificador estable (`procesos.py`) para que la
  * política sea portable entre sistemas operativos; acá se deshace sólo para
  * mostrarlo. La política sigue hablando de `claude-code`, no de "Claude Code".
+ *
+ * Exportado: es el mismo vocabulario que usa "Mi actividad"
+ * (`actividad.service.ts`) para traducir sus propios eventos, y dos mapas
+ * distintos para el mismo `process` se desincronizan solos con el tiempo.
  */
-const NOMBRE_DE_PROCESO: Record<string, string> = {
+export const NOMBRE_DE_PROCESO: Record<string, string> = {
   'claude-code': 'Claude Code',
   'chatgpt-app': 'ChatGPT (app)',
   browser: 'Navegador',
@@ -118,8 +122,11 @@ const NOMBRE_DE_PROCESO: Record<string, string> = {
   desconocido: 'Sin atribuir',
 };
 
-/** `modelo:empresa` y `empresa_cliente` son familias, no reglas sueltas. */
-function nombreDeRegla(reglaId: string): string {
+/**
+ * `modelo:empresa` y `empresa_cliente` son familias, no reglas sueltas.
+ * Exportada por la misma razón que `NOMBRE_DE_PROCESO`: la reusa "Mi actividad".
+ */
+export function nombreDeRegla(reglaId: string): string {
   let nombre = NOMBRE_DE_REGLA[reglaId];
   if (!nombre) {
     if (reglaId.startsWith('modelo:')) {

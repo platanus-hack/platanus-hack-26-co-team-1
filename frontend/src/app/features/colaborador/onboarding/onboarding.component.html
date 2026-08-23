@@ -31,13 +31,20 @@
         <div class="flex flex-col gap-5">
           <p class="text-sm text-aegis-dim">Define una contraseña propia antes de continuar (este paso no es opcional).</p>
           <div>
+            <label class="aegis-label">Contraseña temporal</label>
+            <input class="aegis-input mt-1.5" type="password" placeholder="La que te dio tu administrador" [(ngModel)]="contrasenaActual" />
+          </div>
+          <div>
             <label class="aegis-label">Nueva contraseña</label>
-            <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="nuevaPassword" />
+            <input class="aegis-input mt-1.5" type="password" placeholder="Mínimo 8 caracteres" [(ngModel)]="nuevaPassword" (keydown.enter)="next()" />
           </div>
           <div>
             <label class="aegis-label">Confirmar contraseña</label>
-            <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="confirmarPassword" />
+            <input class="aegis-input mt-1.5" type="password" placeholder="••••••••" [(ngModel)]="confirmarPassword" (keydown.enter)="next()" />
           </div>
+          @if (errorPassword()) {
+            <p class="rounded-lg border border-aegis-red/25 bg-aegis-red/[0.06] px-3 py-2 text-sm text-aegis-red">{{ errorPassword() }}</p>
+          }
         </div>
       }
 
@@ -118,7 +125,7 @@
         }
 
         @if (step < steps.length - 1) {
-          <button type="button" class="aegis-btn-primary" (click)="next()">Continuar ↗</button>
+          <button type="button" class="aegis-btn-primary" [disabled]="cambiando()" (click)="next()">{{ cambiando() ? 'Cambiando…' : 'Continuar ↗' }}</button>
         } @else {
           <button type="button" class="aegis-btn-primary" (click)="finalizar()">Finalizar onboarding ↗</button>
         }
