@@ -21,9 +21,11 @@ DEFAULT_CACHE = Path(os.environ.get("AEGIS_DOMAIN_CACHE", "aegis-domains-cache.j
 DEFAULT_BACKEND = os.environ.get("AEGIS_BACKEND", "http://127.0.0.1:8686")
 REQUEST_TIMEOUT = 5
 
-# Esperas entre reintentos mientras el backend clasifica. La ultima es larga a
-# proposito: si en cuatro segundos no hubo veredicto, lo tendra la proxima visita.
-RETRY_BACKOFF = (0.3, 0.7, 1.5, 0)
+# Esperas entre reintentos mientras el backend clasifica. Cubren la latencia
+# real de Haiku (~4s, medida en vivo): con 2.5s el veredicto llegaba a la base
+# pero el agente ya habia soltado, y como should_classify dispara una sola vez
+# por dominio, la proteccion quedaba esperando al sync de los 300s.
+RETRY_BACKOFF = (0.3, 0.7, 1.5, 3.0, 0)
 
 # Cada cuanto se sincroniza el delta con el backend. Nunca esta en el camino
 # de ninguna decision (la comparacion es local, ver suffixes.py), asi que
