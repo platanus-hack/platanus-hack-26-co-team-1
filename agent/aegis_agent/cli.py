@@ -1,8 +1,11 @@
 """Un solo punto de entrada, que es lo que se empaqueta como Aegis.exe.
 
     aegis instalar      CA + proxy + variables + arranque automatico, y arranca
-    aegis servicio      corre el proxy (es lo que ejecuta el arranque automatico)
+    aegis panel         abre el panel local: metricas y el interruptor
+    aegis prender       vuelve a interceptar (no reinstala nada)
+    aegis apagar        deja de interceptar (no desinstala nada)
     aegis estado        que esta configurado y si esta protegiendo AHORA
+    aegis servicio      corre el proxy (es lo que ejecuta el arranque automatico)
     aegis verificar     prueba de punta a punta con un secreto de juguete
     aegis desinstalar   revierte todo
     aegis demo          el producto funcionando, sin tocar el sistema
@@ -216,6 +219,66 @@ def _demo(puerto: int) -> int:
     return run.main() or 0
 
 
+def _panel(puerto: int) -> int:
+    """Levanta el panel local y abre el navegador ahi.
+
+    Es el comando que convierte a Aegis en algo que se puede mirar sin saber
+    ninguno de los otros: muestra que vio el agente y trae el interruptor para
+    prenderlo y apagarlo mientras se prueban cosas.
+    """
+
+    import secrets
+    import threading
+    import webbrowser
+    from pathlib import Path
+
+    from .events import DEFAULT_QUEUE
+    from .panel import server as panel
+
+    puerto_panel = int(os.environ.get("AEGIS_PANEL_PORT", panel.DEFAULT_PORT))
+    cola = Path(os.environ.get("AEGIS_QUEUE", str(DEFAULT_QUEUE)))
+    token = secrets.token_urlsafe(24)
+
+    try:
+        servidor = panel.serve(cola, puerto_panel, token=token)
+    except OSError as error:
+        print(f"  No se pudo abrir el panel en el puerto {puerto_panel}: {error}")
+        print(f"  Si ya hay uno abierto, esta en http://127.0.0.1:{puerto_panel}")
+        return 1
+
+    url = f"http://127.0.0.1:{puerto_panel}"
+    print(f"  Panel de Aegis en {url}")
+    print("  Ctrl+C para cerrarlo. El agente sigue corriendo igual.")
+
+    # Se abre despues de que el servidor ya escucha: al reves el navegador llega
+    # primero y muestra un error que no es real.
+    threading.Timer(0.3, lambda: webbrowser.open(url)).start()
+    try:
+        servidor.serve_forever()
+    except KeyboardInterrupt:
+        print(chr(10) + "  Panel cerrado. Aegis no se toco.")
+    finally:
+        servidor.server_close()
+    return 0
+
+
+def _prender(puerto: int) -> int:
+    from . import control
+
+    ok, mensaje = control.prender(puerto)
+    print(f"  {mensaje}")
+    return 0 if ok else 1
+
+
+def _apagar(puerto: int) -> int:
+    from . import control
+
+    ok, mensaje = control.apagar(puerto)
+    print(f"  {mensaje}")
+    return 0 if ok else 1
+
+
+
 # El mapa guarda NOMBRES y no funciones, y la busqueda es en tiempo de llamada.
 #
 # La primera version guardaba las funciones directo, y eso tiene una consecuencia
@@ -236,6 +299,10 @@ ACCIONES: dict[str, str] = {
     "run": "_servicio",
     "estado": "_estado",
     "status": "_estado",
+    "panel": "_panel",
+    "prender": "_prender",
+    "encender": "_prender",
+    "apagar": "_apagar",
     "verificar": "_verificar",
     "desinstalar": "_desinstalar",
     "uninstall": "_desinstalar",
