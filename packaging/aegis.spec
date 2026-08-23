@@ -136,8 +136,13 @@ if COMPLETO:
     _hf = Path.home() / ".cache/huggingface/hub/models--urchade--gliner_multi-v2.1"
     _snaps = sorted(_hf.glob("snapshots/*")) if _hf.exists() else []
     if _snaps:
+        # pytorch_model.bin NO va: es el MISMO modelo que model.safetensors, en
+        # el formato viejo. Meter los dos sumaba 1.102 MB de nada y dejaba el zip
+        # en 2.241 MB, arriba del limite de 2 GB por archivo de GitHub -- o sea
+        # que el paquete completo no se podia ni publicar.
+        _sobra = {"pytorch_model.bin", ".gitattributes", "README.md"}
         for _f in _snaps[-1].rglob("*"):
-            if _f.is_file():
+            if _f.is_file() and _f.name not in _sobra:
                 datos.append((str(_f.resolve()), str(Path("modelo") / _f.parent.relative_to(_snaps[-1]))))
         print(f"paquete COMPLETO: {len(datos)} archivos de datos, modelo incluido")
     else:
