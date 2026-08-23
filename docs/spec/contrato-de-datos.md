@@ -108,24 +108,48 @@ destino, y si es reincidencia. Es suficiente para enseñar e inútil para filtra
 
 ---
 
-## 4. Política de la empresa — `GET /v1/policy`
+## 4. Política de la empresa — `GET`/`PUT /v1/policy/{tenant}`
 
-El agente la descarga y **la cachea en disco**. Sin conexión, sigue aplicando la última que tenga.
+El agente la descarga y **la cachea en disco** (`~/.aegis/politica.json`). Sin conexión, sigue
+aplicando la última que tenga. Se refresca en caliente cada ~60 segundos
+(`AEGIS_REFRESCO_POLITICA`): lo que la web guarda con `PUT` cambia el comportamiento del agente
+sin reiniciarlo.
+
+La forma canónica la define `agent/aegis_agent/policy.py` (`Policy.a_dict()`). Esta es la forma
+real que la pantalla de configuración edita:
 
 ```jsonc
 {
-  "policy_version": 14,
-  "unknown_domain_action": "warn",
-  "approved_ai": ["claude.ai", "api.anthropic.com"],
-  "passthrough": ["*.bancolombia.com", "*.gov.co", "*.windowsupdate.com"],
-  "rules": { "secret": "block", "pii": "warn", "internal_data": "warn" },
-  "by_area": { "finance": { "pii": "block" } },
-  "internal_fingerprints_url": "/v1/fingerprints"   // hashes, nunca los valores en claro
+  "tenant_id": "acme",
+  "approved_ai": ["api.anthropic.com", "claude.ai"],
+  "unknown_domain_action": "warn",          // warn | block_content | allow
+  "unapproved_ai_action": "inspect",        // inspect | block_destination
+  "block_categories": ["internal_data", "secret"],
+  "warn_categories": ["pii"],
+  "blind_spot_action": "warn",              // warn | block
+
+  // Lo que encuentra el modelo local (T2)
+  "model_action": "block",                  // block | warn (interruptor general)
+  "model_block_categories": ["internal_data", "secret"],
+  "model_block_labels": ["nombre de cliente"],
+  "model_labels": ["nombre de cliente", "credencial", "..."],
+  "model_threshold": 0.5,
+
+  // Lo que la empresa configura desde la web
+  "disabled_rules": ["email_address"],      // ids de reglas T1 apagadas
+  "forbidden_terms": ["proyecto orion"],    // terminos literales prohibidos
+  "forbidden_terms_category": "internal_data",  // secret | internal_data | pii
+  "custom_rules": [
+    { "id": "ticket_interno", "pattern": "TKT-\\d{6}",
+      "category": "internal_data", "severity": "high" }
+  ]
 }
 ```
 
-Las huellas de datos internos (nombres de clientes, proyectos, repositorios) se distribuyen como
-**hashes**: el agente compara localmente sin que el backend sepa contra qué está comparando.
+Claves desconocidas se ignoran y claves ausentes caen al default: una política escrita por un
+backend más nuevo no rompe un agente viejo. Una `custom_rule` malformada (sin id, sin patrón,
+regex inválida) se descarta en silencio: la política la edita gente, y un formulario a medio
+guardar no puede dejar a la empresa sin protección.
 
 ---
 
