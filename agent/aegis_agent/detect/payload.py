@@ -14,6 +14,7 @@ from .engine import scan
 from .files import scan_files
 from .model import scan_model
 from .prompt import extract_prompt
+from .ruleset import RULESET_POR_DEFECTO, RuleSet
 from .types import Finding
 
 # Un secreto casi nunca viaja en texto plano y derecho: viaja dentro de un JSON
@@ -218,7 +219,7 @@ def _derived_views(text: str) -> list[str]:
     return views
 
 
-def scan_preview(preview: str) -> list[Finding]:
+def scan_preview(preview: str, ruleset: RuleSet | None = None) -> list[Finding]:
     """Barrido barato sobre un preview de texto: solo regex, nada de archivos.
 
     Sirve para decidir si un destino sin clasificar merece el escaneo completo
@@ -228,10 +229,11 @@ def scan_preview(preview: str) -> list[Finding]:
     que esto ya encontro algo, no en cada POST de la navegacion normal.
     """
 
+    rs = ruleset or RULESET_POR_DEFECTO
     findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for view in (preview, *_derived_views(preview)):
-        for finding in scan(view):
+        for finding in scan(view, rs.rules):
             key = (finding.rule_id, finding.evidence)
             if key not in seen:
                 seen.add(key)
@@ -240,13 +242,18 @@ def scan_preview(preview: str) -> list[Finding]:
     return findings
 
 
-def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
+def scan_payload(
+    body: bytes | None, query: str = "", ruleset: RuleSet | None = None
+) -> ScanResult:
     """Escanea un request completo, incluidas sus formas ofuscadas.
 
     Devuelve hallazgos deduplicados: el mismo secreto visto en el texto plano y
-    en su version base64 es un solo incidente, no dos.
+    en su version base64 es un solo incidente, no dos. El ruleset trae lo que
+    la politica cambio (reglas apagadas, terminos, regex propias); sin el se
+    corre con las reglas de fabrica.
     """
 
+    rs = ruleset or RULESET_POR_DEFECTO
     truncated = False
     payload = body or b""
     if len(payload) > MAX_INSPECT_BYTES:
@@ -278,7 +285,7 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
             scanned += 1
             # El tope de la vista incluye la cola: recortar aca de nuevo dejaria
             # afuera justo el pedazo que se conservo para no perder el final.
-            view_findings = scan(view[: MAX_INSPECT_BYTES + TAIL_BYTES])
+            view_findings = scan(view[: MAX_INSPECT_BYTES + TAIL_BYTES], rs.rules)
             for rule_id, total in Counter(f.rule_id for f in view_findings).items():
                 # Se toma el maximo por vista y no la suma: el mismo export visto
                 # en texto plano y en base64 no son dos fugas distintas.
@@ -291,14 +298,18 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
 
     # El archivo puede ser critico por lo que es, no por lo que dice: un
     # volcado binario no tiene ni una palabra que una regla de texto encuentre.
+    # Los hallazgos sinteticos no nacen de una Rule, asi que las reglas
+    # apagadas de la politica se aplican aca por id.
     for hallazgo in scan_files(payload, principal):
+        if hallazgo.rule_id in rs.disabled:
+            continue
         clave = (hallazgo.rule_id, hallazgo.evidence)
         if clave not in seen:
             seen.add(clave)
             findings.append(hallazgo)
 
     bulk = _bulk_pii(counts)
-    if bulk is not None:
+    if bulk is not None and bulk.rule_id not in rs.disabled:
         findings.append(bulk)
 
     # T2 solo entra cuando T1 se quedo sin nada que decir. Si ya hay una
@@ -308,8 +319,16 @@ def scan_payload(body: bytes | None, query: str = "") -> ScanResult:
         # Al modelo se le da lo que escribio la persona, no el sobre que lo
         # lleva. Si la forma del request no se reconoce se mira todo: un
         # servicio que nadie clasifico todavia tampoco tiene una forma conocida,
-        # y recortar ahi seria recortar justo el caso peligroso.
-        findings.extend(scan_model(extract_prompt(principal) or principal))
+        # y recortar ahi seria recortar justo el caso peligroso. Las etiquetas
+        # y el umbral son los de la politica: es la parte del modelo que la
+        # empresa puede ajustar sin tocar codigo.
+        findings.extend(
+            scan_model(
+                extract_prompt(principal) or principal,
+                rs.model_labels,
+                rs.model_threshold,
+            )
+        )
 
     # Se reordena al final para que el primero sea el hallazgo mas especifico, no
     # el ultimo que se agrego. De ese primero sale la leccion que ve la persona,
