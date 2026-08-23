@@ -1,5 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { StatTileComponent } from '../../../shared/ui/stat-tile/stat-tile.component';
 import { BadgeComponent, BadgeTone } from '../../../shared/ui/badge/badge.component';
@@ -10,11 +11,17 @@ import { DirectorioService } from '../../../shared/data/directorio.service';
 // en cuanto una de las dos cambie.
 import { MetricasService, Ranking } from '../../../shared/data/metricas.service';
 
+/** Fecha local en formato YYYY-MM-DD, para precargar los <input type="date">. */
+function isoLocal(d: Date): string {
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off * 60_000).toISOString().slice(0, 10);
+}
+
 /** Panel general: dashboard agregado semanal con widgets de actividad DLP. */
 @Component({
   selector: 'app-panel-general',
   standalone: true,
-  imports: [CommonModule, RouterLink, StatTileComponent, BadgeComponent, AvatarStackComponent],
+  imports: [CommonModule, FormsModule, RouterLink, StatTileComponent, BadgeComponent, AvatarStackComponent],
   templateUrl: './panel-general.component.html',
 })
 export class PanelGeneralComponent implements OnInit {
@@ -31,6 +38,10 @@ export class PanelGeneralComponent implements OnInit {
 
   rango = 'Esta semana';
   readonly rangos = ['Esta semana', 'Últimos 14 días', 'Este mes', 'Personalizado'];
+
+  // Rango personalizado: por defecto, los ultimos 7 dias.
+  desde = isoLocal(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+  hasta = isoLocal(new Date());
 
   // Solo quienes tienen algo que revisar esta semana: el directorio completo
   // vive en /admin/colaboradores. Los intentos los cuenta el backend cruzando

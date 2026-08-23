@@ -1,24 +1,38 @@
-<header class="relative flex flex-wrap items-center justify-between gap-4 overflow-hidden border-b border-aegis-border bg-aegis-surface px-4 py-8 sm:px-8">
+<header class="relative flex flex-col gap-4 overflow-hidden border-b border-aegis-border bg-aegis-surface px-4 py-8 sm:px-8">
   <div class="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-aegis-accent/10 blur-3xl"></div>
   <div class="pointer-events-none absolute -right-4 top-8 h-40 w-40 rounded-full bg-aegis-highlight/10 blur-3xl"></div>
-  <div class="relative">
-    <p class="aegis-label">Vista agregada</p>
-    <h1 class="mt-1 font-display text-2xl font-semibold text-aegis-text">Panel general</h1>
+  <div class="relative flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <p class="aegis-label">Vista agregada</p>
+      <h1 class="mt-1 font-display text-2xl font-semibold text-aegis-text">Panel general</h1>
+    </div>
+    <div class="inline-flex flex-wrap gap-1 rounded-lg border border-aegis-border bg-aegis-surface2 p-1">
+      @for (r of rangos; track r) {
+        <button
+          type="button"
+          class="rounded-md px-3 py-1.5 font-display text-xs font-medium transition-colors"
+          [class.bg-aegis-surface]="rango === r"
+          [class.text-aegis-text]="rango === r"
+          [class.shadow-panel]="rango === r"
+          [class.text-aegis-dim]="rango !== r"
+          [class.hover:text-aegis-text]="rango !== r"
+          (click)="rango = r"
+        >{{ r }}</button>
+      }
+    </div>
   </div>
-  <div class="relative inline-flex flex-wrap gap-1 rounded-lg border border-aegis-border bg-aegis-surface2 p-1">
-    @for (r of rangos; track r) {
-      <button
-        type="button"
-        class="rounded-md px-3 py-1.5 font-display text-xs font-medium transition-colors"
-        [class.bg-aegis-surface]="rango === r"
-        [class.text-aegis-text]="rango === r"
-        [class.shadow-panel]="rango === r"
-        [class.text-aegis-dim]="rango !== r"
-        [class.hover:text-aegis-text]="rango !== r"
-        (click)="rango = r"
-      >{{ r }}</button>
-    }
-  </div>
+  @if (rango === 'Personalizado') {
+    <div class="relative flex flex-wrap items-center justify-end gap-3 sm:gap-4">
+      <label class="flex items-center gap-2 font-display text-xs font-medium text-aegis-dim">
+        Desde
+        <input type="date" class="aegis-input w-auto py-1.5" [(ngModel)]="desde" [max]="hasta" />
+      </label>
+      <label class="flex items-center gap-2 font-display text-xs font-medium text-aegis-dim">
+        Hasta
+        <input type="date" class="aegis-input w-auto py-1.5" [(ngModel)]="hasta" [min]="desde" />
+      </label>
+    </div>
+  }
 </header>
 
 <main class="flex-1 px-4 py-6 sm:px-8">
